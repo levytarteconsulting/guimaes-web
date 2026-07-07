@@ -343,6 +343,45 @@
     return full;
   }
 
+  // ---- Contactos reales (tabla "contactos" de Supabase) ----
+  function rowToContact(row){
+    return {
+      id: row.id,
+      company: row.company || "",
+      full_name: row.full_name || "",
+      email: row.email || "",
+      phone: row.phone || "",
+      dni: row.dni || "",
+      city: row.city || "",
+      province: row.province || "",
+      employees: row.employees,
+      lifecycle: row.lifecycle || "lead",
+      priority: row.priority || "medium",
+      owner: row.owner || "",
+      source: row.source || "",
+      kyc: !!row.kyc,
+      registered: !!row.registered,
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  // Carga los contactos reales de Supabase y los inyecta en CONTACTS (una sola vez, al arrancar)
+  async function loadContactos(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("contactos").select("*").order("created_at",{ascending:false});
+      if(res.error || !res.data) return 0;
+      var n = 0;
+      res.data.forEach(function(row){
+        var c = rowToContact(row);
+        if(contactById[c.id]) return; // evitar duplicados
+        CONTACTS.unshift(c);
+        contactById[c.id] = c;
+        n++;
+      });
+      return n;
+    }catch(e){ if(window.console) console.error("loadContactos:", e); return 0; }
+  }
+
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
   function leadToContact(row){
     var created = (row.created_at||"").toString();
@@ -410,7 +449,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads,
+    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,

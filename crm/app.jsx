@@ -993,6 +993,7 @@ function App(){
       if(Auth.configured){
         const session = await Auth.getSession();
         if(session && Auth.isAllowed(session.user.email)){
+          if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
           if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
           if(mounted) setUser(userFromSession(session));
         }
@@ -1000,7 +1001,7 @@ function App(){
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
             if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); setUser(userFromSession(session)); })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });
