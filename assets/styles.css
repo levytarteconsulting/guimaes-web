@@ -436,6 +436,7 @@ body.menu-open .mobile-menu { transform: none; opacity: 1; pointer-events: auto;
 .form-card { background: #fff; border: 1px solid var(--line); border-radius: var(--r-lg); padding: clamp(26px,4vw,40px); box-shadow: var(--shadow); }
 .form-row { display: grid; gap: 18px; }
 @media (min-width: 560px){ .form-row.two { grid-template-columns: 1fr 1fr; } }
+.hp-field { position: absolute; left: -9999px; top: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
 .field label { font-family: var(--display); font-weight: 600; font-size: .9rem; color: var(--ink-2); }
 .field input, .field select, .field textarea {

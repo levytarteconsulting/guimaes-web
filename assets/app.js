@@ -142,6 +142,14 @@
         if (fields) fields.appendChild(p);
       };
 
+      // Honeypot anti-spam: campo invisible para humanos que solo un bot rellenaría.
+      // Si viene con contenido, fingimos éxito sin guardar nada en Supabase ni
+      // incluirlo en el payload que se inserta en "leads".
+      if (val("company_url")) {
+        showSuccess();
+        return;
+      }
+
       if (btn) btn.disabled = true;
       loadSupabase()
         .then(function () {
