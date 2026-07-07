@@ -381,6 +381,21 @@
       return n;
     }catch(e){ if(window.console) console.error("loadContactos:", e); return 0; }
   }
+  // Crea un contacto real en Supabase y lo inyecta en CONTACTS
+  async function addContact(client, data){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var fields = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source"];
+    var payload = {};
+    fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
+    if(!payload.lifecycle) payload.lifecycle = "lead";
+    if(!payload.source) payload.source = "Alta manual";
+    var res = await client.from("contactos").insert(payload).select();
+    if(res.error) throw res.error;
+    var c = rowToContact(res.data[0]);
+    CONTACTS.unshift(c);
+    contactById[c.id] = c;
+    return c;
+  }
 
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
   function leadToContact(row){
@@ -449,7 +464,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos,
+    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,

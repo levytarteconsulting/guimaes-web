@@ -318,16 +318,33 @@ function Contacts({nav, toast}){
           })}
         </div>
       )}
-      {showNew && <NewContact onClose={()=>setNew(false)} onSave={()=>{setNew(false);toast("Contacto creado");}}/>}
+      {showNew && <NewContact onClose={()=>setNew(false)} onSave={async(f)=>{
+        try{
+          const c = await CRM.addContact(Auth.client, f);
+          setContacts(cs=>[c,...cs]);
+          setNew(false);
+          toast("Contacto creado");
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
 }
 function NewContact({onClose,onSave}){
-  return <Modal title="Nuevo contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={onSave}>Crear contacto</button></>}>
-    <div className="fld-row"><Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa"/></Field><Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos"/></Field></div>
-    <div className="fld-row"><Field label="Email"><input className="inp" placeholder="email@empresa.es"/></Field><Field label="Teléfono"><input className="inp" placeholder="+34 …"/></Field></div>
-    <div className="fld-row"><Field label="Servicio de interés"><select className="inp">{CRM.SERVICES.map(s=><option key={s.id}>{s.name}</option>)}</select></Field><Field label="Owner"><select className="inp">{CRM.USERS.map(u=><option key={u.id}>{u.name}</option>)}</select></Field></div>
-    <Field label="Crear oportunidad (deal) al guardar"><label className="row" style={{gap:8}}><input type="checkbox" defaultChecked/> Sí, añadir al pipeline en "Nueva solicitud"</label></Field>
+  const [f,setF]=uState({company:"",full_name:"",email:"",phone:"",lifecycle:"lead",owner:CRM.USERS[0]?.id||""});
+  const [saving,setSaving]=uState(false);
+  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Nuevo contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear contacto"}</button></>}>
+    <div className="fld-row"><Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={f.company} onChange={set("company")}/></Field><Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={f.full_name} onChange={set("full_name")}/></Field></div>
+    <div className="fld-row"><Field label="Email"><input className="inp" placeholder="email@empresa.es" value={f.email} onChange={set("email")}/></Field><Field label="Teléfono"><input className="inp" placeholder="+34 …" value={f.phone} onChange={set("phone")}/></Field></div>
+    <div className="fld-row"><Field label="Ciclo de vida"><select className="inp" value={f.lifecycle} onChange={set("lifecycle")}>{CRM.LIFECYCLE.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></Field><Field label="Owner"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field></div>
   </Modal>;
 }
 
