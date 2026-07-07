@@ -220,8 +220,17 @@
     var idx = USERS.findIndex(function(u){return u.id===id;});
     if(idx>-1) USERS.splice(idx,1);
   }
-  function updateContact(id, patch){
+  var CONTACTOS_COLUMNS = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source","kyc","registered"];
+  async function updateContact(client, id, patch){
     var c = contactById[id]; if(!c) return null;
+    // Los leads aún no convertidos usan un id sintético "lead-<uuid>" que no
+    // existe como fila en public.contactos: solo se persiste en memoria.
+    if(client && id.indexOf("lead-")!==0){
+      var payload = {};
+      CONTACTOS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
+      var res = await client.from("contactos").update(payload).eq("id", id);
+      if(res.error) throw res.error;
+    }
     Object.assign(c, patch);
     return c;
   }
@@ -232,7 +241,13 @@
     for(var j=TASKS.length-1;j>=0;j--) if(TASKS[j].deal===dealId) TASKS.splice(j,1);
     for(var k=DOCUMENTS.length-1;k>=0;k--) if(DOCUMENTS[k].deal===dealId) DOCUMENTS.splice(k,1);
   }
-  function removeContact(id){
+  async function removeContact(client, id){
+    // Los leads aún no convertidos usan un id sintético "lead-<uuid>" que no
+    // existe como fila en public.contactos: solo se borra en memoria.
+    if(client && id.indexOf("lead-")!==0){
+      var res = await client.from("contactos").delete().eq("id", id);
+      if(res.error) throw res.error;
+    }
     var idx = CONTACTS.findIndex(function(c){return c.id===id;});
     if(idx>-1) CONTACTS.splice(idx,1);
     delete contactById[id];

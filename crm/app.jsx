@@ -355,7 +355,20 @@ function ContactDetail({id, nav, toast}){
   const [tab,setTab]=uState("resumen");
   const [showEdit,setShowEdit]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false);
+  const [deleting,setDeleting]=uState(false);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
+  const doDelete=async()=>{
+    setDeleting(true);
+    try{
+      await CRM.removeContact(Auth.client, id);
+      setConfirmDel(false);
+      toast("Contacto eliminado");
+      nav("contacts");
+    }catch(e){
+      toast("No se pudo eliminar: "+e.message);
+      setDeleting(false);
+    }
+  };
   const deleteDeal=(dealId,title)=>{
     if(!window.confirm("¿Eliminar el deal \""+title+"\"? Esta acción no se puede deshacer.")) return;
     CRM.removeDeal(dealId); toast("Deal eliminado"); bump();
@@ -416,8 +429,18 @@ function ContactDetail({id, nav, toast}){
           {tab==="actividad" && <div className="card"><div className="card__body"><div className="tl">{acts.map((a,i)=><div key={i} className="tl-item"><div className="tl-item__ico"><Icon name={a.type==="call"?"phone":a.type==="note"?"note":a.type==="email"?"mail":a.type==="doc"?"documents":a.type==="stage"?"pipeline":"contacts"} size={11}/></div><div className="tl-item__head">{a.text}</div><div className="tl-item__meta">{a.who?CRM.userById(a.who)?.name+" · ":""}{a.at}</div></div>)}</div></div></div>}
         </div>
       </div>
-      {showEdit && <EditContact contact={c} onClose={()=>setShowEdit(false)} onSave={(patch)=>{CRM.updateContact(id,patch);setShowEdit(false);toast("Ficha actualizada");bump();}}/>}
-      {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)}>Cancelar</button><button className="btn btn--danger" onClick={()=>{CRM.removeContact(id);setConfirmDel(false);toast("Contacto eliminado");nav("contacts");}}>Eliminar definitivamente</button></>}>
+      {showEdit && <EditContact contact={c} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
+        try{
+          await CRM.updateContact(Auth.client, id, patch);
+          setShowEdit(false);
+          toast("Ficha actualizada");
+          bump();
+        }catch(e){
+          toast("No se pudo actualizar: "+e.message);
+          throw e;
+        }
+      }}/>}
+      {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
         <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s), notas, tareas y documentos asociados. Esta acción no se puede deshacer.</p>
       </Modal>}
     </div>
@@ -425,8 +448,14 @@ function ContactDetail({id, nav, toast}){
 }
 function EditContact({contact, onClose, onSave}){
   const [f,setF]=uState({...contact});
+  const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
-  return <Modal title="Editar ficha de contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={()=>onSave(f)}>Guardar cambios</button></>}>
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Editar ficha de contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
     <div className="fld-row"><Field label="Empresa"><input className="inp" value={f.company} onChange={set("company")}/></Field><Field label="Persona de contacto"><input className="inp" value={f.full_name} onChange={set("full_name")}/></Field></div>
     <div className="fld-row"><Field label="Email"><input className="inp" value={f.email} onChange={set("email")}/></Field><Field label="Teléfono"><input className="inp" value={f.phone} onChange={set("phone")}/></Field></div>
     <div className="fld-row"><Field label="Ciudad"><input className="inp" value={f.city} onChange={set("city")}/></Field><Field label="Provincia"><input className="inp" value={f.province} onChange={set("province")}/></Field></div>
