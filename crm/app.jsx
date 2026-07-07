@@ -447,7 +447,11 @@ function ContactDetail({id, nav, toast}){
   );
 }
 function EditContact({contact, onClose, onSave}){
-  const [f,setF]=uState({...contact});
+  const [f,setF]=uState(()=>{
+    var init={...contact};
+    Object.keys(init).forEach(function(k){ if(init[k]===null||init[k]===undefined) init[k]=""; });
+    return init;
+  });
   const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
   const save=async()=>{

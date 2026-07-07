@@ -228,8 +228,20 @@
     if(client && id.indexOf("lead-")!==0){
       var payload = {};
       CONTACTOS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
-      var res = await client.from("contactos").update(payload).eq("id", id);
+      // id (clave de .eq()) y created_at (gestionado por la BD) nunca deben ir en el UPDATE.
+      delete payload.id;
+      delete payload.created_at;
+      if(payload.employees!==undefined){
+        var emp = payload.employees;
+        if(typeof emp==="string") emp = emp.trim()===""? NaN : parseInt(emp,10);
+        payload.employees = (typeof emp!=="number" || isNaN(emp)) ? null : emp;
+      }
+      if(payload.kyc!==undefined) payload.kyc = !!payload.kyc;
+      if(payload.registered!==undefined) payload.registered = !!payload.registered;
+      // Los campos de texto en blanco ("") se envían tal cual, no se convierten a null.
+      var res = await client.from("contactos").update(payload).eq("id", id).select();
       if(res.error) throw res.error;
+      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
     }
     Object.assign(c, patch);
     return c;
