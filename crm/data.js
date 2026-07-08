@@ -424,6 +424,41 @@
     return c;
   }
 
+  // ---- Deals reales (tabla "deals" de Supabase) ----
+  function rowToDeal(row){
+    return {
+      id: row.id,
+      title: row.title || "",
+      contact: row.contact_id,
+      service: row.service || "",
+      stage: row.stage || "reunion",
+      owner: row.owner || "",
+      amount: row.amount,
+      frequency: row.frequency || "",
+      priority: row.priority || "medium",
+      loss_reason: row.loss_reason || null,
+      signed: row.signed_at,
+      renewal: row.renewal_at,
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  // Carga los deals reales de Supabase y los inyecta en DEALS (una sola vez, al arrancar)
+  async function loadDeals(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("deals").select("*").order("created_at",{ascending:false});
+      if(res.error || !res.data) return 0;
+      var n = 0;
+      res.data.forEach(function(row){
+        var d = rowToDeal(row);
+        if(DEALS.some(function(x){return x.id===d.id;})) return; // evitar duplicados
+        DEALS.unshift(d);
+        n++;
+      });
+      return n;
+    }catch(e){ if(window.console) console.error("loadDeals:", e); return 0; }
+  }
+
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
   function leadToContact(row){
     var created = (row.created_at||"").toString();
@@ -491,7 +526,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact,
+    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
