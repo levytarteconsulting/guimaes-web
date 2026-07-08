@@ -246,7 +246,17 @@
     Object.assign(c, patch);
     return c;
   }
-  function removeDeal(dealId){
+  // Los ids de la maqueta (p.ej. "d1", "c1") son cortos y sin guiones; los
+  // uuid reales que devuelve Supabase tienen 36 caracteres con guiones.
+  function isUuidLike(id){
+    return typeof id==="string" && id.length===36 && id.indexOf("-")!==-1;
+  }
+  async function removeDeal(client, dealId){
+    // Los deals de la maqueta no existen como fila en public.deals: solo se borran en memoria.
+    if(client && isUuidLike(dealId)){
+      var res = await client.from("deals").delete().eq("id", dealId);
+      if(res.error) throw res.error;
+    }
     var idx = DEALS.findIndex(function(d){return d.id===dealId;});
     if(idx>-1) DEALS.splice(idx,1);
     for(var i=NOTES.length-1;i>=0;i--) if(NOTES[i].deal===dealId) NOTES.splice(i,1);
@@ -263,7 +273,9 @@
     var idx = CONTACTS.findIndex(function(c){return c.id===id;});
     if(idx>-1) CONTACTS.splice(idx,1);
     delete contactById[id];
-    for(var i=DEALS.length-1;i>=0;i--) if(DEALS[i].contact===id) removeDeal(DEALS[i].id);
+    // El borrado del contacto ya hizo cascade sobre sus deals en Supabase (on delete cascade);
+    // aquí solo limpiamos memoria, sin repetir la llamada remota (client=null).
+    for(var i=DEALS.length-1;i>=0;i--) if(DEALS[i].contact===id) await removeDeal(null, DEALS[i].id);
     for(var j=NOTES.length-1;j>=0;j--) if(NOTES[j].contact===id) NOTES.splice(j,1);
     for(var k=TASKS.length-1;k>=0;k--) if(TASKS[k].contact===id) TASKS.splice(k,1);
     for(var l=DOCUMENTS.length-1;l>=0;l--) if(DOCUMENTS[l].contact===id) DOCUMENTS.splice(l,1);
@@ -271,8 +283,23 @@
     for(var n=ACTIVITY.length-1;n>=0;n--) if(ACTIVITY[n].contact===id) ACTIVITY.splice(n,1);
   }
 
-  function updateDeal(id, patch){
+  var DEALS_COLUMNS = ["title","contact_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at"];
+  async function updateDeal(client, id, patch){
     var d = DEALS.find(function(x){return x.id===id;}); if(!d) return null;
+    // Los deals de la maqueta no existen como fila en public.deals: solo se persiste en memoria.
+    if(client && isUuidLike(id)){
+      var payload = {};
+      DEALS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
+      delete payload.id;
+      delete payload.created_at;
+      if(payload.amount!==undefined){
+        payload.amount = (payload.amount===null || payload.amount==="") ? null : parseFloat(payload.amount);
+        if(isNaN(payload.amount)) payload.amount = null;
+      }
+      var res = await client.from("deals").update(payload).eq("id", id).select();
+      if(res.error) throw res.error;
+      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
+    }
     Object.assign(d, patch);
     return d;
   }

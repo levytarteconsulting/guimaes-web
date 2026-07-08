@@ -370,9 +370,15 @@ function ContactDetail({id, nav, toast}){
       setDeleting(false);
     }
   };
-  const deleteDeal=(dealId,title)=>{
+  const deleteDeal=async(dealId,title)=>{
     if(!window.confirm("¿Eliminar el deal \""+title+"\"? Esta acción no se puede deshacer.")) return;
-    CRM.removeDeal(dealId); toast("Deal eliminado"); bump();
+    try{
+      await CRM.removeDeal(Auth.client, dealId);
+      toast("Deal eliminado");
+      bump();
+    }catch(e){
+      toast("No se pudo eliminar el deal: "+e.message);
+    }
   };
   const deals = CRM.DEALS.filter(d=>d.contact===id);
   const notes = CRM.NOTES.filter(n=>n.contact===id);
@@ -518,13 +524,32 @@ function Pipeline({nav, toast}){
   const [drag,setDrag]=uState(null); const [over,setOver]=uState(null); const [loss,setLoss]=uState(null);
   const [showNewDeal,setShowNewDeal]=uState(false);
   const cols = CRM.STAGES;
-  const move=(dealId,stage)=>{
+  const move=async(dealId,stage)=>{
     const d=deals.find(x=>x.id===dealId); if(!d||d.stage===stage)return;
     if(stage==="perdido"){ setLoss({dealId}); return; }
+    const prev={...d};
     setDeals(ds=>ds.map(x=>x.id===dealId?{...x,stage}:x));
-    if(stage==="cliente_activo") toast("🎉 "+d.title+" → Cliente activo. Expediente creado.");
+    try{
+      await CRM.updateDeal(Auth.client, dealId, {stage});
+      if(stage==="cliente_activo") toast("🎉 "+d.title+" → Cliente activo. Expediente creado.");
+    }catch(e){
+      setDeals(ds=>ds.map(x=>x.id===dealId?prev:x));
+      toast("No se pudo mover el deal: "+e.message);
+    }
   };
-  const confirmLoss=(reason)=>{ setDeals(ds=>ds.map(x=>x.id===loss.dealId?{...x,stage:"perdido",loss_reason:reason}:x)); setLoss(null); toast("Deal marcado como perdido"); };
+  const confirmLoss=async(reason)=>{
+    const dealId=loss.dealId;
+    const prev=deals.find(x=>x.id===dealId);
+    setDeals(ds=>ds.map(x=>x.id===dealId?{...x,stage:"perdido",loss_reason:reason}:x));
+    setLoss(null);
+    try{
+      await CRM.updateDeal(Auth.client, dealId, {stage:"perdido", loss_reason:reason});
+      toast("Deal marcado como perdido");
+    }catch(e){
+      if(prev) setDeals(ds=>ds.map(x=>x.id===dealId?prev:x));
+      toast("No se pudo marcar como perdido: "+e.message);
+    }
+  };
   return (
     <div className="content--flush" style={{flex:1,display:"flex",flexDirection:"column"}}>
       <div style={{padding:"16px 26px 0",display:"flex",alignItems:"center",gap:12}}>
@@ -611,15 +636,31 @@ function DealDetail({id, nav, toast, user}){
           {tab==="correos" && <div className="wrap-gap">{dealEmails.length? dealEmails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
         </div>
       </div>
-      {showEdit && <EditDeal deal={d} onClose={()=>setShowEdit(false)} onSave={(patch)=>{CRM.updateDeal(id,{...patch, amount:+patch.amount});setShowEdit(false);toast("Deal actualizado");bump();}}/>}
+      {showEdit && <EditDeal deal={d} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
+        try{
+          await CRM.updateDeal(Auth.client, id, {...patch, amount:+patch.amount});
+          setShowEdit(false);
+          toast("Deal actualizado");
+          bump();
+        }catch(e){
+          toast("No se pudo actualizar el deal: "+e.message);
+          throw e;
+        }
+      }}/>}
       {showUpload && <UploadDocument onClose={()=>setShowUpload(false)} onSave={(doc)=>{CRM.addDocument({...doc, deal:d.id, contact:d.contact, by:user?.id, at:new Date().toISOString().slice(0,10)});setShowUpload(false);toast("Documento subido");bump();}}/>}
     </div>
   );
 }
 function EditDeal({deal, onClose, onSave}){
   const [f,setF]=uState({...deal});
+  const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
-  return <Modal title="Editar deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={()=>onSave(f)}>Guardar cambios</button></>}>
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Editar deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
     <Field label="Título"><input className="inp" value={f.title} onChange={set("title")}/></Field>
     <div className="fld-row">
       <Field label="Servicio"><select className="inp" value={f.service} onChange={set("service")}>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
