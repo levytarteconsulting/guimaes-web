@@ -601,9 +601,22 @@ function Pipeline({nav, toast}){
 function DealDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const [showEdit,setShowEdit]=uState(false); const [showUpload,setShowUpload]=uState(false);
+  const [confirmDel,setConfirmDel]=uState(false); const [deleting,setDeleting]=uState(false);
   const d = CRM.DEALS.find(x=>x.id===id);
   const [tab,setTab]=uState("resumen");
   if(!d) return <div className="content"><Empty title="Deal no encontrado"/></div>;
+  const doDelete=async()=>{
+    setDeleting(true);
+    try{
+      await CRM.removeDeal(Auth.client, d.id);
+      setConfirmDel(false);
+      toast("Deal eliminado");
+      nav("pipeline");
+    }catch(e){
+      toast("No se pudo eliminar: "+e.message);
+      setDeleting(false);
+    }
+  };
   const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
   const notes=CRM.NOTES.filter(n=>n.deal===id); const docs=CRM.DOCUMENTS.filter(x=>x.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id);
   const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
@@ -620,6 +633,7 @@ function DealDetail({id, nav, toast, user}){
             <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/></div>
             <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{CRM.fmtEUR(d.amount)} / {d.frequency}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
             <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar deal</button>
+            <button className="btn btn--sm btn--danger" style={{width:"100%",marginTop:8}} onClick={()=>setConfirmDel(true)}><Icon name="trash" size={15}/>Eliminar deal</button>
           </div>
         </div>
         <div>
@@ -648,6 +662,9 @@ function DealDetail({id, nav, toast, user}){
         }
       }}/>}
       {showUpload && <UploadDocument onClose={()=>setShowUpload(false)} onSave={(doc)=>{CRM.addDocument({...doc, deal:d.id, contact:d.contact, by:user?.id, at:new Date().toISOString().slice(0,10)});setShowUpload(false);toast("Documento subido");bump();}}/>}
+      {confirmDel && <Modal title="Eliminar deal" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
+        <p className="muted">Se eliminará el deal <b>{d.title}</b>. Esta acción no se puede deshacer.</p>
+      </Modal>}
     </div>
   );
 }
