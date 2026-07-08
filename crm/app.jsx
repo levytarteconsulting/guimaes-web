@@ -356,6 +356,7 @@ function ContactDetail({id, nav, toast}){
   const [showEdit,setShowEdit]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false);
   const [deleting,setDeleting]=uState(false);
+  const [showNewDeal,setShowNewDeal]=uState(false);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
   const doDelete=async()=>{
     setDeleting(true);
@@ -412,7 +413,7 @@ function ContactDetail({id, nav, toast}){
         <div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="wrap-gap">
-            <div className="card"><div className="card__head"><h3>Deals activos</h3><button className="right btn btn--sm btn--subtle"><Icon name="plus" size={14}/>Nuevo deal</button></div><div className="card__body" style={{paddingTop:4}}>
+            <div className="card"><div className="card__head"><h3>Deals activos</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewDeal(true)}><Icon name="plus" size={14}/>Nuevo deal</button></div><div className="card__body" style={{paddingTop:4}}>
               {deals.map(d=><div key={d.id} className="lrow" style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}><div className="lrow__ico" style={{background:(CRM.serviceById(d.service)?.color || "#888")+"1A",color:CRM.serviceById(d.service)?.color || "#888"}}><Icon name="briefcase" size={17}/></div><div className="lrow__main"><div className="lrow__title">{d.title}</div><div className="lrow__sub">{CRM.serviceById(d.service)?.name || "—"}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</div><div className="muted" style={{fontSize:11}}>{d.frequency}</div></div><StageBadge id={d.stage}/><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={e=>{e.stopPropagation();deleteDeal(d.id,d.title);}}><Icon name="trash" size={14}/></button></div>)}
               {deals.length===0 && <span className="muted">Sin deals.</span>}
             </div></div>
@@ -443,6 +444,17 @@ function ContactDetail({id, nav, toast}){
       {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
         <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s), notas, tareas y documentos asociados. Esta acción no se puede deshacer.</p>
       </Modal>}
+      {showNewDeal && <NewDeal contactId={id} onClose={()=>setShowNewDeal(false)} onSave={async(f)=>{
+        try{
+          await CRM.addDeal(Auth.client, {...f, contact_id:id});
+          setShowNewDeal(false);
+          toast("Deal creado");
+          bump();
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
 }
@@ -476,10 +488,35 @@ function TaskRow({t, toast}){
   return <div className="lrow"><div className={"tcheck"+(done?" done":"")} onClick={()=>{setDone(!done);toast(done?"Tarea reabierta":"Tarea completada");}}>{done&&<Icon name="check" size={13}/>}</div><div className="lrow__main"><div className="lrow__title" style={{textDecoration:done?"line-through":"none",opacity:done?.6:1}}>{t.title}</div><div className="lrow__sub">Vence {t.due} · {CRM.userById(t.owner)?.name.split(" ")[0]}</div></div><PriorityDot id={t.priority}/></div>;
 }
 
+function NewDeal({contactId, onClose, onSave}){
+  const [f,setF]=uState({title:"", contact:contactId||"", service:"", stage:"reunion", amount:"", frequency:"", priority:""});
+  const [saving,setSaving]=uState(false);
+  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Nuevo deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear deal"}</button></>}>
+    <Field label="Título"><input className="inp" placeholder="Ej. CFO externo para escalado" value={f.title} onChange={set("title")}/></Field>
+    {!contactId && <Field label="Contacto"><select className="inp" value={f.contact} onChange={set("contact")}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>}
+    <div className="fld-row">
+      <Field label="Servicio"><select className="inp" value={f.service} onChange={set("service")}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      <Field label="Etapa"><select className="inp" value={f.stage} onChange={set("stage")}>{CRM.STAGES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></Field>
+    </div>
+    <div className="fld-row">
+      <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={f.amount} onChange={set("amount")}/></Field>
+      <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
+    </div>
+    <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}><option value="">— Sin especificar —</option>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
+  </Modal>;
+}
+
 /* ============ PIPELINE ============ */
 function Pipeline({nav, toast}){
   const [deals,setDeals]=uState(CRM.DEALS.map(d=>({...d})));
   const [drag,setDrag]=uState(null); const [over,setOver]=uState(null); const [loss,setLoss]=uState(null);
+  const [showNewDeal,setShowNewDeal]=uState(false);
   const cols = CRM.STAGES;
   const move=(dealId,stage)=>{
     const d=deals.find(x=>x.id===dealId); if(!d||d.stage===stage)return;
@@ -492,7 +529,7 @@ function Pipeline({nav, toast}){
     <div className="content--flush" style={{flex:1,display:"flex",flexDirection:"column"}}>
       <div style={{padding:"16px 26px 0",display:"flex",alignItems:"center",gap:12}}>
         <div className="muted" style={{fontSize:13}}>{deals.filter(d=>d.stage!=="perdido"&&d.stage!=="cliente_activo").length} deals abiertos · arrastra las tarjetas entre etapas</div>
-        <button className="btn btn--sm btn--primary right" onClick={()=>toast("Nuevo deal")}><Icon name="plus" size={15}/>Nuevo deal</button>
+        <button className="btn btn--sm btn--primary right" onClick={()=>setShowNewDeal(true)}><Icon name="plus" size={15}/>Nuevo deal</button>
       </div>
       <div className="kanban">
         {cols.map(col=>{
@@ -520,6 +557,17 @@ function Pipeline({nav, toast}){
         <p className="muted" style={{marginBottom:14}}>Registrar el motivo alimenta las métricas de pérdidas.</p>
         <div className="wrap-gap" style={{gap:8}}>{CRM.LOSS_REASONS.map(r=><button key={r.id} className="chip" style={{justifyContent:"flex-start"}} onClick={()=>confirmLoss(r.id)}>{r.label}</button>)}</div>
       </Modal>}
+      {showNewDeal && <NewDeal onClose={()=>setShowNewDeal(false)} onSave={async(f)=>{
+        try{
+          const d = await CRM.addDeal(Auth.client, {...f, contact_id:f.contact});
+          setDeals(ds=>[d,...ds]);
+          setShowNewDeal(false);
+          toast("Deal creado");
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
 }

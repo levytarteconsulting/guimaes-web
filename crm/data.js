@@ -458,6 +458,23 @@
       return n;
     }catch(e){ if(window.console) console.error("loadDeals:", e); return 0; }
   }
+  // Crea un deal real en Supabase y lo inyecta en DEALS
+  async function addDeal(client, data){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    if(!data.contact_id) throw new Error("Un deal necesita un contacto asociado");
+    var fields = ["title","contact_id","service","stage","owner","amount","frequency","priority"];
+    var payload = {};
+    fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
+    if(!payload.stage) payload.stage = "reunion";
+    payload.amount = (data.amount===undefined || data.amount===null || data.amount==="") ? null : parseFloat(data.amount);
+    if(isNaN(payload.amount)) payload.amount = null;
+    var res = await client.from("deals").insert(payload).select();
+    if(res.error) throw res.error;
+    if(!res.data || res.data.length===0) throw new Error("No se creó el deal");
+    var d = rowToDeal(res.data[0]);
+    DEALS.unshift(d);
+    return d;
+  }
 
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
   function leadToContact(row){
@@ -526,7 +543,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals,
+    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
