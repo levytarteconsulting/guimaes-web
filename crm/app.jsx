@@ -413,7 +413,7 @@ function ContactDetail({id, nav, toast}){
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="wrap-gap">
             <div className="card"><div className="card__head"><h3>Deals activos</h3><button className="right btn btn--sm btn--subtle"><Icon name="plus" size={14}/>Nuevo deal</button></div><div className="card__body" style={{paddingTop:4}}>
-              {deals.map(d=><div key={d.id} className="lrow" style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}><div className="lrow__ico" style={{background:CRM.serviceById(d.service).color+"1A",color:CRM.serviceById(d.service).color}}><Icon name="briefcase" size={17}/></div><div className="lrow__main"><div className="lrow__title">{d.title}</div><div className="lrow__sub">{CRM.serviceById(d.service).name}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</div><div className="muted" style={{fontSize:11}}>{d.frequency}</div></div><StageBadge id={d.stage}/><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={e=>{e.stopPropagation();deleteDeal(d.id,d.title);}}><Icon name="trash" size={14}/></button></div>)}
+              {deals.map(d=><div key={d.id} className="lrow" style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}><div className="lrow__ico" style={{background:(CRM.serviceById(d.service)?.color || "#888")+"1A",color:CRM.serviceById(d.service)?.color || "#888"}}><Icon name="briefcase" size={17}/></div><div className="lrow__main"><div className="lrow__title">{d.title}</div><div className="lrow__sub">{CRM.serviceById(d.service)?.name || "—"}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</div><div className="muted" style={{fontSize:11}}>{d.frequency}</div></div><StageBadge id={d.stage}/><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={e=>{e.stopPropagation();deleteDeal(d.id,d.title);}}><Icon name="trash" size={14}/></button></div>)}
               {deals.length===0 && <span className="muted">Sin deals.</span>}
             </div></div>
             <div className="card"><div className="card__head"><h3>Últimas notas</h3></div><div className="card__body">
@@ -505,7 +505,7 @@ function Pipeline({nav, toast}){
             <div className="kcol__body">
               {items.map(d=>{ const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
                 return <div key={d.id} className={"kcard"+(drag===d.id?" dragging":"")} draggable onDragStart={()=>setDrag(d.id)} onDragEnd={()=>{setDrag(null);setOver(null);}} onClick={()=>nav("deal",d.id)}>
-                  <div className="kcard__top"><span className="dot" style={{background:s.color}}></span><span className="muted" style={{fontSize:11,fontWeight:600}}>{s.short}</span><span className="right">{ownerAvatar(d.owner)}</span></div>
+                  <div className="kcard__top"><span className="dot" style={{background:s?.color || "#888"}}></span><span className="muted" style={{fontSize:11,fontWeight:600}}>{s?.short || "—"}</span><span className="right">{ownerAvatar(d.owner)}</span></div>
                   <div className="kcard__title">{d.title}</div>
                   <div className="kcard__co">{c?.company}</div>
                   <div className="kcard__foot"><span className="kcard__amt">{CRM.fmtEUR(d.amount)}</span><span className="kcard__freq">/{d.frequency}</span><span className="right"><PriorityDot id={d.priority}/></span></div>
@@ -543,7 +543,7 @@ function DealDetail({id, nav, toast, user}){
       <div className="detail">
         <div className="detail__aside">
           <div className="profile">
-            <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:s.color+"1A",color:s.color,borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div><div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("contact",c.id)}>{c.company}</div></div>
+            <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:(s?.color || "#888")+"1A",color:s?.color || "#888",borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div><div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("contact",c.id)}>{c.company}</div></div>
             <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/></div>
             <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{CRM.fmtEUR(d.amount)} / {d.frequency}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
             <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar deal</button>
