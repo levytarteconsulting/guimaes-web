@@ -407,13 +407,15 @@ function ContactDetail({id, nav, toast}){
             <div className="profile__top">
               <Avatar name={c.company} size="lg" color={CRM.colorFor(c.company)}/>
               <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div></div>
-              <div className="row" style={{gap:6}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label="Lead del formulario web — sin convertir" color="#D9822B"/>}</div>
+              <div className="row" style={{gap:6,flexWrap:"wrap",justifyContent:"center"}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label="Lead del formulario web — sin convertir" color="#D9822B"/>}</div>
             </div>
             <div style={{marginTop:16}}>
               <KV k="Email">{c.email}</KV><KV k="Teléfono">{c.phone}</KV><KV k="CIF/NIF">{c.dni}</KV>
               <KV k="Ciudad">{c.city} ({c.province})</KV><KV k="Empleados">{c.employees}</KV>
               <KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(c.owner)}{CRM.userById(c.owner)?.name}</span></KV>
-              <KV k="Origen">{c.source}</KV><KV k="UTM">{c.utm}</KV>
+              <KV k="Origen">{c.source}</KV>
+              {c.service_interest && <KV k="Servicio de interés">{c.service_interest}</KV>}
+              {c.utm && <KV k="UTM">{c.utm}</KV>}
               <KV k="KYC">{c.kyc? <Badge label="Verificado" color="#1F9D6B"/> : <Badge label="Pendiente" color="#D9822B"/>}</KV>
             </div>
             <div className="row" style={{gap:8,marginTop:14}}>
