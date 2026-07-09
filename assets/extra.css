@@ -230,6 +230,11 @@
 .legal__toc a { color: var(--accent); text-decoration: none; }
 .legal__toc a:hover { text-decoration: underline; }
 .legal__updated { color: var(--muted); font-size: .9rem; margin-top: 8px; }
+.legal-table { width: 100%; min-width: 480px; border-collapse: collapse; font-size: .95rem; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.legal-table th, .legal-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.legal-table th { background: var(--mist); color: var(--ink); font-family: var(--display); font-weight: 600; white-space: nowrap; }
+.legal-table td { color: var(--slate); }
+.legal-table tr:last-child td { border-bottom: none; }
 
 /* ============================================================
    BOTONES FLOTANTES (WhatsApp + teléfono)
