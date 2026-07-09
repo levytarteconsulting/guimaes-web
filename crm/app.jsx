@@ -354,7 +354,20 @@ function ContactDetail({id, nav, toast}){
   const [confirmDel,setConfirmDel]=uState(false);
   const [deleting,setDeleting]=uState(false);
   const [showNewDeal,setShowNewDeal]=uState(false);
+  const [converting,setConverting]=uState(false);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
+  const isLead = id.indexOf("lead-")===0;
+  const doConvert=async()=>{
+    setConverting(true);
+    try{
+      const newContact = await CRM.convertLeadToContact(Auth.client, id);
+      toast("Lead convertido en contacto");
+      nav("contact", newContact.id);
+    }catch(e){
+      toast("No se pudo convertir: "+e.message);
+      setConverting(false);
+    }
+  };
   const doDelete=async()=>{
     setDeleting(true);
     try{
@@ -394,7 +407,7 @@ function ContactDetail({id, nav, toast}){
             <div className="profile__top">
               <Avatar name={c.company} size="lg" color={CRM.colorFor(c.company)}/>
               <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div></div>
-              <div className="row" style={{gap:6}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/></div>
+              <div className="row" style={{gap:6}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label="Lead del formulario web — sin convertir" color="#D9822B"/>}</div>
             </div>
             <div style={{marginTop:16}}>
               <KV k="Email">{c.email}</KV><KV k="Teléfono">{c.phone}</KV><KV k="CIF/NIF">{c.dni}</KV>
@@ -407,6 +420,7 @@ function ContactDetail({id, nav, toast}){
               <button className="btn btn--sm btn--primary" style={{flex:1}} onClick={()=>toast("Abriendo llamada…")}><Icon name="phone" size={15}/>Llamar</button>
               <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>nav("whatsapp")}><Icon name="whatsapp" size={15}/>WhatsApp</button>
             </div>
+            {isLead && <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:8}} onClick={doConvert} disabled={converting}><Icon name="refresh" size={15}/>{converting?"Convirtiendo…":"Convertir en contacto"}</button>}
             <div className="row" style={{gap:8,marginTop:8}}>
               <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar ficha</button>
               <button className="btn btn--sm btn--danger" style={{flex:1}} onClick={()=>setConfirmDel(true)}><Icon name="trash" size={15}/>Eliminar</button>
@@ -416,7 +430,7 @@ function ContactDetail({id, nav, toast}){
         <div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="wrap-gap">
-            <div className="card"><div className="card__head"><h3>Deals activos</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewDeal(true)}><Icon name="plus" size={14}/>Nuevo deal</button></div><div className="card__body" style={{paddingTop:4}}>
+            <div className="card"><div className="card__head"><h3>Deals activos</h3>{isLead ? <span className="right muted" style={{fontSize:12}}>Convierte el lead en contacto para poder crear deals</span> : <button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewDeal(true)}><Icon name="plus" size={14}/>Nuevo deal</button>}</div><div className="card__body" style={{paddingTop:4}}>
               {deals.map(d=><div key={d.id} className="lrow" style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}><div className="lrow__ico" style={{background:(CRM.serviceById(d.service)?.color || "#888")+"1A",color:CRM.serviceById(d.service)?.color || "#888"}}><Icon name="briefcase" size={17}/></div><div className="lrow__main"><div className="lrow__title">{d.title}</div><div className="lrow__sub">{CRM.serviceById(d.service)?.name || "—"}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</div><div className="muted" style={{fontSize:11}}>{d.frequency}</div></div><StageBadge id={d.stage}/><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={e=>{e.stopPropagation();deleteDeal(d.id,d.title);}}><Icon name="trash" size={14}/></button></div>)}
               {deals.length===0 && <span className="muted">Sin deals.</span>}
             </div></div>

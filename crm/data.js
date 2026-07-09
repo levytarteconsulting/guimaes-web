@@ -426,6 +426,41 @@
       return n;
     }catch(e){ if(window.console) console.error("loadWebLeads:", e); return 0; }
   }
+  // Convierte un lead (id sintético "lead-<uuid>") en un contacto real de public.contactos
+  async function convertLeadToContact(client, leadId){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var leadUuid = leadId.indexOf("lead-")===0 ? leadId.slice(5) : leadId;
+    var lead = contactById[leadId];
+    if(!lead) throw new Error("No se encontró el lead a convertir");
+
+    var payload = {
+      company: lead.company || "",
+      full_name: lead.full_name || "",
+      email: lead.email || "",
+      phone: lead.phone || "",
+      source: "Formulario web",
+      lifecycle: "lead"
+    };
+    var res = await client.from("contactos").insert(payload).select();
+    if(res.error) throw res.error;
+
+    var statusRes = await client.from("leads").update({status:"converted"}).eq("id", leadUuid);
+    if(statusRes.error) throw statusRes.error;
+
+    var idx = CONTACTS.findIndex(function(c){return c.id===leadId;});
+    if(idx>-1) CONTACTS.splice(idx,1);
+    delete contactById[leadId];
+
+    var c = rowToContact(res.data[0]);
+    CONTACTS.unshift(c);
+    contactById[c.id] = c;
+
+    // Relinkar notas/actividad del lead antiguo al nuevo id real, para no perder el historial.
+    NOTES.forEach(function(n){ if(n.contact===leadId) n.contact=c.id; });
+    ACTIVITY.forEach(function(a){ if(a.contact===leadId) a.contact=c.id; });
+
+    return c;
+  }
 
   // ---- KPIs (dashboard) ----
   function computeKpis(deals){
@@ -450,7 +485,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal,
+    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
