@@ -76,7 +76,6 @@ function Login({onLogin, onPortal}){
           <div className="login__divider"><span>o</span></div>
           <button className="btn btn--ghost" style={{width:"100%"}} onClick={google}><GoogleG size={17}/>Continuar con Google</button>
           {!Auth.configured && <div className="login__notice" style={{marginTop:14}}>⚠ El acceso aún no está configurado (falta conectar Supabase). Ver crm/SETUP-SUPABASE.md.</div>}
-          <button className="btn btn--ghost" style={{width:"100%",marginTop:16}} onClick={onPortal}><Icon name="external" size={16}/>Ver portal del cliente</button>
         </div>
       </div>
     </div>
@@ -141,8 +140,6 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
               <Icon name={n.icon} size={18}/>{n.label}{b?<span className="sb-item__badge">{b}</span>:null}
             </a>;
           })}
-          <div className="sb-nav__label">Cliente</div>
-          <a className="sb-item" onClick={()=>nav("portal")}><Icon name="external" size={18}/>Portal del cliente</a>
         </nav>
         <div className="sb-user">
           <Avatar name={user.name} size="md" color={user.color}/>

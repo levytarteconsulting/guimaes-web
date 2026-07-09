@@ -69,103 +69,27 @@
     {id:"low", label:"Baja", color:"#6E8298"}
   ];
 
-  // ---- Contacts ----
-  var CONTACTS = [
-    {id:"c1", company:"Nordia Logística S.L.", full_name:"Elena Ruiz", email:"elena@nordialogistica.es", phone:"+34 916 22 10 44", dni:"B87654321", city:"Pozuelo de Alarcón", province:"Madrid", lifecycle:"active_client", owner:"u2", source:"Referido", priority:"high", utm:"referido/socio", kyc:true, registered:true, created:"2024-11-12", employees:38},
-    {id:"c2", company:"Grupo Ventia", full_name:"Marcos Belmonte", email:"m.belmonte@grupoventia.com", phone:"+34 915 88 20 31", dni:"B12398745", city:"Madrid", province:"Madrid", lifecycle:"opportunity", owner:"u1", source:"Formulario web", priority:"high", utm:"google/cpc · verifactu", kyc:false, registered:false, created:"2026-06-28", employees:74},
-    {id:"c3", company:"Talleres Aravaca", full_name:"José Luis Prieto", email:"jlprieto@talleresaravaca.es", phone:"+34 917 40 55 12", dni:"B45612378", city:"Aravaca", province:"Madrid", lifecycle:"active_client", owner:"u4", source:"Referido", priority:"medium", utm:"referido/cliente", kyc:true, registered:true, created:"2023-03-20", employees:12},
-    {id:"c4", company:"Marea Estudio Creativo", full_name:"Paula Sanz", email:"hola@mareaestudio.com", phone:"+34 640 12 88 90", dni:"B78945612", city:"Madrid", province:"Madrid", lifecycle:"proposal", owner:"u1", source:"Formulario web", priority:"medium", utm:"google/organic · cfo externo", kyc:false, registered:false, created:"2026-06-19", employees:9},
-    {id:"c5", company:"Delicatessen Ibéricos Vega", full_name:"Antonio Vega", email:"antonio@ibericosvega.es", phone:"+34 924 33 21 09", dni:"B32165498", city:"Badajoz", province:"Badajoz", lifecycle:"active_client", owner:"u2", source:"LinkedIn", priority:"medium", utm:"linkedin/social", kyc:true, registered:true, created:"2024-01-15", employees:22},
-    {id:"c6", company:"Clínica Dental Sonrisa", full_name:"Dra. Carmen Losada", email:"direccion@clinicasonrisa.es", phone:"+34 918 20 44 77", dni:"B65498732", city:"Boadilla del Monte", province:"Madrid", lifecycle:"opportunity", owner:"u3", source:"Formulario web", priority:"high", utm:"google/cpc · asesoría laboral", kyc:false, registered:false, created:"2026-06-30", employees:15},
-    {id:"c7", company:"TechFlow Solutions", full_name:"Iván Cortés", email:"ivan@techflow.io", phone:"+34 645 90 12 33", dni:"B98765432", city:"Madrid", province:"Madrid", lifecycle:"opportunity", owner:"u5", source:"Referido", priority:"high", utm:"referido/inversor", kyc:false, registered:false, created:"2026-06-24", employees:28},
-    {id:"c8", company:"Panadería La Espiga", full_name:"Rosa Giménez", email:"rosa@laespiga.es", phone:"+34 913 55 66 21", dni:"B11223344", city:"Getafe", province:"Madrid", lifecycle:"lost", owner:"u4", source:"Formulario web", priority:"low", utm:"google/organic", kyc:false, registered:false, created:"2026-05-10", employees:6},
-    {id:"c9", company:"Inmobiliaria Castellana Prime", full_name:"Fernando Aguirre", email:"faguirre@castellanaprime.es", phone:"+34 914 21 78 65", dni:"B55667788", city:"Madrid", province:"Madrid", lifecycle:"active_client", owner:"u1", source:"Referido", priority:"high", utm:"referido/socio", kyc:true, registered:true, created:"2022-09-05", employees:19},
-    {id:"c10", company:"BioNatura Cosmética", full_name:"Lucía Herrero", email:"lucia@bionatura.es", phone:"+34 963 22 11 09", dni:"B99887766", city:"Valencia", province:"Valencia", lifecycle:"proposal", owner:"u2", source:"Formulario web", priority:"medium", utm:"google/cpc · planificación fiscal", kyc:false, registered:false, created:"2026-06-15", employees:31},
-    {id:"c11", company:"Construcciones Halcón", full_name:"Pedro Halcón", email:"pedro@construccioneshalcon.es", phone:"+34 925 44 33 22", dni:"B22334455", city:"Toledo", province:"Toledo", lifecycle:"opportunity", owner:"u5", source:"Llamada entrante", priority:"medium", utm:"directo", kyc:false, registered:false, created:"2026-06-26", employees:53},
-    {id:"c12", company:"EduSmart Academias", full_name:"Nuria Peña", email:"nuria@edusmart.es", phone:"+34 918 77 65 43", dni:"B66778899", city:"Las Rozas", province:"Madrid", lifecycle:"active_client", owner:"u3", source:"Referido", priority:"medium", utm:"referido/cliente", kyc:true, registered:true, created:"2024-07-22", employees:17},
-    {id:"c13", company:"Restaurante El Fogón", full_name:"Diego Márquez", email:"diego@elfogon.es", phone:"+34 915 33 88 12", dni:"B33445566", city:"Madrid", province:"Madrid", lifecycle:"new", owner:"u4", source:"Formulario web", priority:"low", utm:"google/organic · blog", kyc:false, registered:false, created:"2026-07-01", employees:11},
-    {id:"c14", company:"AgroValle Cooperativa", full_name:"Isabel Moreno", email:"imoreno@agrovalle.coop", phone:"+34 947 12 09 88", dni:"F44556677", city:"Burgos", province:"Burgos", lifecycle:"opportunity", owner:"u2", source:"LinkedIn", priority:"high", utm:"linkedin/social", kyc:false, registered:false, created:"2026-06-21", employees:44}
-  ];
+  // ---- Contacts (datos reales desde Supabase, ver loadContactos/loadWebLeads) ----
+  var CONTACTS = [];
   var contactById={}; CONTACTS.forEach(function(c){contactById[c.id]=c;});
 
-  // ---- Deals ----
-  var DEALS = [
-    {id:"d1", title:"Dirección financiera externa", contact:"c1", service:"s1", stage:"cliente_activo", owner:"u2", amount:1800, frequency:"mensual", priority:"high", created:"2024-11-20", signed:"2024-12-02", renewal:"2026-12-02"},
-    {id:"d2", title:"Cuota contable mensual", contact:"c1", service:"s3", stage:"cliente_activo", owner:"u4", amount:650, frequency:"mensual", priority:"medium", created:"2024-11-20", signed:"2024-12-02", renewal:"2026-12-02"},
-    {id:"d3", title:"CFO externo para escalado", contact:"c2", service:"s1", stage:"negociacion", owner:"u1", amount:2200, frequency:"mensual", priority:"high", created:"2026-06-28", renewal:null},
-    {id:"d4", title:"Gestión contable y fiscal", contact:"c3", service:"s3", stage:"cliente_activo", owner:"u4", amount:520, frequency:"mensual", priority:"medium", created:"2023-03-25", signed:"2023-04-01", renewal:"2027-04-01"},
-    {id:"d5", title:"CFO externo a tiempo parcial", contact:"c4", service:"s1", stage:"propuesta", owner:"u1", amount:1500, frequency:"mensual", priority:"medium", created:"2026-06-19", renewal:null},
-    {id:"d6", title:"Planificación fiscal anual", contact:"c5", service:"s2", stage:"cliente_activo", owner:"u2", amount:3200, frequency:"anual", priority:"medium", created:"2024-01-20", signed:"2024-02-01", renewal:"2027-02-01"},
-    {id:"d7", title:"Nóminas y laboral (15 empleados)", contact:"c6", service:"s4", stage:"contactado", owner:"u3", amount:560, frequency:"mensual", priority:"high", created:"2026-06-30", renewal:null},
-    {id:"d8", title:"Preparación ronda + CFO", contact:"c7", service:"s1", stage:"reunion", owner:"u5", amount:2600, frequency:"mensual", priority:"high", created:"2026-06-24", renewal:null},
-    {id:"d9", title:"Alta y contabilidad", contact:"c8", service:"s3", stage:"perdido", owner:"u4", amount:390, frequency:"mensual", priority:"low", created:"2026-05-10", loss_reason:"precio_alto"},
-    {id:"d10", title:"Legal societario y contratos", contact:"c9", service:"s5", stage:"cliente_activo", owner:"u1", amount:2500, frequency:"puntual", priority:"high", created:"2022-09-10", signed:"2022-10-01", renewal:null},
-    {id:"d11", title:"Planificación fiscal internacional", contact:"c10", service:"s2", stage:"propuesta", owner:"u2", amount:3800, frequency:"anual", priority:"medium", created:"2026-06-15", renewal:null},
-    {id:"d12", title:"Reestructuración y estrategia", contact:"c11", service:"s6", stage:"reunion", owner:"u5", amount:5200, frequency:"puntual", priority:"medium", created:"2026-06-26", renewal:null},
-    {id:"d13", title:"Laboral + contable pack", contact:"c12", service:"s4", stage:"cliente_activo", owner:"u3", amount:720, frequency:"mensual", priority:"medium", created:"2024-07-28", signed:"2024-08-01", renewal:"2026-08-01"},
-    {id:"d14", title:"Consulta fiscal alta autónomo", contact:"c13", service:"s2", stage:"nueva_solicitud", owner:"u4", amount:1200, frequency:"anual", priority:"low", created:"2026-07-01", renewal:null},
-    {id:"d15", title:"Compliance y protección de datos", contact:"c14", service:"s5", stage:"propuesta", owner:"u2", amount:2900, frequency:"puntual", priority:"high", created:"2026-06-21", renewal:null},
-    {id:"d16", title:"Cuota contable mensual", contact:"c9", service:"s3", stage:"cliente_activo", owner:"u4", amount:700, frequency:"mensual", priority:"medium", created:"2022-09-10", signed:"2022-10-01", renewal:"2026-10-01"}
-  ];
+  // ---- Deals (datos reales desde Supabase, ver loadDeals) ----
+  var DEALS = [];
 
   // ---- Tasks ----
-  var TASKS = [
-    {id:"t1", title:"Enviar propuesta CFO a Grupo Ventia", deal:"d3", contact:"c2", owner:"u1", status:"pending", priority:"high", due:"2026-07-03"},
-    {id:"t2", title:"Llamar a Clínica Sonrisa para agendar reunión", deal:"d7", contact:"c6", owner:"u3", status:"pending", priority:"high", due:"2026-07-02"},
-    {id:"t3", title:"Revisar documentación KYC de TechFlow", deal:"d8", contact:"c7", owner:"u5", status:"in_progress", priority:"medium", due:"2026-07-04"},
-    {id:"t4", title:"Preparar cierre trimestral Nordia", deal:"d1", contact:"c1", owner:"u4", status:"pending", priority:"medium", due:"2026-07-10"},
-    {id:"t5", title:"Renovación anual Delicatessen Vega", deal:"d6", contact:"c5", owner:"u2", status:"pending", priority:"medium", due:"2026-07-15"},
-    {id:"t6", title:"Firmar contrato BioNatura", deal:"d11", contact:"c10", owner:"u2", status:"done", priority:"high", due:"2026-06-30"},
-    {id:"t7", title:"Enviar borrador de compliance a AgroValle", deal:"d15", contact:"c14", owner:"u2", status:"in_progress", priority:"high", due:"2026-07-05"}
-  ];
+  var TASKS = [];
 
   // ---- Notes ----
-  var NOTES = [
-    {id:"n1", contact:"c2", deal:"d3", author:"u1", created:"2026-06-29 10:12", body:"Vienen de un despacho tradicional. Facturan ~4M€, quieren reporting mensual y control de caja. Muy receptivos, decisión en 2 semanas."},
-    {id:"n2", contact:"c7", deal:"d8", author:"u5", created:"2026-06-25 16:40", body:"Preparan ronda seed de 800K. Necesitan modelo financiero y data room. Introducción vía inversor conocido."},
-    {id:"n3", contact:"c6", deal:"d7", author:"u3", created:"2026-07-01 09:05", body:"Clínica con 15 empleados, actualmente con una gestoría que no les atiende bien. Prioridad: nóminas y un despido complicado."},
-    {id:"n4", contact:"c1", deal:"d1", author:"u2", created:"2026-06-20 12:00", body:"Cliente estrella. Ampliar a planificación fiscal en la renovación de diciembre."}
-  ];
+  var NOTES = [];
 
   // ---- Calls ----
-  var CALLS = [
-    {id:"cl1", contact:"c2", deal:"d3", user:"u1", direction:"outbound", outcome:"Interesado", duration:640, notes:"Repaso de necesidades, acuerda recibir propuesta.", at:"2026-06-29 10:00"},
-    {id:"cl2", contact:"c6", deal:"d7", user:"u3", direction:"inbound", outcome:"Agendar reunión", duration:320, notes:"Llama pidiendo cambio de gestoría.", at:"2026-06-30 11:20"},
-    {id:"cl3", contact:"c11", deal:"d12", user:"u5", direction:"outbound", outcome:"No contesta", duration:0, notes:"Buzón. Reintentar mañana.", at:"2026-07-01 17:30"}
-  ];
+  var CALLS = [];
 
   // ---- WhatsApp ----
-  var WHATSAPP = [
-    {id:"w1", contact:"c2", unread:2, updated:"10:24", messages:[
-      {dir:"in", t:"09:58", body:"Buenos días, ¿recibisteis la documentación que envié?"},
-      {dir:"out", t:"10:05", body:"¡Buenos días Marcos! Sí, todo recibido. Estamos preparando la propuesta de CFO externo."},
-      {dir:"in", t:"10:20", body:"Perfecto. ¿Para cuándo la tendríais?"},
-      {dir:"in", t:"10:24", body:"Es que tenemos consejo el jueves y me gustaría presentarla."}
-    ]},
-    {id:"w2", contact:"c6", unread:0, updated:"Ayer", messages:[
-      {dir:"in", t:"Ayer 11:15", body:"Hola, nos gustaría cambiar de asesoría laboral."},
-      {dir:"out", t:"Ayer 11:40", body:"Encantada de ayudaros. ¿Cuántos empleados tenéis actualmente?"},
-      {dir:"in", t:"Ayer 11:42", body:"Somos 15, con un caso de despido en marcha."},
-      {dir:"out", t:"Ayer 12:00", body:"Lo vemos. ¿Os viene bien una llamada mañana a las 10:00?"}
-    ]},
-    {id:"w3", contact:"c1", unread:0, updated:"Lun", messages:[
-      {dir:"out", t:"Lun 09:00", body:"Elena, os paso el reporting de junio esta tarde."},
-      {dir:"in", t:"Lun 09:12", body:"Genial, gracias Juan Manuel 👍"}
-    ]},
-    {id:"w4", contact:"c14", unread:1, updated:"08:30", messages:[
-      {dir:"in", t:"08:30", body:"¿Habéis podido revisar el tema de protección de datos de la cooperativa?"}
-    ]}
-  ];
+  var WHATSAPP = [];
 
   // ---- Documents ----
-  var DOCUMENTS = [
-    {id:"doc1", name:"Propuesta_CFO_GrupoVentia.pdf", type:"Propuesta", deal:"d3", contact:"c2", size:"248 KB", by:"u1", at:"2026-06-29", visible:false},
-    {id:"doc2", name:"Contrato_servicios_Nordia.pdf", type:"Contrato", deal:"d1", contact:"c1", size:"512 KB", by:"u2", at:"2024-12-02", visible:true},
-    {id:"doc3", name:"Modelo_financiero_TechFlow.xlsx", type:"Modelo", deal:"d8", contact:"c7", size:"1.2 MB", by:"u5", at:"2026-06-25", visible:false},
-    {id:"doc4", name:"Cierre_trimestral_Q1_Nordia.pdf", type:"Informe", deal:"d1", contact:"c1", size:"690 KB", by:"u4", at:"2026-04-05", visible:true},
-    {id:"doc5", name:"Escritura_constitucion_Castellana.pdf", type:"Legal", deal:"d10", contact:"c9", size:"3.1 MB", by:"u1", at:"2022-10-01", visible:true},
-    {id:"doc6", name:"Borrador_compliance_AgroValle.docx", type:"Borrador", deal:"d15", contact:"c14", size:"88 KB", by:"u2", at:"2026-07-01", visible:false}
-  ];
+  var DOCUMENTS = [];
 
   // ---- Automations ----
   var AUTOMATIONS = [
@@ -178,17 +102,7 @@
   ];
 
   // ---- Activity log (per contact) ----
-  var ACTIVITY = [
-    {contact:"c2", type:"stage", at:"2026-06-29 10:30", who:"u1", text:"Deal movido a Negociación"},
-    {contact:"c2", type:"call", at:"2026-06-29 10:00", who:"u1", text:"Llamada saliente · 10m 40s · Interesado"},
-    {contact:"c2", type:"note", at:"2026-06-29 10:12", who:"u1", text:"Añadió una nota"},
-    {contact:"c2", type:"contact", at:"2026-06-28 18:02", who:null, text:"Contacto creado desde el formulario web"},
-    {contact:"c7", type:"note", at:"2026-06-25 16:40", who:"u5", text:"Añadió una nota"},
-    {contact:"c7", type:"email", at:"2026-06-25 15:10", who:"u5", text:"Email enviado · Introducción y siguientes pasos"},
-    {contact:"c7", type:"contact", at:"2026-06-24 09:30", who:null, text:"Contacto creado · referido por inversor"},
-    {contact:"c1", type:"doc", at:"2026-04-05 12:00", who:"u4", text:"Subió Cierre trimestral Q1"},
-    {contact:"c1", type:"stage", at:"2024-12-02 12:00", who:"u2", text:"Deal firmado → Cliente activo"}
-  ];
+  var ACTIVITY = [];
 
   // ---- WhatsApp templates (Meta Business Manager) ----
   var WA_TEMPLATES = [
@@ -324,41 +238,7 @@
   ];
   var folderById={}; FOLDERS.forEach(function(f){folderById[f.id]=f;});
 
-  var EMAILS = [
-    {id:"e1", contact:"c2", deal:"d3", folder:"inbox", archived:false, subject:"Documentación para la propuesta de CFO", updated:"10:20 hoy",
-      messages:[
-        {dir:"in", from:"m.belmonte@grupoventia.com", to:MAILBOX, date:"2026-06-29 09:40", body:"Buenos días,\n\nOs adjunto la documentación solicitada para preparar la propuesta de CFO externo. Quedo a la espera."},
-        {dir:"out", from:MAILBOX, to:"m.belmonte@grupoventia.com", date:"2026-06-29 11:02", body:"Gracias Marcos, la revisamos y te contamos esta semana con la propuesta cerrada."},
-        {dir:"in", from:"m.belmonte@grupoventia.com", to:MAILBOX, date:"2026-06-30 10:20", body:"Perfecto, ¿para cuándo la tendríais? Tenemos consejo el jueves."}
-      ]},
-    {id:"e2", contact:"c6", deal:"d7", folder:"inbox", archived:false, subject:"Cambio de asesoría laboral", updated:"Ayer",
-      messages:[
-        {dir:"in", from:"direccion@clinicasonrisa.es", to:MAILBOX, date:"2026-06-30 08:15", body:"Hola, nos gustaría cambiar de asesoría laboral. Somos 15 empleados y tenemos un despido en marcha."},
-        {dir:"out", from:MAILBOX, to:"direccion@clinicasonrisa.es", date:"2026-06-30 09:30", body:"Encantados de ayudaros. Os llamamos hoy mismo para agendar una reunión."}
-      ]},
-    {id:"e3", contact:"c1", deal:"d1", folder:"facturas", archived:false, subject:"Factura junio — Dirección financiera externa", updated:"05/07",
-      messages:[
-        {dir:"out", from:MAILBOX, to:"elena@nordialogistica.es", date:"2026-07-05 09:00", body:"Hola Elena, adjuntamos la factura del mes de junio. Cualquier duda nos avisas."},
-        {dir:"in", from:"elena@nordialogistica.es", to:MAILBOX, date:"2026-07-05 12:40", body:"Recibido, gracias Juan Manuel."}
-      ]},
-    {id:"e4", contact:"c7", deal:"d8", folder:"legal", archived:false, subject:"Data room — ronda de financiación", updated:"Lun",
-      messages:[
-        {dir:"in", from:"ivan@techflow.io", to:MAILBOX, date:"2026-06-28 17:20", body:"Os comparto acceso al data room para que preparéis el modelo financiero de cara a la ronda."}
-      ]},
-    {id:"e5", contact:null, deal:null, folder:"inbox", archived:false, subject:"Consulta sobre servicios de asesoría", updated:"08:10",
-      messages:[
-        {dir:"in", from:"contacto@nuevaempresa.es", to:MAILBOX, date:"2026-07-06 08:10", body:"Buenos días, nos gustaría información sobre vuestros servicios de asesoría fiscal y contable para una empresa de nueva creación."}
-      ]},
-    {id:"e6", contact:"c10", deal:"d11", folder:"fiscal", archived:true, subject:"Planificación fiscal internacional — borrador", updated:"22/06",
-      messages:[
-        {dir:"out", from:MAILBOX, to:"lucia@bionatura.es", date:"2026-06-22 16:00", body:"Lucía, adjuntamos el primer borrador de la planificación fiscal internacional para vuestra revisión."},
-        {dir:"in", from:"lucia@bionatura.es", to:MAILBOX, date:"2026-06-23 09:15", body:"Gracias, lo revisamos y os comentamos."}
-      ]},
-    {id:"e7", contact:"c14", deal:"d15", folder:"inbox", archived:false, subject:"Compliance y protección de datos — cooperativa", updated:"01/07",
-      messages:[
-        {dir:"in", from:"imoreno@agrovalle.coop", to:MAILBOX, date:"2026-07-01 11:00", body:"¿Habéis podido revisar el tema de protección de datos de la cooperativa?"}
-      ]}
-  ];
+  var EMAILS = [];
 
   function unreadOf(e){ return e.messages.length && e.messages[e.messages.length-1].dir==="in" ? 1 : 0; }
 
