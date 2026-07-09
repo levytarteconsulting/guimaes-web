@@ -124,6 +124,7 @@ const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
   {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.CONTACTS.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
+  {id:"tareas", label:"Tareas", icon:"task"},
   {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.WHATSAPP.reduce((a,w)=>a+w.unread,0)},
   {id:"inbox", label:"Bandeja de entrada", icon:"mail", badge:()=>CRM.EMAILS.filter(e=>!e.archived&&CRM.unreadOf(e)).length},
   {id:"documents", label:"Documentos", icon:"documents"},
@@ -358,7 +359,18 @@ function ContactDetail({id, nav, toast}){
   const [deleting,setDeleting]=uState(false);
   const [showNewDeal,setShowNewDeal]=uState(false);
   const [converting,setConverting]=uState(false);
+  const [showNewTask,setShowNewTask]=uState(false);
+  const [editingTask,setEditingTask]=uState(null);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
+  const toggleTask=async(t)=>{
+    try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
+    catch(e){ toast("No se pudo completar: "+e.message); }
+  };
+  const deleteTask=async(t)=>{
+    if(!window.confirm("¿Eliminar la tarea \""+t.title+"\"? Esta acción no se puede deshacer.")) return;
+    try{ await CRM.removeTask(Auth.client, t.id); toast("Tarea eliminada"); bump(); }
+    catch(e){ toast("No se pudo eliminar: "+e.message); }
+  };
   const isLead = id.indexOf("lead-")===0;
   const doConvert=async()=>{
     setConverting(true);
@@ -395,7 +407,7 @@ function ContactDetail({id, nav, toast}){
   };
   const deals = CRM.DEALS.filter(d=>d.contact===id);
   const notes = CRM.NOTES.filter(n=>n.contact===id);
-  const tasks = CRM.TASKS.filter(t=>t.contact===id);
+  const tasks = CRM.TASKS.filter(t=>t.contact===id && !t.archived);
   const docs = CRM.DOCUMENTS.filter(d=>d.contact===id);
   const acts = CRM.ACTIVITY.filter(a=>a.contact===id);
   const wa = CRM.WHATSAPP.filter(w=>w.contact===id);
@@ -445,7 +457,7 @@ function ContactDetail({id, nav, toast}){
           </div>}
           {tab==="deals" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Deal</th><th>Servicio</th><th>Etapa</th><th>Importe</th><th>Owner</th><th></th></tr></thead><tbody>{deals.map(d=><tr key={d.id} onClick={()=>nav("deal",d.id)}><td className="tbl__name">{d.title}</td><td><ServiceBadge id={d.service}/></td><td><StageBadge id={d.stage}/></td><td className="mono">{CRM.fmtEUR(d.amount)} <span className="muted" style={{fontSize:11}}>/{d.frequency}</span></td><td>{ownerAvatar(d.owner)}</td><td onClick={e=>e.stopPropagation()}><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={()=>deleteDeal(d.id,d.title)}><Icon name="trash" size={14}/></button></td></tr>)}</tbody></table>{deals.length===0&&<Empty icon="briefcase" title="Sin deals"/>}</div>}
           {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Escribe una nota…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir nota</button><div style={{marginTop:18}}>{notes.map(n=><div key={n.id} style={{marginBottom:14}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}</div></div></div>}
-          {tab==="tareas" && <div className="card"><div className="card__body" style={{paddingTop:6}}>{tasks.length? tasks.map(t=><TaskRow key={t.id} t={t} toast={toast}/>) : <Empty icon="task" title="Sin tareas"/>}</div></div>}
+          {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length? tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>) : <Empty icon="task" title="Sin tareas"/>}</div></div>}
           {tab==="whatsapp" && <div className="card"><div className="card__body">{wa.length? wa[0].messages.map((m,i)=><div key={i} className={"bubble "+(m.dir)} style={{marginBottom:8,maxWidth:"70%"}}>{m.body}<div className="bubble__t">{m.t}</div></div>) : <Empty icon="whatsapp" title="Sin conversación de WhatsApp"/>}</div></div>}
           {tab==="correos" && <div className="wrap-gap">{emails.length? emails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
           {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Tamaño</th><th>Visible cliente</th><th>Fecha</th></tr></thead><tbody>{docs.map(d=><tr key={d.id}><td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{d.size}</td><td>{d.visible? <Badge label="Compartido" color="#1F9D6B"/> : <span className="muted">No</span>}</td><td className="tbl__sub">{d.at}</td></tr>)}</tbody></table>{docs.length===0&&<Empty icon="documents" title="Sin documentos"/>}</div>}
@@ -477,6 +489,28 @@ function ContactDetail({id, nav, toast}){
           throw e;
         }
       }}/>}
+      {showNewTask && <NewTask contactId={id} onClose={()=>setShowNewTask(false)} onSave={async(f)=>{
+        try{
+          await CRM.addTask(Auth.client, {title:f.title, due_at:f.due, assigned_to:f.owner, contact_id:id, deal_id:f.deal});
+          setShowNewTask(false);
+          toast("Tarea creada");
+          bump();
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
+      {editingTask && <EditTask task={editingTask} onClose={()=>setEditingTask(null)} onSave={async(f)=>{
+        try{
+          await CRM.updateTask(Auth.client, editingTask.id, {title:f.title, due_at:f.due||null, assigned_to:f.owner, contact_id:f.contact||null, deal_id:f.deal||null});
+          setEditingTask(null);
+          toast("Tarea actualizada");
+          bump();
+        }catch(e){
+          toast("No se pudo actualizar: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
 }
@@ -505,9 +539,152 @@ function EditContact({contact, onClose, onSave}){
     <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
   </Modal>;
 }
-function TaskRow({t, toast}){
-  const [done,setDone]=uState(t.status==="done");
-  return <div className="lrow"><div className={"tcheck"+(done?" done":"")} onClick={()=>{setDone(!done);toast(done?"Tarea reabierta":"Tarea completada");}}>{done&&<Icon name="check" size={13}/>}</div><div className="lrow__main"><div className="lrow__title" style={{textDecoration:done?"line-through":"none",opacity:done?.6:1}}>{t.title}</div><div className="lrow__sub">Vence {t.due} · {CRM.userById(t.owner)?.name.split(" ")[0]}</div></div><PriorityDot id={t.priority}/></div>;
+function fmtDue(iso){
+  if(!iso) return "sin fecha";
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return "sin fecha";
+  return d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"});
+}
+function isOverdue(t){
+  if(!t.due || t.status==="done") return false;
+  var d = new Date(t.due);
+  return !isNaN(d.getTime()) && d.getTime()<Date.now();
+}
+function TaskRow({t, toast, onToggle, onEdit, onDelete}){
+  const done = t.status==="done";
+  const overdue = isOverdue(t);
+  return <div className="lrow">
+    <div className={"tcheck"+(done?" done":"")} onClick={onToggle} title={done?"Completada":"Marcar como completada"}>{done&&<Icon name="check" size={13}/>}</div>
+    <div className="lrow__main">
+      <div className="lrow__title" style={{textDecoration:done?"line-through":"none",opacity:done?.6:1}}>{t.title}</div>
+      <div className="lrow__sub" style={overdue?{color:"var(--danger)",fontWeight:600}:undefined}>{overdue?"Vencida":"Vence"} {fmtDue(t.due)} · {CRM.userById(t.owner)?.name?.split(" ")[0] || "Sin asignar"}</div>
+    </div>
+    {onEdit && <button className="btn btn--sm btn--ghost" title="Editar tarea" onClick={onEdit}><Icon name="edit" size={14}/></button>}
+    {onDelete && <button className="btn btn--sm btn--ghost" title="Eliminar tarea" onClick={onDelete}><Icon name="trash" size={14}/></button>}
+  </div>;
+}
+function toDatetimeLocal(iso){
+  if(!iso) return "";
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return "";
+  var pad=function(n){return String(n).padStart(2,"0");};
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
+}
+function NewTask({contactId, dealId, defaultOwner, onClose, onSave}){
+  const [f,setF]=uState({title:"", due:"", owner:defaultOwner||CRM.USERS[0]?.id||"", contact:contactId||"", deal:dealId||""});
+  const [saving,setSaving]=uState(false);
+  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const dealsForContact = f.contact ? CRM.DEALS.filter(d=>d.contact===f.contact) : [];
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Nueva tarea" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear tarea"}</button></>}>
+    <Field label="Título"><input className="inp" placeholder="Ej. Llamar para agendar reunión" value={f.title} onChange={set("title")}/></Field>
+    <div className="fld-row">
+      <Field label="Fecha y hora"><input className="inp" type="datetime-local" value={f.due} onChange={set("due")}/></Field>
+      <Field label="Asignar a"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+    </div>
+    {!contactId && <div className="fld-row">
+      <Field label="Contacto"><select className="inp" value={f.contact} onChange={e=>setF({...f,contact:e.target.value,deal:""})}><option value="">— Ninguno —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>
+      <Field label="Deal"><select className="inp" value={f.deal} onChange={set("deal")} disabled={!f.contact}><option value="">— Ninguno —</option>{dealsForContact.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</select></Field>
+    </div>}
+    {contactId && !dealId && <Field label="Deal (opcional)"><select className="inp" value={f.deal} onChange={set("deal")}><option value="">— Ninguno —</option>{dealsForContact.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</select></Field>}
+  </Modal>;
+}
+function EditTask({task, onClose, onSave}){
+  const [f,setF]=uState(()=>({
+    title: task.title||"",
+    due: toDatetimeLocal(task.due),
+    owner: task.owner||"",
+    contact: task.contact||"",
+    deal: task.deal||""
+  }));
+  const [saving,setSaving]=uState(false);
+  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const dealsForContact = f.contact ? CRM.DEALS.filter(d=>d.contact===f.contact) : [];
+  const save=async()=>{
+    setSaving(true);
+    try{ await onSave(f); }
+    finally{ setSaving(false); }
+  };
+  return <Modal title="Editar tarea" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
+    <Field label="Título"><input className="inp" value={f.title} onChange={set("title")}/></Field>
+    <div className="fld-row">
+      <Field label="Fecha y hora"><input className="inp" type="datetime-local" value={f.due} onChange={set("due")}/></Field>
+      <Field label="Asignar a"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+    </div>
+    <div className="fld-row">
+      <Field label="Contacto"><select className="inp" value={f.contact} onChange={e=>setF({...f,contact:e.target.value,deal:""})}><option value="">— Ninguno —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>
+      <Field label="Deal"><select className="inp" value={f.deal} onChange={set("deal")} disabled={!f.contact}><option value="">— Ninguno —</option>{dealsForContact.map(d=><option key={d.id} value={d.id}>{d.title}</option>)}</select></Field>
+    </div>
+  </Modal>;
+}
+
+/* ============ TASKS ============ */
+function Tasks({nav, toast, user}){
+  const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
+  const knownUser = !!CRM.userById(user?.id);
+  const [view,setView]=uState(knownUser?"mine":"all");
+  const [showNew,setNew]=uState(false);
+  const [editing,setEditing]=uState(null);
+  const list = (view==="archived" ? CRM.TASKS.filter(t=>t.archived) : CRM.TASKS.filter(t=>!t.archived && (view==="all" || t.owner===user?.id)))
+    .slice()
+    .sort((a,b)=>{
+      if(!a.due && !b.due) return 0;
+      if(!a.due) return 1;
+      if(!b.due) return -1;
+      return new Date(a.due)-new Date(b.due);
+    });
+  const doToggle=async(t)=>{
+    try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
+    catch(e){ toast("No se pudo completar: "+e.message); }
+  };
+  const doDelete=async(t)=>{
+    if(!window.confirm("¿Eliminar la tarea \""+t.title+"\"? Esta acción no se puede deshacer.")) return;
+    try{ await CRM.removeTask(Auth.client, t.id); toast("Tarea eliminada"); bump(); }
+    catch(e){ toast("No se pudo eliminar: "+e.message); }
+  };
+  return (
+    <div className="content">
+      <div className="toolbar">
+        <button className={"chip"+(view==="mine"?" active":"")} onClick={()=>setView("mine")}>Mis tareas</button>
+        <button className={"chip"+(view==="all"?" active":"")} onClick={()=>setView("all")}>Todas</button>
+        <button className={"chip"+(view==="archived"?" active":"")} onClick={()=>setView("archived")}>Archivadas</button>
+        <div className="toolbar__spacer"></div>
+        <button className="btn btn--primary" onClick={()=>setNew(true)}><Icon name="plus" size={16}/>Nueva tarea</button>
+      </div>
+      <div className="card"><div className="card__body" style={{paddingTop:6}}>
+        {list.length? list.map(t=><TaskRow key={t.id} t={t} toast={toast}
+          onToggle={t.archived?undefined:()=>doToggle(t)}
+          onEdit={()=>setEditing(t)}
+          onDelete={()=>doDelete(t)}
+        />) : <Empty icon="task" title={view==="archived"?"Sin tareas archivadas":"Sin tareas"} sub={view==="mine"?"Estás al día.":undefined}/>}
+      </div></div>
+      {showNew && <NewTask defaultOwner={knownUser?user.id:undefined} onClose={()=>setNew(false)} onSave={async(f)=>{
+        try{
+          await CRM.addTask(Auth.client, {title:f.title, due_at:f.due, assigned_to:f.owner, contact_id:f.contact, deal_id:f.deal});
+          setNew(false);
+          toast("Tarea creada");
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
+      {editing && <EditTask task={editing} onClose={()=>setEditing(null)} onSave={async(f)=>{
+        try{
+          await CRM.updateTask(Auth.client, editing.id, {title:f.title, due_at:f.due||null, assigned_to:f.owner, contact_id:f.contact||null, deal_id:f.deal||null});
+          setEditing(null);
+          toast("Tarea actualizada");
+          bump();
+        }catch(e){
+          toast("No se pudo actualizar: "+e.message);
+          throw e;
+        }
+      }}/>}
+    </div>
+  );
 }
 
 function NewDeal({contactId, onClose, onSave}){
@@ -649,9 +826,19 @@ function DealDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const [showEdit,setShowEdit]=uState(false); const [showUpload,setShowUpload]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false); const [deleting,setDeleting]=uState(false);
+  const [showNewTask,setShowNewTask]=uState(false); const [editingTask,setEditingTask]=uState(null);
   const d = CRM.DEALS.find(x=>x.id===id);
   const [tab,setTab]=uState("resumen");
   if(!d) return <div className="content"><Empty title="Deal no encontrado"/></div>;
+  const toggleTask=async(t)=>{
+    try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
+    catch(e){ toast("No se pudo completar: "+e.message); }
+  };
+  const deleteTask=async(t)=>{
+    if(!window.confirm("¿Eliminar la tarea \""+t.title+"\"? Esta acción no se puede deshacer.")) return;
+    try{ await CRM.removeTask(Auth.client, t.id); toast("Tarea eliminada"); bump(); }
+    catch(e){ toast("No se pudo eliminar: "+e.message); }
+  };
   const doDelete=async()=>{
     setDeleting(true);
     try{
@@ -665,7 +852,7 @@ function DealDetail({id, nav, toast, user}){
     }
   };
   const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
-  const notes=CRM.NOTES.filter(n=>n.deal===id); const docs=CRM.DOCUMENTS.filter(x=>x.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id);
+  const notes=CRM.NOTES.filter(n=>n.deal===id); const docs=CRM.DOCUMENTS.filter(x=>x.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
   const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
   const dealEmails=CRM.EMAILS.filter(e=>e.deal===id);
   const tabs=[{id:"resumen",label:"Resumen"},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:dealEmails.length||null},{id:"docs",label:"Documentos",n:docs.length}];
@@ -688,7 +875,7 @@ function DealDetail({id, nav, toast, user}){
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="card"><div className="card__body"><div className="grid-2"><KV k="Proveedor actual">Gestoría local</KV><KV k="Cuota actual">{CRM.fmtEUR(Math.round(d.amount*1.2))}</KV><KV k="Ahorro estimado">{CRM.fmtEUR(Math.round(d.amount*0.2))}/{d.frequency}</KV><KV k="Frecuencia pago">{d.frequency}</KV></div></div></div>}
           {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Nota interna del deal…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir</button><div style={{marginTop:16}}>{notes.map(n=><div key={n.id} style={{marginBottom:12}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div></div></div>}
-          {tab==="tareas" && <div className="card"><div className="card__body" style={{paddingTop:6}}>{tasks.length?tasks.map(t=><TaskRow key={t.id} t={t} toast={toast}/>):<Empty icon="task" title="Sin tareas"/>}</div></div>}
+          {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length?tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>):<Empty icon="task" title="Sin tareas"/>}</div></div>}
           {tab==="docs" && <>
             <div className="row" style={{justifyContent:"flex-end",marginBottom:12}}><button className="btn btn--sm btn--primary" onClick={()=>setShowUpload(true)}><Icon name="upload" size={14}/>Subir documento</button></div>
             <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Visible cliente</th></tr></thead><tbody>{docs.map(x=><tr key={x.id}><td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{x.name}</span></td><td><Badge label={x.type} color="#6E8298"/></td><td>{x.visible?<Badge label="Compartido" color="#1F9D6B"/>:<span className="muted">No</span>}</td></tr>)}</tbody></table>{docs.length===0&&<Empty icon="documents" title="Sin documentos"/>}</div>
@@ -712,6 +899,28 @@ function DealDetail({id, nav, toast, user}){
       {confirmDel && <Modal title="Eliminar deal" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
         <p className="muted">Se eliminará el deal <b>{d.title}</b>. Esta acción no se puede deshacer.</p>
       </Modal>}
+      {showNewTask && <NewTask contactId={d.contact} dealId={id} onClose={()=>setShowNewTask(false)} onSave={async(f)=>{
+        try{
+          await CRM.addTask(Auth.client, {title:f.title, due_at:f.due, assigned_to:f.owner, contact_id:d.contact, deal_id:id});
+          setShowNewTask(false);
+          toast("Tarea creada");
+          bump();
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
+      {editingTask && <EditTask task={editingTask} onClose={()=>setEditingTask(null)} onSave={async(f)=>{
+        try{
+          await CRM.updateTask(Auth.client, editingTask.id, {title:f.title, due_at:f.due||null, assigned_to:f.owner, contact_id:f.contact||null, deal_id:f.deal||null});
+          setEditingTask(null);
+          toast("Tarea actualizada");
+          bump();
+        }catch(e){
+          toast("No se pudo actualizar: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
 }
@@ -1232,6 +1441,7 @@ function App(){
         if(session && Auth.isAllowed(session.user.email)){
           if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
+          if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
           if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
           if(mounted) setUser(userFromSession(session));
         }
@@ -1239,7 +1449,7 @@ function App(){
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
             if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); setUser(userFromSession(session)); })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });
@@ -1255,13 +1465,14 @@ function App(){
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user && !portal) return <><Login onLogin={u=>{setUser(u);nav("home");}} onPortal={()=>setPortal(true)}/><Toast msg={toast}/></>;
   if(portal) return <><Portal onExit={()=>setPortal(false)} toast={fireToast}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
+  else if(view.name==="tareas") screen=<Tasks nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;

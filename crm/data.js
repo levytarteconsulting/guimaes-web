@@ -407,6 +407,80 @@
     return d;
   }
 
+  // ---- Tareas reales (tabla "tareas" de Supabase) ----
+  function rowToTask(row){
+    return {
+      id: row.id,
+      title: row.title || "",
+      due: row.due_at || null,
+      owner: row.assigned_to || "",
+      status: row.status || "pending",
+      archived: !!row.archived,
+      contact: row.contact_id || null,
+      deal: row.deal_id || null,
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  // Carga las tareas reales de Supabase y las inyecta en TASKS (una sola vez, al arrancar)
+  async function loadTasks(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("tareas").select("*").order("due_at",{ascending:true});
+      if(res.error || !res.data) return 0;
+      var n = 0;
+      res.data.forEach(function(row){
+        var t = rowToTask(row);
+        if(TASKS.some(function(x){return x.id===t.id;})) return; // evitar duplicados
+        TASKS.push(t);
+        n++;
+      });
+      return n;
+    }catch(e){ if(window.console) console.error("loadTasks:", e); return 0; }
+  }
+  // Crea una tarea real en Supabase y la inyecta en TASKS
+  async function addTask(client, data){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    if(!data.title) throw new Error("La tarea necesita un título");
+    var fields = ["title","assigned_to","due_at","contact_id","deal_id","status","archived"];
+    var payload = {};
+    fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
+    if(!payload.status) payload.status = "pending";
+    if(payload.archived===undefined) payload.archived = false;
+    var res = await client.from("tareas").insert(payload).select();
+    if(res.error) throw res.error;
+    if(!res.data || res.data.length===0) throw new Error("No se creó la tarea");
+    var t = rowToTask(res.data[0]);
+    TASKS.unshift(t);
+    return t;
+  }
+  var TAREAS_COLUMNS = ["title","assigned_to","due_at","contact_id","deal_id","status","archived"];
+  async function updateTask(client, id, patch){
+    var t = TASKS.find(function(x){return x.id===id;}); if(!t) return null;
+    if(client){
+      var payload = {};
+      TAREAS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
+      delete payload.id;
+      delete payload.created_at;
+      var res = await client.from("tareas").update(payload).eq("id", id).select();
+      if(res.error) throw res.error;
+      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
+    }
+    Object.assign(t, patch);
+    return t;
+  }
+  async function removeTask(client, id){
+    if(client){
+      var res = await client.from("tareas").delete().eq("id", id);
+      if(res.error) throw res.error;
+    }
+    var idx = TASKS.findIndex(function(x){return x.id===id;});
+    if(idx>-1) TASKS.splice(idx,1);
+  }
+  // Completar una tarea = marcarla hecha y archivarla de una vez
+  async function toggleTaskDone(client, id){
+    return updateTask(client, id, {status:"done", archived:true});
+  }
+
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
   function leadToContact(row){
     var created = (row.created_at||"").toString();
@@ -542,6 +616,7 @@
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
+    loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
