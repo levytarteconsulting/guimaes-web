@@ -405,25 +405,51 @@
       _lead:true, _mensaje: row.mensaje||""
     };
   }
-  // Carga los leads de Supabase y los inyecta como contactos (una sola vez, al arrancar)
+  // Intenta hacer corresponder el texto libre "servicio" del lead con un id del catálogo SERVICES.
+  // Si no hay coincidencia exacta, devuelve el propio texto (mejor que perderlo).
+  function matchServiceId(label){
+    if(!label) return "";
+    var found = SERVICES.find(function(s){ return s.name.toLowerCase()===String(label).trim().toLowerCase(); });
+    return found ? found.id : label;
+  }
+  // Carga los leads de Supabase. Cada lead con status 'new' se convierte
+  // automáticamente en contacto real + deal (reutiliza convertLeadToContact
+  // y addDeal). Los que ya están 'converted' se ignoran — es el blindaje
+  // anti-duplicados: si status no es 'new', el lead ni se toca.
   async function loadWebLeads(client){
     if(!client) return 0;
     try{
       var res = await client.from("leads").select("*").order("created_at",{ascending:false});
       if(res.error || !res.data) return 0;
       var n = 0;
-      res.data.forEach(function(row){
-        var c = leadToContact(row);
-        if(contactById[c.id]) return; // evitar duplicados
-        CONTACTS.unshift(c);
-        contactById[c.id] = c;
-        var at = (row.created_at||"").toString().replace("T"," ").slice(0,16);
-        if(c._mensaje){
-          NOTES.push({id:"n-"+row.id, contact:c.id, deal:null, author:null, created:at, body:c._mensaje});
-        }
-        ACTIVITY.unshift({contact:c.id, type:"contact", at:at, who:null, text:"Contacto creado desde el formulario web"});
-        n++;
-      });
+      for(var i=0;i<res.data.length;i++){
+        var row = res.data[i];
+        if(row.status!=="new") continue; // solo leads sin convertir
+        try{
+          // 1) objeto temporal en memoria (igual que antes) para que convertLeadToContact lo encuentre
+          var c = leadToContact(row);
+          CONTACTS.unshift(c);
+          contactById[c.id] = c;
+          var at = (row.created_at||"").toString().replace("T"," ").slice(0,16);
+          if(c._mensaje){
+            NOTES.push({id:"n-"+row.id, contact:c.id, deal:null, author:null, created:at, body:c._mensaje});
+          }
+          ACTIVITY.unshift({contact:c.id, type:"contact", at:at, who:null, text:"Contacto creado desde el formulario web"});
+
+          // 2) convierte a contacto real en public.contactos y marca el lead como 'converted'
+          //    (convertLeadToContact ya relinca NOTES/ACTIVITY al nuevo id real)
+          var newContact = await convertLeadToContact(client, c.id);
+
+          // 3) crea el deal asociado, con el servicio pedido como título
+          await addDeal(client, {
+            title: row.servicio || "Solicitud web",
+            contact_id: newContact.id,
+            service: matchServiceId(row.servicio),
+            stage: "reunion"
+          });
+          n++;
+        }catch(e){ if(window.console) console.error("loadWebLeads: fallo al convertir lead "+row.id, e); }
+      }
       return n;
     }catch(e){ if(window.console) console.error("loadWebLeads:", e); return 0; }
   }

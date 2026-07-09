@@ -131,16 +131,28 @@
         if (fields) fields.style.display = "none";
         if (ok) ok.classList.add("show");
       };
-      var showError = function () {
+      var showFieldError = function (msg) {
         if (btn) btn.disabled = false;
         var p = document.createElement("p");
         p.className = "form-err";
         p.style.cssText = "margin-top:14px;color:#B4232E;font-weight:600;font-size:14px";
-        p.textContent = isEN()
-          ? "We couldn't send your message. Please try again or email us at info@guimaes.es."
-          : "No hemos podido enviar tu mensaje. Inténtalo de nuevo o escríbenos a info@guimaes.es.";
+        p.textContent = msg;
         if (fields) fields.appendChild(p);
       };
+      var showError = function () {
+        showFieldError(isEN()
+          ? "We couldn't send your message. Please try again or email us at info@guimaes.es."
+          : "No hemos podido enviar tu mensaje. Inténtalo de nuevo o escríbenos a info@guimaes.es.");
+      };
+
+      // El servicio de interés es obligatorio: sin él no sabemos qué deal crear en el CRM.
+      if (!payload.servicio) {
+        showFieldError(isEN()
+          ? "Please select a service before sending."
+          : "Por favor, selecciona un servicio antes de enviar.");
+        if (svcEl) svcEl.focus();
+        return;
+      }
 
       // Honeypot anti-spam: campo invisible para humanos que solo un bot rellenaría.
       // Si viene con contenido, fingimos éxito sin guardar nada en Supabase ni

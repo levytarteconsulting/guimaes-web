@@ -511,6 +511,12 @@ function NewDeal({contactId, onClose, onSave}){
   const [f,setF]=uState({title:"", contact:contactId||"", service:"", stage:"reunion", amount:"", frequency:"", priority:""});
   const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const setService=(e)=>{
+    const newId = e.target.value;
+    const newName = CRM.serviceById(newId)?.name || "";
+    const prevName = CRM.serviceById(f.service)?.name || "";
+    setF(prev=>({...prev, service:newId, title:(prev.title===""||prev.title===prevName) ? newName : prev.title}));
+  };
   const save=async()=>{
     setSaving(true);
     try{ await onSave(f); }
@@ -520,7 +526,7 @@ function NewDeal({contactId, onClose, onSave}){
     <Field label="Título"><input className="inp" placeholder="Ej. CFO externo para escalado" value={f.title} onChange={set("title")}/></Field>
     {!contactId && <Field label="Contacto"><select className="inp" value={f.contact} onChange={set("contact")}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>}
     <div className="fld-row">
-      <Field label="Servicio"><select className="inp" value={f.service} onChange={set("service")}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      <Field label="Servicio"><select className="inp" value={f.service} onChange={setService}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
       <Field label="Etapa"><select className="inp" value={f.stage} onChange={set("stage")}>{CRM.STAGES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></Field>
     </div>
     <div className="fld-row">
