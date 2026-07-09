@@ -180,9 +180,18 @@
   async function removeContact(client, id){
     // Los leads aún no convertidos usan un id sintético "lead-<uuid>" que no
     // existe como fila en public.contactos: solo se borra en memoria.
+    var contact = contactById[id];
     if(client && id.indexOf("lead-")!==0){
       var res = await client.from("contactos").delete().eq("id", id);
       if(res.error) throw res.error;
+      // Si el contacto venía de un lead, márcalo como 'deleted' para que
+      // loadWebLeads (que solo procesa status='new') no lo vuelva a convertir.
+      if(contact && contact.lead_id){
+        try{
+          var leadRes = await client.from("leads").update({status:"deleted"}).eq("id", contact.lead_id);
+          if(leadRes.error) throw leadRes.error;
+        }catch(e){ if(window.console) console.error("removeContact: no se pudo marcar el lead como 'deleted'", e); }
+      }
     }
     var idx = CONTACTS.findIndex(function(c){return c.id===id;});
     if(idx>-1) CONTACTS.splice(idx,1);
@@ -295,6 +304,7 @@
       source: row.source || "",
       kyc: !!row.kyc,
       registered: !!row.registered,
+      lead_id: row.lead_id || null,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -460,19 +470,24 @@
     var lead = contactById[leadId];
     if(!lead) throw new Error("No se encontró el lead a convertir");
 
+    // Se marca el lead como convertido ANTES de crear el contacto: así, si el
+    // insert de abajo fallara, nunca queda un contacto huérfano con su lead
+    // todavía en 'new' (que es lo que provoca duplicados en cada recarga).
+    var statusRes = await client.from("leads").update({status:"converted"}).eq("id", leadUuid).select();
+    if(statusRes.error) throw statusRes.error;
+    if(!statusRes.data || statusRes.data.length===0) throw new Error("No se pudo marcar el lead como convertido (id: "+leadUuid+")");
+
     var payload = {
       company: lead.company || "",
       full_name: lead.full_name || "",
       email: lead.email || "",
       phone: lead.phone || "",
       source: "Formulario web",
-      lifecycle: "lead"
+      lifecycle: "lead",
+      lead_id: leadUuid
     };
     var res = await client.from("contactos").insert(payload).select();
     if(res.error) throw res.error;
-
-    var statusRes = await client.from("leads").update({status:"converted"}).eq("id", leadUuid);
-    if(statusRes.error) throw statusRes.error;
 
     var idx = CONTACTS.findIndex(function(c){return c.id===leadId;});
     if(idx>-1) CONTACTS.splice(idx,1);
