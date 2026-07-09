@@ -5,6 +5,9 @@ const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React
 function Toast({msg}){ return msg ? <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#0B2238",color:"#fff",padding:"12px 20px",borderRadius:12,boxShadow:"var(--shadow-lg)",zIndex:200,fontWeight:600,fontFamily:"var(--display)"}}>{msg}</div> : null; }
 const useToast = () => { const [m,setM]=uState(null); const fire=(t)=>{setM(t);setTimeout(()=>setM(null),2200);}; return [m,fire]; };
 function ownerAvatar(id){ const u=CRM.userById(id); return u? <Avatar name={u.name} size="sm" color={u.color}/> : null; }
+// id real del servicio "Asesoría Laboral" en CRM.SERVICES — se busca por nombre en vez de
+// hardcodear el id, para no romper en silencio si el catálogo cambia.
+const LABORAL_SERVICE_ID = (CRM.SERVICES.find(s=>s.name==="Asesoría Laboral")||{}).id || "";
 
 /* ============ LOGIN ============ */
 function userFromSession(session){
@@ -508,18 +511,32 @@ function TaskRow({t, toast}){
 }
 
 function NewDeal({contactId, onClose, onSave}){
-  const [f,setF]=uState({title:"", contact:contactId||"", service:"", stage:"reunion", amount:"", frequency:"", priority:""});
+  const [f,setF]=uState({title:"", contact:contactId||"", service:"", stage:"reunion", amount:"", frequency:"", priority:"", num_nominas:"", coste_nomina:20});
   const [saving,setSaving]=uState(false);
+  const isLaboral = f.service===LABORAL_SERVICE_ID;
+  const computedAmount = (parseFloat(f.num_nominas)||0) * (parseFloat(f.coste_nomina)||0);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
   const setService=(e)=>{
     const newId = e.target.value;
     const newName = CRM.serviceById(newId)?.name || "";
     const prevName = CRM.serviceById(f.service)?.name || "";
-    setF(prev=>({...prev, service:newId, title:(prev.title===""||prev.title===prevName) ? newName : prev.title}));
+    setF(prev=>{
+      const next = {...prev, service:newId, title:(prev.title===""||prev.title===prevName) ? newName : prev.title};
+      if(newId===LABORAL_SERVICE_ID){
+        next.frequency = "mensual";
+        if(next.coste_nomina==="") next.coste_nomina = 20;
+      }
+      return next;
+    });
   };
   const save=async()=>{
     setSaving(true);
-    try{ await onSave(f); }
+    try{
+      const payload = isLaboral
+        ? {...f, amount:computedAmount, frequency:"mensual"}
+        : {...f, num_nominas:"", coste_nomina:""};
+      await onSave(payload);
+    }
     finally{ setSaving(false); }
   };
   return <Modal title="Nuevo deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear deal"}</button></>}>
@@ -529,10 +546,21 @@ function NewDeal({contactId, onClose, onSave}){
       <Field label="Servicio"><select className="inp" value={f.service} onChange={setService}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
       <Field label="Etapa"><select className="inp" value={f.stage} onChange={set("stage")}>{CRM.STAGES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></Field>
     </div>
-    <div className="fld-row">
-      <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={f.amount} onChange={set("amount")}/></Field>
-      <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
-    </div>
+    {isLaboral ? (
+      <>
+        <div className="fld-row">
+          <Field label="Nº de nóminas activas"><input className="inp" type="number" min="0" placeholder="0" value={f.num_nominas} onChange={set("num_nominas")}/></Field>
+          <Field label="Coste por nómina (€)"><input className="inp" type="number" min="0" value={f.coste_nomina} onChange={set("coste_nomina")}/></Field>
+        </div>
+        <Field label="Frecuencia"><select className="inp" value="mensual" disabled><option value="mensual">Mensual</option></select></Field>
+        <p className="muted" style={{fontSize:13,margin:"-6px 0 14px"}}>Importe: <b>{CRM.fmtEUR(computedAmount)}</b>/mes</p>
+      </>
+    ) : (
+      <div className="fld-row">
+        <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={f.amount} onChange={set("amount")}/></Field>
+        <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
+      </div>
+    )}
     <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}><option value="">— Sin especificar —</option>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
   </Modal>;
 }
@@ -650,7 +678,7 @@ function DealDetail({id, nav, toast, user}){
           <div className="profile">
             <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:(s?.color || "#888")+"1A",color:s?.color || "#888",borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div><div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("contact",c.id)}>{c.company}</div></div>
             <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/></div>
-            <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{CRM.fmtEUR(d.amount)} / {d.frequency}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
+            <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{(d.service===LABORAL_SERVICE_ID && d.num_nominas && d.coste_nomina) ? <>{d.num_nominas} nóminas × {CRM.fmtEUR(d.coste_nomina)} = {CRM.fmtEUR(d.amount)}/mes</> : <>{CRM.fmtEUR(d.amount)} / {d.frequency}</>}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
             <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar deal</button>
             <button className="btn btn--sm btn--danger" style={{width:"100%",marginTop:8}} onClick={()=>setConfirmDel(true)}><Icon name="trash" size={15}/>Eliminar deal</button>
           </div>
@@ -688,24 +716,58 @@ function DealDetail({id, nav, toast, user}){
   );
 }
 function EditDeal({deal, onClose, onSave}){
-  const [f,setF]=uState({...deal});
+  const [f,setF]=uState(()=>{
+    var init={...deal};
+    Object.keys(init).forEach(function(k){ if(init[k]===null||init[k]===undefined) init[k]=""; });
+    if(init.coste_nomina==="") init.coste_nomina = 20;
+    return init;
+  });
   const [saving,setSaving]=uState(false);
+  const isLaboral = f.service===LABORAL_SERVICE_ID;
+  const computedAmount = (parseFloat(f.num_nominas)||0) * (parseFloat(f.coste_nomina)||0);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const setService=(e)=>{
+    const newId = e.target.value;
+    setF(prev=>{
+      const next = {...prev, service:newId};
+      if(newId===LABORAL_SERVICE_ID){
+        next.frequency = "mensual";
+        if(next.coste_nomina==="") next.coste_nomina = 20;
+      }
+      return next;
+    });
+  };
   const save=async()=>{
     setSaving(true);
-    try{ await onSave(f); }
+    try{
+      const payload = isLaboral
+        ? {...f, amount:computedAmount, frequency:"mensual"}
+        : {...f, num_nominas:"", coste_nomina:""};
+      await onSave(payload);
+    }
     finally{ setSaving(false); }
   };
   return <Modal title="Editar deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
     <Field label="Título"><input className="inp" value={f.title} onChange={set("title")}/></Field>
     <div className="fld-row">
-      <Field label="Servicio"><select className="inp" value={f.service} onChange={set("service")}>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      <Field label="Servicio"><select className="inp" value={f.service} onChange={setService}>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
       <Field label="Etapa"><select className="inp" value={f.stage} onChange={set("stage")}>{CRM.STAGES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></Field>
     </div>
-    <div className="fld-row">
-      <Field label="Importe (€)"><input className="inp" type="number" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/></Field>
-      <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="mensual">mensual</option><option value="trimestral">trimestral</option><option value="anual">anual</option><option value="puntual">puntual</option></select></Field>
-    </div>
+    {isLaboral ? (
+      <>
+        <div className="fld-row">
+          <Field label="Nº de nóminas activas"><input className="inp" type="number" min="0" placeholder="0" value={f.num_nominas} onChange={set("num_nominas")}/></Field>
+          <Field label="Coste por nómina (€)"><input className="inp" type="number" min="0" value={f.coste_nomina} onChange={set("coste_nomina")}/></Field>
+        </div>
+        <Field label="Frecuencia"><select className="inp" value="mensual" disabled><option value="mensual">Mensual</option></select></Field>
+        <p className="muted" style={{fontSize:13,margin:"-6px 0 14px"}}>Importe: <b>{CRM.fmtEUR(computedAmount)}</b>/mes</p>
+      </>
+    ) : (
+      <div className="fld-row">
+        <Field label="Importe (€)"><input className="inp" type="number" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/></Field>
+        <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="mensual">mensual</option><option value="trimestral">trimestral</option><option value="anual">anual</option><option value="puntual">puntual</option></select></Field>
+      </div>
+    )}
     <div className="fld-row">
       <Field label="Owner"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
       <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>

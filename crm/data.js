@@ -206,7 +206,7 @@
     for(var n=ACTIVITY.length-1;n>=0;n--) if(ACTIVITY[n].contact===id) ACTIVITY.splice(n,1);
   }
 
-  var DEALS_COLUMNS = ["title","contact_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at"];
+  var DEALS_COLUMNS = ["title","contact_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at","num_nominas","coste_nomina"];
   async function updateDeal(client, id, patch){
     var d = DEALS.find(function(x){return x.id===id;}); if(!d) return null;
     // Los deals de la maqueta no existen como fila en public.deals: solo se persiste en memoria.
@@ -218,6 +218,14 @@
       if(payload.amount!==undefined){
         payload.amount = (payload.amount===null || payload.amount==="") ? null : parseFloat(payload.amount);
         if(isNaN(payload.amount)) payload.amount = null;
+      }
+      if(payload.num_nominas!==undefined){
+        payload.num_nominas = (payload.num_nominas===null || payload.num_nominas==="") ? null : parseInt(payload.num_nominas,10);
+        if(isNaN(payload.num_nominas)) payload.num_nominas = null;
+      }
+      if(payload.coste_nomina!==undefined){
+        payload.coste_nomina = (payload.coste_nomina===null || payload.coste_nomina==="") ? null : parseFloat(payload.coste_nomina);
+        if(isNaN(payload.coste_nomina)) payload.coste_nomina = null;
       }
       var res = await client.from("deals").update(payload).eq("id", id).select();
       if(res.error) throw res.error;
@@ -356,6 +364,8 @@
       loss_reason: row.loss_reason || null,
       signed: row.signed_at,
       renewal: row.renewal_at,
+      num_nominas: row.num_nominas===undefined ? null : row.num_nominas,
+      coste_nomina: row.coste_nomina===undefined ? null : row.coste_nomina,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -379,12 +389,16 @@
   async function addDeal(client, data){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     if(!data.contact_id) throw new Error("Un deal necesita un contacto asociado");
-    var fields = ["title","contact_id","service","stage","owner","amount","frequency","priority"];
+    var fields = ["title","contact_id","service","stage","owner","amount","frequency","priority","num_nominas","coste_nomina"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
     if(!payload.stage) payload.stage = "reunion";
     payload.amount = (data.amount===undefined || data.amount===null || data.amount==="") ? null : parseFloat(data.amount);
     if(isNaN(payload.amount)) payload.amount = null;
+    payload.num_nominas = (data.num_nominas===undefined || data.num_nominas===null || data.num_nominas==="") ? null : parseInt(data.num_nominas,10);
+    if(isNaN(payload.num_nominas)) payload.num_nominas = null;
+    payload.coste_nomina = (data.coste_nomina===undefined || data.coste_nomina===null || data.coste_nomina==="") ? null : parseFloat(data.coste_nomina);
+    if(isNaN(payload.coste_nomina)) payload.coste_nomina = null;
     var res = await client.from("deals").insert(payload).select();
     if(res.error) throw res.error;
     if(!res.data || res.data.length===0) throw new Error("No se creó el deal");
