@@ -17,6 +17,6 @@
     { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial", "destination": "/blog", "permanent": true }
   ],
   "rewrites": [
-    { "source": "/google88c86944e5df5eab.html", "destination": "/google88c86944e5df5eab.html" }
+    { "source": "/google88c86944e5df5eab.html", "destination": "/google88c86944e5df5eab.txt" }
   ]
 }
