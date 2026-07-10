@@ -66,7 +66,7 @@ function AuthScreen({ onAuthed }) {
         <div className="ac-divider"><span>o</span></div>
         <button className="btn btn--ghost" style={{ width: "100%" }} onClick={google}><GoogleG size={17} />Continuar con Google</button>
         {!ClientAuth.configured && <div className="ac-notice" style={{ marginTop: 14 }}>⚠ El área cliente aún no está conectada. Vuelve pronto.</div>}
-        <a className="ac-back" href="index.html">← Volver a la web</a>
+        <a className="ac-back" href="/">← Volver a la web</a>
       </div>
     </div>
   );
