@@ -35,6 +35,11 @@
 .reviews-head .g-badge b { font-family: var(--display); }
 
 .reviews { display: grid; gap: 22px; margin-top: 44px; }
+/* Móvil: carrusel deslizable (scroll-snap, sin JS); en 720px+ vuelve al grid de siempre. */
+@media (max-width: 719.98px) {
+  .reviews { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scroll-padding-left: var(--gutter); padding-bottom: 10px; }
+  .review { flex: 0 0 82%; scroll-snap-align: start; }
+}
 @media (min-width: 720px){ .reviews { grid-template-columns: repeat(2,1fr); } }
 @media (min-width: 1000px){ .reviews { grid-template-columns: repeat(3,1fr); } }
 .review {
