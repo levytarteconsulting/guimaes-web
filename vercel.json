@@ -1,4 +1,19 @@
 {
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "redirects": [
+    { "source": "/home", "destination": "/", "permanent": true },
+    { "source": "/equipo", "destination": "/nosotros", "permanent": true },
+    { "source": "/category/asesoria-empresarial", "destination": "/blog", "permanent": true },
+    { "source": "/guiames-asesoria-empresarial", "destination": "/servicios/asesoria-laboral", "permanent": true },
+
+    { "source": "/verifactu-2025-todo-lo-que-tu-empresa-debe-saber", "destination": "/blog/verifactu-2026", "permanent": true },
+    { "source": "/verifactu-se-aplaza-a-2027", "destination": "/blog/verifactu-2026", "permanent": true },
+    { "source": "/el-cfo-externo-como-eje-integrador-de-la-direccion-financiera", "destination": "/blog/cuando-necesitas-cfo-externo", "permanent": true },
+    { "source": "/factura-electronica-obligatoria-que-es-cuando-llega-y-como-prepararse-antes-de-2027", "destination": "/blog/factura-electronica-obligatoria-2027", "permanent": true },
+    { "source": "/inspeccion-de-la-agencia-tributaria-senales-de-riesgo-y-como-anticiparse", "destination": "/blog/inspeccion-hacienda-senales-riesgo", "permanent": true },
+    { "source": "/nuevas-posibilidades-de-financiacion-de-las-empresas-claves-para-optimizar-tu-estructura-financiera", "destination": "/blog/ronda-financiacion-inversores", "permanent": true },
+    { "source": "/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos", "destination": "/blog", "permanent": true },
+    { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial", "destination": "/blog", "permanent": true }
+  ]
 }
