@@ -218,6 +218,19 @@
     var c = getConsent();
     return !!(c && c.analytics);
   };
+
+  /* ---------- Puente hacia Google Consent Mode v2 ---------- */
+  document.addEventListener("guimaes:consent", function (e) {
+    if (typeof gtag === "function") {
+      gtag('consent', 'update', {
+        analytics_storage: e.detail.analytics ? 'granted' : 'denied'
+      });
+    }
+  });
+  if (window.hasAnalyticsConsent() && typeof gtag === "function") {
+    gtag('consent', 'update', { analytics_storage: 'granted' });
+  }
+
   function initCookieBanner() {
     var existing = getConsent();
     window.guimaesConsent = existing || null;
