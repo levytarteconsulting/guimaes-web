@@ -15,5 +15,8 @@
     { "source": "/nuevas-posibilidades-de-financiacion-de-las-empresas-claves-para-optimizar-tu-estructura-financiera", "destination": "/blog/ronda-financiacion-inversores", "permanent": true },
     { "source": "/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos", "destination": "/blog", "permanent": true },
     { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial", "destination": "/blog", "permanent": true }
+  ],
+  "rewrites": [
+    { "source": "/google88c86944e5df5eab.html", "destination": "/google88c86944e5df5eab.html" }
   ]
 }
