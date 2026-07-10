@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /crm
+Disallow: /area-cliente
 
 Sitemap: https://www.guimaes.es/sitemap.xml
