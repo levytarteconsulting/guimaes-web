@@ -543,7 +543,7 @@
             title: row.servicio || "Solicitud web",
             contact_id: newContact.id,
             service: matchServiceId(row.servicio),
-            stage: "reunion"
+            stage: "nueva_solicitud"
           });
           n++;
         }catch(e){ if(window.console) console.error("loadWebLeads: fallo al convertir lead "+row.id, e); }
