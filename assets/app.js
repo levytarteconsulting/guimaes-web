@@ -172,6 +172,8 @@
         .then(function (res) {
           if (res && res.error) throw res.error;
           showSuccess();
+          window.dataLayer = window.dataLayer || [];
+          window.dataLayer.push({ event: 'form_submit_success' });
         })
         .catch(function (err) {
           if (window.console) console.error("Lead insert error:", err);
