@@ -245,6 +245,17 @@ function Contacts({nav, toast}){
     setContacts(cs=>cs.map(x=>x.id===id?{...x,lifecycle}:x));
     toast(c.company+" → "+CRM.lifecycleById[lifecycle].label);
   };
+  const doDeleteSelected=async()=>{
+    if(!window.confirm("¿Eliminar "+sel.length+" contacto(s)? Esta acción no se puede deshacer.")) return;
+    try{
+      const n = await CRM.removeContacts(Auth.client, sel);
+      toast(n+" contactos eliminados");
+      setSel([]);
+      setContacts(CRM.CONTACTS.map(c=>({...c})));
+    }catch(e){
+      toast("No se pudieron eliminar: "+e.message);
+    }
+  };
   return (
     <div className={mode==="pipeline"?"content--flush":"content"} style={mode==="pipeline"?{flex:1,display:"flex",flexDirection:"column",minHeight:0}:undefined}>
       <div className="toolbar" style={mode==="pipeline"?{padding:"16px 26px 0",marginBottom:0}:undefined}>
@@ -268,7 +279,7 @@ function Contacts({nav, toast}){
           <button className="btn btn--sm btn--ghost"><Icon name="tag" size={15}/>Añadir a lista</button>
           <button className="btn btn--sm btn--ghost"><Icon name="download" size={15}/>Exportar CSV</button>
           <div className="toolbar__spacer"></div>
-          <button className="btn btn--sm btn--ghost" onClick={()=>{toast(sel.length+" enviados a la papelera");setSel([]);}}><Icon name="trash" size={15}/>Papelera</button>
+          <button className="btn btn--sm btn--ghost" onClick={doDeleteSelected}><Icon name="trash" size={15}/>Eliminar</button>
           <button className="btn btn--sm btn--ghost" onClick={()=>setSel([])}><Icon name="x" size={15}/></button>
         </div>
       )}

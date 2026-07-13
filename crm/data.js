@@ -182,6 +182,8 @@
     // existe como fila en public.contactos: solo se borra en memoria.
     var contact = contactById[id];
     if(client && id.indexOf("lead-")!==0){
+      var delDeals = await client.from("deals").delete().eq("contact_id", id);
+      if(delDeals.error) throw delDeals.error;
       var res = await client.from("contactos").delete().eq("id", id);
       if(res.error) throw res.error;
       // Si el contacto venía de un lead, márcalo como 'deleted' para que
@@ -196,14 +198,24 @@
     var idx = CONTACTS.findIndex(function(c){return c.id===id;});
     if(idx>-1) CONTACTS.splice(idx,1);
     delete contactById[id];
-    // El borrado del contacto ya hizo cascade sobre sus deals en Supabase (on delete cascade);
-    // aquí solo limpiamos memoria, sin repetir la llamada remota (client=null).
+    // Los deals asociados ya se borraron en Supabase arriba; aquí solo limpiamos
+    // memoria, sin repetir la llamada remota (client=null).
     for(var i=DEALS.length-1;i>=0;i--) if(DEALS[i].contact===id) await removeDeal(null, DEALS[i].id);
     for(var j=NOTES.length-1;j>=0;j--) if(NOTES[j].contact===id) NOTES.splice(j,1);
     for(var k=TASKS.length-1;k>=0;k--) if(TASKS[k].contact===id) TASKS.splice(k,1);
     for(var l=DOCUMENTS.length-1;l>=0;l--) if(DOCUMENTS[l].contact===id) DOCUMENTS.splice(l,1);
     for(var m=WHATSAPP.length-1;m>=0;m--) if(WHATSAPP[m].contact===id) WHATSAPP.splice(m,1);
     for(var n=ACTIVITY.length-1;n>=0;n--) if(ACTIVITY[n].contact===id) ACTIVITY.splice(n,1);
+  }
+  async function removeContacts(client, ids){
+    var n = 0;
+    for(var id of ids){
+      try{
+        await removeContact(client, id);
+        n++;
+      }catch(e){ if(window.console) console.error("removeContacts: fallo al borrar "+id, e); }
+    }
+    return n;
   }
 
   var DEALS_COLUMNS = ["title","contact_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at","num_nominas","coste_nomina"];
@@ -617,7 +629,7 @@
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
-    updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact,
+    updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
