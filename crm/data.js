@@ -19,7 +19,8 @@
     {id:"u2", name:"Juan Manuel", email:"juanmanuel@guimaes.es", role:"admin", title:"Socio · Fiscal", color:"#16B8A6"},
     {id:"u3", name:"Macarena", email:"macarena@guimaes.es", role:"admin", title:"Asesora · Laboral", color:"#E0518A"},
     {id:"u4", name:"J. Chávarri", email:"jchavarrisantiago@gmail.com", role:"admin", title:"Asesor · Contable", color:"#C8A24B"},
-    {id:"u5", name:"Levy Tarte", email:"levytarteconsulting@gmail.com", role:"admin", title:"Consultor · Estrategia", color:"#7C5CFC"}
+    {id:"u5", name:"Levy Tarte", email:"levytarteconsulting@gmail.com", role:"admin", title:"Consultor · Estrategia", color:"#7C5CFC"},
+    {id:"u6", name:"Guillermo Guimaes", email:"guillermogteran@gmail.com", role:"admin", title:"Socio director", color:"#1F6FEB"}
   ];
 
   // ---- Services catalog (6 + user can add) ----
