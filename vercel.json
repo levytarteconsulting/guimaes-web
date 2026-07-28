@@ -14,6 +14,32 @@
     { "source": "/inspeccion-de-la-agencia-tributaria-senales-de-riesgo-y-como-anticiparse", "destination": "/blog/inspeccion-hacienda-senales-riesgo", "permanent": true },
     { "source": "/nuevas-posibilidades-de-financiacion-de-las-empresas-claves-para-optimizar-tu-estructura-financiera", "destination": "/blog/ronda-financiacion-inversores", "permanent": true },
     { "source": "/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos", "destination": "/blog", "permanent": true },
-    { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial", "destination": "/blog", "permanent": true }
+    { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial", "destination": "/blog", "permanent": true },
+
+    { "source": "/internacionalizacion-de-empresas", "destination": "/servicios/expansion-latam", "permanent": true },
+    { "source": "/planificacion-fiscal", "destination": "/servicios/planificacion-fiscal", "permanent": true },
+    { "source": "/tributacion-de-extranjeros-en-espana-residentes-y-no-residentes", "destination": "/servicios/expansion-latam", "permanent": true },
+    { "source": "/landing-cfo-externo", "destination": "/servicios/cfo-externo", "permanent": true },
+    { "source": "/landing-verifactu", "destination": "/blog/verifactu-2026", "permanent": true },
+    { "source": "/landing-crecimiento-fiscal", "destination": "/servicios/planificacion-estrategica", "permanent": true },
+    { "source": "/contacto-3", "destination": "/contacto", "permanent": true },
+
+    { "source": "/category/direccion-financiera", "destination": "/blog", "permanent": true },
+    { "source": "/category/planificacion-fiscal", "destination": "/blog", "permanent": true },
+    { "source": "/category/tributario", "destination": "/blog", "permanent": true },
+    { "source": "/tag/asesoria-empresarial", "destination": "/blog", "permanent": true },
+    { "source": "/tag/holding", "destination": "/blog", "permanent": true },
+
+    { "source": "/cuando-externalizar-la-direccion-financiera-en-una-pyme", "destination": "/blog/cuando-necesitas-cfo-externo", "permanent": true },
+    { "source": "/la-diferencia-entre-tener-un-asesor-y-tener-un-cfo-externo", "destination": "/blog/gestoria-vs-asesoria-estrategica", "permanent": true },
+    { "source": "/planificacion-fiscal-empresarial-decisiones-clave-para-optimizar-la-carga-tributaria", "destination": "/blog/planificacion-fiscal-pymes", "permanent": true },
+    { "source": "/optimizacion-fiscal-para-empresas-por-que-pagas-mas-impuestos-de-los-necesarios-y-como-evitarlo", "destination": "/blog/planificacion-fiscal-pymes", "permanent": true },
+    { "source": "/incentivos-fiscales-para-emprendedores-en-espana-como-integrarlos-en-una-estrategia-fiscal-y-societaria-solida", "destination": "/blog/planificacion-fiscal-pymes", "permanent": true },
+
+    { "source": "/por-que-constituir-un-holding-ventajas-riesgos-y-cuando-conviene-hacerlo", "destination": "/blog", "permanent": true },
+    { "source": "/errores-legales-al-crear-una-empresa-y-como-evitarlos", "destination": "/blog", "permanent": true },
+    { "source": "/como-afecta-tu-estructura-societaria-a-tu-declaracion-de-la-renta", "destination": "/blog", "permanent": true },
+    { "source": "/declaracion-de-la-renta-para-empresarios-decisiones-clave-antes-de-presentar-el-irpf", "destination": "/blog", "permanent": true },
+    { "source": "/novedades-de-la-declaracion-de-la-renta-2025-2026-lo-que-cambia-este-ano", "destination": "/blog", "permanent": true }
   ]
 }
