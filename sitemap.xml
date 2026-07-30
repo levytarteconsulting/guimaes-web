@@ -541,4 +541,12 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/compliance-cumplimiento-normativo-pymes"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/compliance-cumplimiento-normativo-pymes"/>
   </url>
+  <url>
+    <loc>https://guimaes.es/blog/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos</loc>
+    <lastmod>2026-07-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos"/>
+  </url>
 </urlset>
