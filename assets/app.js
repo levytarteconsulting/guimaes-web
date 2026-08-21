@@ -154,6 +154,18 @@
           : "No hemos podido enviar tu mensaje. Inténtalo de nuevo o escríbenos a info@guimaes.es.");
       };
 
+      // RGPD: sin la casilla de consentimiento marcada, no se envía nada a Supabase.
+      // El atributo required no basta porque el <form> lleva novalidate — esta
+      // comprobación es la única barrera real antes del insert.
+      var consentEl = form.querySelector("#consent");
+      if (consentEl && !consentEl.checked) {
+        showFieldError(isEN()
+          ? "Please accept the Privacy Policy before sending."
+          : "Por favor, acepta la Política de Privacidad antes de enviar.");
+        consentEl.focus();
+        return;
+      }
+
       // El servicio de interés es obligatorio: sin él no sabemos qué deal crear en el CRM.
       if (!payload.servicio) {
         showFieldError(isEN()
