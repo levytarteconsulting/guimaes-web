@@ -196,6 +196,7 @@
 .post-feature__img img, .post-feature__img.ph-photo { width: 100%; height: 100%; object-fit: cover; }
 .post-feature h3 { font-size: clamp(1.6rem,2.6vw,2.2rem); margin: 14px 0 14px; }
 .post-feature p { color: var(--slate); font-size: 1.05rem; margin-bottom: 22px; }
+.post-feature .btn { margin-top: 16px; }
 
 /* Artículo (prosa) */
 .article { max-width: 720px; margin-inline: auto; }
