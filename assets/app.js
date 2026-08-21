@@ -55,19 +55,28 @@
     window.addEventListener("scroll", onScroll, { passive: true });
   }
 
-  /* ---------- Animaciones de entrada ---------- */
+  /* ---------- Animaciones de entrada ----------
+     El contenido es visible por defecto en CSS (styles.css). Solo se oculta
+     y anima si logramos montar el observer Y registrar todos los elementos
+     sin errores: "js-reveal" se añade a <html> como último paso, dentro de
+     un try/catch. Si falta soporte de IntersectionObserver, no hay
+     elementos, o algo falla al construir/registrar el observer, la clase
+     nunca se añade y el contenido se queda tal cual (visible, por CSS).
+     threshold en 0.01 (en vez de 0.12) para que un scroll rápido en móvil
+     no pueda saltarse la ventana de intersección de un elemento y dejarlo
+     invisible para siempre. */
   function initReveal() {
     var els = document.querySelectorAll("[data-reveal]");
-    if (!("IntersectionObserver" in window) || !els.length) {
-      els.forEach(function (el) { el.classList.add("in"); });
-      return;
-    }
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
-      });
-    }, { threshold: 0.12, rootMargin: "0px 0px -40px 0px" });
-    els.forEach(function (el) { io.observe(el); });
+    if (!("IntersectionObserver" in window) || !els.length) { return; }
+    try {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+        });
+      }, { threshold: 0.01, rootMargin: "0px 0px -40px 0px" });
+      els.forEach(function (el) { io.observe(el); });
+      document.documentElement.classList.add("js-reveal");
+    } catch (e) { /* algo falló: no ocultamos nada, el contenido se queda visible */ }
   }
 
   /* ---------- Formulario de contacto → Supabase (CRM) ----------

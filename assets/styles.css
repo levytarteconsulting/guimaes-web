@@ -473,13 +473,18 @@ body.menu-open .mobile-menu { transform: none; opacity: 1; pointer-events: auto;
 .faq details[open] summary .plus { transform: rotate(45deg); }
 .faq p { color: var(--slate); padding: 0 0 20px; font-size: .98rem; }
 
-/* ---------- Animaciones de entrada ---------- */
+/* ---------- Animaciones de entrada ----------
+   [data-reveal] es visible por defecto: solo se oculta para animar cuando
+   <html> lleva la clase "js-reveal", que app.js añade únicamente si logra
+   montar el IntersectionObserver. Si el JS falla, no llega a ejecutarse o
+   el observer no dispara a tiempo (scroll rápido en móvil), el contenido
+   nunca queda invisible. */
 @media (prefers-reduced-motion: no-preference){
-  [data-reveal]{ opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
-  [data-reveal].in{ opacity: 1; transform: none; }
-  [data-reveal][data-delay="1"]{ transition-delay: .08s; }
-  [data-reveal][data-delay="2"]{ transition-delay: .16s; }
-  [data-reveal][data-delay="3"]{ transition-delay: .24s; }
+  html.js-reveal [data-reveal]{ opacity: 0; transform: translateY(22px); }
+  html.js-reveal [data-reveal].in{ opacity: 1; transform: none; transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  html.js-reveal [data-reveal][data-delay="1"].in{ transition-delay: .08s; }
+  html.js-reveal [data-reveal][data-delay="2"].in{ transition-delay: .16s; }
+  html.js-reveal [data-reveal][data-delay="3"].in{ transition-delay: .24s; }
 }
 
 /* ---------- i18n ----------
