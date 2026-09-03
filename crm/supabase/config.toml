@@ -1,0 +1,14 @@
+# GUIMAES — Configuración de la CLI de Supabase (solo para desplegar Edge Functions)
+# La fuente de verdad del código de las funciones es crm/supabase-functions/.
+# Este archivo solo le dice a la CLI dónde encontrar el index.ts de cada una.
+project_id = "guimaes"
+
+[functions.admin-users]
+entrypoint = "supabase-functions/admin-users/index.ts"
+
+[functions.notify-new-lead]
+entrypoint = "supabase-functions/notify-new-lead/index.ts"
+
+[functions.whatsapp-webhook]
+entrypoint = "supabase-functions/whatsapp-webhook/index.ts"
+verify_jwt = false
