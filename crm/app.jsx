@@ -1006,15 +1006,42 @@ function UploadDocument({onClose, onSave}){
 }
 
 /* ============ WHATSAPP ============ */
+// Contacto de reserva cuando la conversación aún no está enlazada a una ficha
+// de CRM.CONTACTS (p. ej. un número que escribió por primera vez y nadie ha
+// vinculado todavía) — evita que la UI intente leer .company de undefined.
+function waFallbackContact(w){
+  return { company: w.phone || w.wa_id || "Desconocido", full_name: "", phone: w.phone || "" };
+}
 function WhatsApp({nav, toast}){
   const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
   const [filter,setFilter]=uState("active");
   const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
-  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false);
+  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
   const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
   const conv = convs.find(w=>w.id===active);
-  const c = conv && CRM.contactById[conv.contact];
-  const send=()=>{ if(!txt.trim()||!conv)return; setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,{dir:"out",t:"Ahora",body:txt}]}:w)); setTxt(""); };
+  const c = conv && (CRM.contactById[conv.contact] || waFallbackContact(conv));
+  const activeRef = uRef(active);
+  uEffect(()=>{ activeRef.current = active; },[active]);
+  const send=async ()=>{
+    if(!txt.trim()||!conv||sending) return;
+    const to = conv.wa_id || conv.phone;
+    if(!to){ toast("Esta conversación no tiene un número de WhatsApp asociado."); return; }
+    const body = txt.trim();
+    setSending(true);
+    try{
+      const res = await Auth.client.functions.invoke("whatsapp-send", { body: { conversation_id: conv.id, to, text: body } });
+      if(res.error){ toast(res.error.message || "No se pudo enviar el mensaje."); return; }
+      if(res.data && res.data.error){ toast(res.data.error); return; }
+      const saved = res.data && res.data.message;
+      const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", t:"Ahora", body};
+      setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,msg],updated:msg.t}:w));
+      setTxt("");
+    }catch(e){
+      toast("No se pudo enviar el mensaje: "+(e && e.message ? e.message : String(e)));
+    }finally{
+      setSending(false);
+    }
+  };
   const toggleArchive=(id,e)=>{
     e.stopPropagation();
     const w=convs.find(x=>x.id===id); const newVal=!w.archived;
@@ -1026,6 +1053,22 @@ function WhatsApp({nav, toast}){
   uEffect(()=>{
     if(!visible.find(w=>w.id===active)) setActive(visible[0]?.id || null);
   },[filter]);
+  // Realtime: mensajes entrantes nuevos se añaden al hilo en caliente. Si la
+  // conversación no está abierta, solo sube el contador de no leídos.
+  uEffect(()=>{
+    if(!Auth.client || !CRM.subscribeWhatsapp) return;
+    const channel = CRM.subscribeWhatsapp(Auth.client, (row)=>{
+      if(row.direction!=="in") return; // los salientes ya se añaden al enviar
+      const msg = CRM.rowToWhatsappMessage(row);
+      setConvs(cs=>{
+        const idx = cs.findIndex(w=>w.id===row.conversation_id);
+        if(idx===-1) return cs; // conversación nueva no cargada aún: aparecerá al recargar
+        const isOpen = activeRef.current===row.conversation_id;
+        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], updated:msg.t, unread: isOpen ? w.unread : w.unread+1});
+      });
+    });
+    return ()=>{ if(channel) Auth.client.removeChannel(channel); };
+  },[]);
   return (
     <div className="wa">
       <div className="wa__list">
@@ -1034,10 +1077,10 @@ function WhatsApp({nav, toast}){
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
           <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
         </div>
-        {visible.map(w=>{ const cc=CRM.contactById[w.contact]; const last=w.messages[w.messages.length-1];
+        {visible.map(w=>{ const cc=CRM.contactById[w.contact] || waFallbackContact(w); const last=w.messages[w.messages.length-1];
           return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
             <Avatar name={cc.company} size="md" color={CRM.colorFor(cc.company)}/>
-            <div className="wa__conv__main"><div className="wa__conv__name"><span>{cc.company}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last.dir==="out"?"Tú: ":""}{last.body}</div></div>
+            <div className="wa__conv__main"><div className="wa__conv__name"><span>{cc.company}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
             {w.unread>0 && <span className="wa__unread">{w.unread}</span>}
             <button className="wa__archive" title={w.archived?"Restaurar":"Archivar"} onClick={e=>toggleArchive(w.id,e)}><Icon name={w.archived?"refresh":"archive"} size={15}/></button>
           </div>;
@@ -1046,9 +1089,9 @@ function WhatsApp({nav, toast}){
       </div>
       <div className="wa__thread">
         {conv ? <>
-          <div className="wa__thread__head"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div><button className="btn btn--sm btn--ghost right" onClick={()=>nav("contact",c.id)}>Ver ficha</button></div>
+          <div className="wa__thread__head"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>{conv.contact && <button className="btn btn--sm btn--ghost right" onClick={()=>nav("contact",c.id)}>Ver ficha</button>}</div>
           <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
-          <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Insertar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}}/><button className="btn btn--primary btn--icon" onClick={send}><Icon name="send" size={18}/></button></div>
+          <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Insertar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
         </> : <div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div>}
       </div>
       {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} onUse={conv?(body)=>{setTxt(body);setShowTpl(false);}:null} toast={toast}/>}
@@ -1453,13 +1496,14 @@ function App(){
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
           if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
+          if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client);
           if(mounted) setUser(userFromSession(session));
         }
         Auth.onAuthStateChange((event, session)=>{
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
             if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); setUser(userFromSession(session)); })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });

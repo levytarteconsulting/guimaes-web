@@ -86,8 +86,78 @@
   // ---- Calls ----
   var CALLS = [];
 
-  // ---- WhatsApp ----
+  // ---- WhatsApp (datos reales desde Supabase, ver loadWhatsapp) ----
   var WHATSAPP = [];
+
+  function fmtWaTime(iso){
+    if(!iso) return "";
+    var d = new Date(iso);
+    if(isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("es-ES", {hour:"2-digit", minute:"2-digit"});
+  }
+  function rowToWhatsappMessage(row){
+    return {
+      id: row.id,
+      dir: row.direction==="out" ? "out" : "in",
+      t: fmtWaTime(row.created_at),
+      body: row.body || "",
+      wa_message_id: row.wa_message_id || null,
+      status: row.delivery_status || null
+    };
+  }
+  function rowToWhatsappConversation(row){
+    return {
+      id: row.id,
+      contact: row.contact_id || null,
+      phone: row.phone || "",
+      wa_id: row.wa_id || "",
+      owner: row.owner || "",
+      archived: !!row.archived,
+      unread: 0, // no persistido en el esquema; solo sube en sesión vía Realtime (ver subscribeWhatsapp)
+      updated: fmtWaTime(row.last_customer_message_at || row.updated_at || row.created_at),
+      messages: []
+    };
+  }
+  // Carga las conversaciones + mensajes reales de Supabase y los inyecta en WHATSAPP (una sola vez, al arrancar)
+  async function loadWhatsapp(client){
+    if(!client) return 0;
+    try{
+      var convRes = await client.from("whatsapp_conversations").select("*").order("last_customer_message_at",{ascending:false, nullsFirst:false});
+      if(convRes.error || !convRes.data || convRes.data.length===0) return 0;
+      var convRows = convRes.data;
+
+      var ids = convRows.map(function(r){return r.id;});
+      var msgRes = await client.from("whatsapp_messages").select("*").in("conversation_id", ids).order("created_at",{ascending:true});
+      var msgRows = (msgRes.error || !msgRes.data) ? [] : msgRes.data;
+
+      var messagesByConv = {};
+      msgRows.forEach(function(m){
+        (messagesByConv[m.conversation_id] = messagesByConv[m.conversation_id] || []).push(rowToWhatsappMessage(m));
+      });
+
+      var n = 0;
+      convRows.forEach(function(row){
+        if(WHATSAPP.some(function(x){return x.id===row.id;})) return; // evitar duplicados
+        var conv = rowToWhatsappConversation(row);
+        conv.messages = messagesByConv[row.id] || [];
+        WHATSAPP.push(conv);
+        n++;
+      });
+      return n;
+    }catch(e){ if(window.console) console.error("loadWhatsapp:", e); return 0; }
+  }
+  // Suscripción Realtime a mensajes nuevos de WhatsApp (requiere que la tabla
+  // whatsapp_messages esté añadida a la publicación "supabase_realtime" en Supabase —
+  // Database → Replication — si no, el canal se conecta pero no llegan eventos).
+  function subscribeWhatsapp(client, onInsert){
+    if(!client) return null;
+    return client
+      .channel("whatsapp_messages_changes")
+      .on("postgres_changes", {event:"INSERT", schema:"public", table:"whatsapp_messages"}, function(payload){
+        onInsert(payload.new);
+      })
+      .subscribe();
+  }
 
   // ---- Documents ----
   var DOCUMENTS = [];
@@ -632,6 +702,7 @@
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
+    loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
     setEmailArchived:setEmailArchived, linkEmail:linkEmail, addEmailReply:addEmailReply, addEmailThread:addEmailThread
