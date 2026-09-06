@@ -16,3 +16,7 @@ entrypoint = "../supabase-functions/notify-new-lead/index.ts"
 [functions.whatsapp-webhook]
 entrypoint = "../supabase-functions/whatsapp-webhook/index.ts"
 verify_jwt = false
+
+[functions.whatsapp-send]
+entrypoint = "../supabase-functions/whatsapp-send/index.ts"
+verify_jwt = true  # explícito: la llama el CRM autenticado, a diferencia del webhook
