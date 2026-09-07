@@ -176,12 +176,40 @@
   // ---- Activity log (per contact) ----
   var ACTIVITY = [];
 
-  // ---- WhatsApp templates (Meta Business Manager) ----
-  var WA_TEMPLATES = [
-    {id:"tpl1", name:"bienvenida_cliente", category:"Utilidad", lang:"es_ES", body:"¡Hola {{1}}! Bienvenido/a a GUIMAES. Tu asesor {{2}} se pondrá en contacto contigo en breve."},
-    {id:"tpl2", name:"recordatorio_reunion", category:"Recordatorio", lang:"es_ES", body:"Hola {{1}}, te recordamos tu reunión con GUIMAES el {{2}} a las {{3}}h."},
-    {id:"tpl3", name:"documento_disponible", category:"Utilidad", lang:"es_ES", body:"Hola {{1}}, ya tienes disponible un nuevo documento en tu área de cliente."}
-  ];
+  // ---- WhatsApp templates (datos reales desde Meta, ver loadWaTemplates) ----
+  var WA_TEMPLATES = [];
+  // Solo para mostrar en la UI: Meta guarda category en inglés/mayúsculas
+  // (MARKETING/UTILITY/AUTHENTICATION). El valor en BD se deja tal cual viene.
+  var WA_CATEGORY_LABELS = {MARKETING:"Marketing", UTILITY:"Utilidad", AUTHENTICATION:"Autenticación"};
+  function waCategoryLabel(category){
+    if(!category) return "";
+    var known = WA_CATEGORY_LABELS[category.toUpperCase()];
+    if(known) return known;
+    return category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+  }
+  function rowToWaTemplate(row){
+    return {
+      id: row.id,
+      name: row.name || "",
+      category: waCategoryLabel(row.category),
+      lang: row.language || "",
+      body: row.body || "",
+      status: row.status || "pending",
+      variables: row.variables || []
+    };
+  }
+  // Carga las plantillas reales de Supabase y reemplaza WA_TEMPLATES (la BD es
+  // la fuente de verdad tras sincronizar con Meta, ver whatsapp-sync-templates)
+  async function loadWaTemplates(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("whatsapp_templates").select("*").order("name",{ascending:true});
+      if(res.error || !res.data) return 0;
+      WA_TEMPLATES.length = 0;
+      res.data.forEach(function(row){ WA_TEMPLATES.push(rowToWaTemplate(row)); });
+      return WA_TEMPLATES.length;
+    }catch(e){ if(window.console) console.error("loadWaTemplates:", e); return 0; }
+  }
 
   // ---- Mutations (prototipo: en memoria) ----
   function setArchived(id, val){
@@ -703,7 +731,7 @@
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
-    loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage,
+    loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
     setEmailArchived:setEmailArchived, linkEmail:linkEmail, addEmailReply:addEmailReply, addEmailThread:addEmailThread

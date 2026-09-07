@@ -20,3 +20,7 @@ verify_jwt = false
 [functions.whatsapp-send]
 entrypoint = "../supabase-functions/whatsapp-send/index.ts"
 verify_jwt = true  # explícito: la llama el CRM autenticado, a diferencia del webhook
+
+[functions.whatsapp-sync-templates]
+entrypoint = "../supabase-functions/whatsapp-sync-templates/index.ts"
+verify_jwt = true  # explícito: la llama el CRM autenticado, igual que whatsapp-send

@@ -1116,14 +1116,20 @@ function WhatsApp({nav, toast}){
 function TemplatesModal({onClose, onUse, toast}){
   const [templates,setTemplates]=uState(()=>[...CRM.WA_TEMPLATES]);
   const [importing,setImporting]=uState(false);
-  const importFromMeta=()=>{
+  const importFromMeta=async ()=>{
     setImporting(true);
-    setTimeout(()=>{
-      const extra=[{id:"tpl"+Date.now(), name:"seguimiento_propuesta", category:"Marketing", lang:"es_ES", body:"Hola {{1}}, ¿pudiste revisar la propuesta que te enviamos? Quedamos a tu disposición para cualquier duda."}];
-      setTemplates(t=>[...t,...extra]);
+    try{
+      const res = await Auth.client.functions.invoke("whatsapp-sync-templates", { body: {} });
+      if(res.error){ toast(res.error.message || "No se pudo sincronizar con Meta."); return; }
+      if(res.data && res.data.error){ toast(res.data.error); return; }
+      if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client);
+      setTemplates([...CRM.WA_TEMPLATES]);
+      toast((res.data && res.data.synced!=null ? res.data.synced : CRM.WA_TEMPLATES.length)+" plantillas sincronizadas desde Meta Business Manager");
+    }catch(e){
+      toast("No se pudo sincronizar con Meta: "+(e && e.message ? e.message : String(e)));
+    }finally{
       setImporting(false);
-      toast(extra.length+" plantilla nueva importada desde Meta Business Manager");
-    }, 1100);
+    }
   };
   return <Modal title="Plantillas de WhatsApp" wide onClose={onClose} footer={<button className="btn btn--ghost" onClick={onClose}>Cerrar</button>}>
     <div className="row" style={{justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:16}}>
@@ -1512,13 +1518,14 @@ function App(){
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
           if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
           if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client);
+          if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client);
           if(mounted) setUser(userFromSession(session));
         }
         Auth.onAuthStateChange((event, session)=>{
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
             if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session)); })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });
