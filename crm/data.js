@@ -195,8 +195,56 @@
       lang: row.language || "",
       body: row.body || "",
       status: row.status || "pending",
-      variables: row.variables || []
+      variables: row.variables || [],
+      components: row.components || [],
+      parameter_format: row.parameter_format || null
     };
+  }
+  function waExtractBodyText(components){
+    var body = (components||[]).find(function(c){ return c.type==="BODY"; });
+    return (body && body.text) || "";
+  }
+  // Fuente de verdad del número de variables: el índice MÁXIMO de {{n}} en el
+  // texto del BODY (no un recuento de valores distintos) — mismo criterio que
+  // analyzeBodyVariables en whatsapp-send/index.ts.
+  function waAnalyzeBodyVariables(bodyText){
+    var re = /\{\{\s*(\d+)\s*\}\}/g, numbers = {}, m;
+    while((m = re.exec(bodyText||""))){ numbers[Number(m[1])] = true; }
+    var keys = Object.keys(numbers).map(Number);
+    if(keys.length===0) return {count:0, gapless:true};
+    var count = Math.max.apply(null, keys);
+    var gapless = true;
+    for(var i=1;i<=count;i++){ if(!numbers[i]){ gapless=false; break; } }
+    return {count:count, gapless:gapless};
+  }
+  // Mismo criterio que templateSendIssue() en whatsapp-send/index.ts (Edge
+  // Function) — mantener sincronizado si cambia allí. Devuelve null si la
+  // plantilla es enviable, o el motivo en castellano si no.
+  function waTemplateSendIssue(components, parameterFormat){
+    var list = components || [];
+    if(parameterFormat!=="POSITIONAL"){
+      return "Formato de parámetros no soportado ("+(parameterFormat||"desconocido")+"); solo se soportan plantillas POSITIONAL.";
+    }
+    if(list.some(function(c){return c.type==="CAROUSEL";})){
+      return "Las plantillas con componente CAROUSEL no están soportadas todavía.";
+    }
+    var header = list.find(function(c){return c.type==="HEADER";});
+    if(header){
+      if(header.format!=="TEXT"){
+        return "El header de esta plantilla es de tipo "+(header.format||"desconocido")+"; solo se soportan headers de texto sin variables.";
+      }
+      if((header.text||"").indexOf("{{")!==-1){
+        return "El header de esta plantilla tiene variables; no están soportadas todavía.";
+      }
+    }
+    var buttons = list.find(function(c){return c.type==="BUTTONS";});
+    if(buttons){
+      var dynamicButton = (buttons.buttons||[]).some(function(b){ return typeof b.url==="string" && b.url.indexOf("{{")!==-1; });
+      if(dynamicButton){
+        return "Esta plantilla tiene un botón con URL dinámica; no está soportado todavía.";
+      }
+    }
+    return null;
   }
   // Carga las plantillas reales de Supabase y reemplaza WA_TEMPLATES (la BD es
   // la fuente de verdad tras sincronizar con Meta, ver whatsapp-sync-templates)
@@ -732,6 +780,7 @@
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
+    waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
     setEmailArchived:setEmailArchived, linkEmail:linkEmail, addEmailReply:addEmailReply, addEmailThread:addEmailThread

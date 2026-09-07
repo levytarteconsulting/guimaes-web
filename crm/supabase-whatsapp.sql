@@ -163,3 +163,22 @@ create policy "admins actualizan whatsapp_templates"
 drop policy if exists "admins borran whatsapp_templates" on public.whatsapp_templates;
 create policy "admins borran whatsapp_templates"
   on public.whatsapp_templates for delete to authenticated using (true);
+
+-- ============================================================
+-- Pieza 2 — plantillas: enviar plantillas de verdad requiere el array
+-- "components" crudo de Meta (hoy solo se guardaba el texto del BODY y un
+-- resumen de variables — insuficiente si la plantilla tiene HEADER o BUTTONS).
+-- Bloque idempotente: seguro tanto en una BD nueva (recién creada con este
+-- mismo fichero) como en la BD actual, ya poblada.
+-- ============================================================
+alter table public.whatsapp_templates
+  add column if not exists components jsonb not null default '[]'::jsonb; -- array "components" crudo de la Graph API, sin parsear
+
+alter table public.whatsapp_templates
+  add column if not exists parameter_format text; -- 'POSITIONAL' / 'NAMED' según Meta; nullable
+
+alter table public.whatsapp_templates
+  add column if not exists meta_template_id text; -- id de la plantilla en Meta (no confundir con el id propio, uuid)
+
+alter table public.whatsapp_messages
+  add column if not exists meta jsonb; -- metadatos del envío (p. ej. plantilla usada + variables); nullable

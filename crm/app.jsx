@@ -1103,19 +1103,26 @@ function WhatsApp({nav, toast}){
           <div className="wa__thread__head"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>{conv.contact && <button className="btn btn--sm btn--ghost right" onClick={()=>nav("contact",c.id)}>Ver ficha</button>}</div>
           <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
           {windowOpen ? (
-            <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Insertar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
+            <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
           ) : (
-            <div className="wa__compose"><span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Para reabrir la conversación tendrás que enviar una plantilla (próximamente).</span></div>
+            <div className="wa__compose" style={{justifyContent:"space-between"}}>
+              <span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Necesitas que el cliente responda para volver a escribir texto libre — mientras tanto puedes enviarle una plantilla aprobada.</span>
+              <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
+            </div>
           )}
         </> : <div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div>}
       </div>
-      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} onUse={conv?(body)=>{setTxt(body);setShowTpl(false);}:null} toast={toast}/>}
+      {showTpl && conv && <TemplatesModal onClose={()=>setShowTpl(false)} conv={conv} onSent={(msg)=>{setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,msg],updated:msg.t}:w));}} toast={toast}/>}
     </div>
   );
 }
-function TemplatesModal({onClose, onUse, toast}){
+function TemplatesModal({onClose, conv, onSent, toast}){
   const [templates,setTemplates]=uState(()=>[...CRM.WA_TEMPLATES]);
   const [importing,setImporting]=uState(false);
+  const [selected,setSelected]=uState(null); // plantilla elegida en el paso 2, con bodyText/count precalculados
+  const [values,setValues]=uState([]); // valores de las variables, values[0] -> {{1}}
+  const [sending,setSending]=uState(false);
+
   const importFromMeta=async ()=>{
     setImporting(true);
     try{
@@ -1131,21 +1138,76 @@ function TemplatesModal({onClose, onUse, toast}){
       setImporting(false);
     }
   };
+
+  const openTemplate = (t)=>{
+    const bodyText = CRM.waExtractBodyText(t.components);
+    const {count} = CRM.waAnalyzeBodyVariables(bodyText);
+    setSelected({...t, bodyText, count});
+    setValues(Array(count).fill(""));
+  };
+  const back = ()=>{ setSelected(null); setValues([]); };
+
+  // Huecos sin rellenar (vacíos o solo espacios) se ven como {{n}} en la vista previa.
+  const preview = selected ? selected.bodyText.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m,n)=>{
+    const v = values[Number(n)-1];
+    return (v && v.trim()) ? v : "{{"+n+"}}";
+  }) : "";
+  const canSend = !!selected && !sending && (selected.count===0 || values.every(v=>v && v.trim()));
+
+  const sendTemplate = async ()=>{
+    if(!canSend || !conv) return;
+    setSending(true);
+    try{
+      const res = await Auth.client.functions.invoke("whatsapp-send", {
+        body: { conversation_id: conv.id, type: "template", template: { name: selected.name, language: selected.lang, variables: values } },
+      });
+      if(res.error){ toast(res.error.message || "No se pudo enviar la plantilla."); return; }
+      if(res.data && res.data.error){ toast(res.data.message || res.data.error); return; }
+      const saved = res.data && res.data.message;
+      if(saved && onSent) onSent(CRM.rowToWhatsappMessage(saved));
+      onClose();
+    }catch(e){
+      toast("No se pudo enviar la plantilla: "+(e && e.message ? e.message : String(e)));
+    }finally{
+      setSending(false);
+    }
+  };
+
+  if(selected){
+    return <Modal title={"Enviar plantilla · "+selected.name} wide onClose={onClose} footer={<>
+      <button className="btn btn--ghost" onClick={back} disabled={sending}>Volver</button>
+      <button className="btn btn--primary" onClick={sendTemplate} disabled={!canSend}>{sending?"Enviando…":"Enviar"}</button>
+    </>}>
+      <div className="card" style={{marginBottom:16}}><div className="card__body" style={{padding:14}}>
+        <div className="muted" style={{fontSize:11.5,marginBottom:6}}>Vista previa</div>
+        <div className="tl-item__body">{preview}</div>
+      </div></div>
+      {selected.count>0 && Array.from({length:selected.count}).map((_,i)=>(
+        <Field key={i} label={"Variable "+(i+1)}>
+          <input className="inp" value={values[i]||""} placeholder={"Valor para {{"+(i+1)+"}}"}
+            onChange={e=>{ const next=[...values]; next[i]=e.target.value; setValues(next); }}/>
+        </Field>
+      ))}
+    </Modal>;
+  }
+
   return <Modal title="Plantillas de WhatsApp" wide onClose={onClose} footer={<button className="btn btn--ghost" onClick={onClose}>Cerrar</button>}>
     <div className="row" style={{justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:16}}>
       <p className="muted" style={{maxWidth:420,margin:0}}>Plantillas aprobadas en el WhatsApp Business Manager de Meta. Impórtalas para reutilizarlas al escribir a un cliente.</p>
       <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={importFromMeta} disabled={importing}>{importing? "Importando…" : <><Icon name="download" size={14}/>Importar desde Meta</>}</button>
     </div>
     <div className="wrap-gap" style={{gap:10}}>
-      {templates.map(t=>(
-        <div key={t.id} className="card"><div className="card__body" style={{padding:14}}>
+      {templates.map(t=>{
+        const issue = CRM.waTemplateSendIssue(t.components, t.parameter_format);
+        return <div key={t.id} className="card" style={issue?{opacity:0.55}:undefined}><div className="card__body" style={{padding:14}}>
           <div className="row" style={{justifyContent:"space-between"}}>
             <div className="row" style={{gap:8}}><span style={{fontWeight:700,fontFamily:"var(--display)",fontSize:13.5}}>{t.name}</span><Badge label={t.category} color="#6E8298"/><span className="muted" style={{fontSize:11.5}}>{t.lang}</span></div>
-            {onUse && <button className="btn btn--sm btn--subtle" onClick={()=>onUse(t.body)}>Usar</button>}
+            <button className="btn btn--sm btn--subtle" onClick={()=>openTemplate(t)} disabled={!!issue}>Usar</button>
           </div>
           <div className="tl-item__body" style={{marginTop:8}}>{t.body}</div>
-        </div></div>
-      ))}
+          {issue && <div className="muted" style={{marginTop:8,fontSize:12,color:"var(--danger)"}}>{issue}</div>}
+        </div></div>;
+      })}
     </div>
   </Modal>;
 }

@@ -68,8 +68,13 @@ Deno.serve(async (req) => {
     const token = Deno.env.get("WHATSAPP_TOKEN");
     const wabaId = Deno.env.get("WHATSAPP_WABA_ID");
 
+    // fields explícito: al pasarlo, Meta deja de devolver los campos por
+    // defecto — cualquier campo que el map de abajo use y no esté aquí
+    // llegaría como undefined en silencio. Mantener esta lista sincronizada
+    // con lo que realmente se lee de "t" más abajo.
+    const templateFields = "id,name,status,category,language,components,parameter_format";
     const metaRes = await fetch(
-      `https://graph.facebook.com/${GRAPH_API_VERSION}/${wabaId}/message_templates?limit=100`,
+      `https://graph.facebook.com/${GRAPH_API_VERSION}/${wabaId}/message_templates?limit=100&fields=${templateFields}`,
       { headers: { "Authorization": `Bearer ${token}` } },
     );
     const metaBody = await metaRes.json();
@@ -96,6 +101,9 @@ Deno.serve(async (req) => {
       status: (t.status || "pending").toLowerCase(),
       body: extractBody(t.components),
       variables: extractVariables(t.components),
+      components: Array.isArray(t.components) ? t.components : [],
+      parameter_format: t.parameter_format ?? null,
+      meta_template_id: t.id ?? null,
       synced_at: new Date().toISOString(),
     }));
 
