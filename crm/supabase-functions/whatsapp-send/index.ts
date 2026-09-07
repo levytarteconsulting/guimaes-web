@@ -57,9 +57,35 @@ Deno.serve(async (req) => {
       );
     }
 
-    // TODO: validar ventana de 24h aquí — si han pasado más de 24h desde
-    // last_customer_message_at de la conversación, rechazar el texto libre y
-    // exigir una plantilla aprobada en su lugar. Pendiente de la siguiente iteración.
+    const supabase = createClient(url, serviceKey);
+
+    // ---- Ventana de servicio de 24h (solo aplica a texto libre) ----
+    // Cuando se añadan plantillas, esta comprobación debe saltarse para los
+    // envíos de tipo "template" — Meta permite mandarlas aunque la ventana
+    // esté cerrada; es precisamente el caso de uso para el que existen.
+    const { data: conversation, error: convErr } = await supabase
+      .from("whatsapp_conversations")
+      .select("last_customer_message_at")
+      .eq("id", conversation_id)
+      .maybeSingle();
+    if (convErr) throw convErr;
+    if (!conversation) {
+      return new Response(JSON.stringify({ error: "La conversación no existe." }), { status: 404, headers: corsHeaders });
+    }
+
+    const lastCustomerMessageAt = conversation.last_customer_message_at ? new Date(conversation.last_customer_message_at) : null;
+    const windowOpenMs = 24 * 60 * 60 * 1000;
+    const windowOpen = !!lastCustomerMessageAt && (Date.now() - lastCustomerMessageAt.getTime()) < windowOpenMs;
+
+    if (!windowOpen) {
+      return new Response(
+        JSON.stringify({
+          error: "ventana_cerrada",
+          message: "La ventana de 24h ha expirado. Para escribir a este contacto necesitas enviar una plantilla aprobada.",
+        }),
+        { status: 409, headers: corsHeaders },
+      );
+    }
 
     const token = Deno.env.get("WHATSAPP_TOKEN");
     const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
@@ -91,7 +117,6 @@ Deno.serve(async (req) => {
     const waMessageId = metaBody.messages?.[0]?.id;
 
     // ---- Guardar el mensaje enviado (con permisos de servicio) ----
-    const supabase = createClient(url, serviceKey);
     const { data: saved, error: insertErr } = await supabase
       .from("whatsapp_messages")
       .insert({

@@ -114,6 +114,7 @@
       owner: row.owner || "",
       archived: !!row.archived,
       unread: 0, // no persistido en el esquema; solo sube en sesión vía Realtime (ver subscribeWhatsapp)
+      last_customer_message_at: row.last_customer_message_at || null, // crudo, para calcular la ventana de 24h en la UI
       updated: fmtWaTime(row.last_customer_message_at || row.updated_at || row.created_at),
       messages: []
     };

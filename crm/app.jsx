@@ -1012,6 +1012,16 @@ function UploadDocument({onClose, onSave}){
 function waFallbackContact(w){
   return { company: w.phone || w.wa_id || "Desconocido", full_name: "", phone: w.phone || "" };
 }
+// Ventana de servicio de 24h de Meta: solo se puede escribir texto libre si el
+// cliente escribió en las últimas 24h. Misma regla que valida whatsapp-send en
+// el backend (crítico); esto es solo para la experiencia — el backend manda.
+const WA_WINDOW_MS = 24*60*60*1000;
+function isWaWindowOpen(conv){
+  if(!conv || !conv.last_customer_message_at) return false;
+  const t = new Date(conv.last_customer_message_at).getTime();
+  if(isNaN(t)) return false;
+  return (Date.now()-t) < WA_WINDOW_MS;
+}
 function WhatsApp({nav, toast}){
   const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
   const [filter,setFilter]=uState("active");
@@ -1020,10 +1030,11 @@ function WhatsApp({nav, toast}){
   const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
   const conv = convs.find(w=>w.id===active);
   const c = conv && (CRM.contactById[conv.contact] || waFallbackContact(conv));
+  const windowOpen = isWaWindowOpen(conv);
   const activeRef = uRef(active);
   uEffect(()=>{ activeRef.current = active; },[active]);
   const send=async ()=>{
-    if(!txt.trim()||!conv||sending) return;
+    if(!txt.trim()||!conv||sending||!windowOpen) return;
     const to = conv.wa_id || conv.phone;
     if(!to){ toast("Esta conversación no tiene un número de WhatsApp asociado."); return; }
     const body = txt.trim();
@@ -1031,7 +1042,7 @@ function WhatsApp({nav, toast}){
     try{
       const res = await Auth.client.functions.invoke("whatsapp-send", { body: { conversation_id: conv.id, to, text: body } });
       if(res.error){ toast(res.error.message || "No se pudo enviar el mensaje."); return; }
-      if(res.data && res.data.error){ toast(res.data.error); return; }
+      if(res.data && res.data.error){ toast(res.data.message || res.data.error); return; }
       const saved = res.data && res.data.message;
       const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", t:"Ahora", body};
       setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,msg],updated:msg.t}:w));
@@ -1091,7 +1102,11 @@ function WhatsApp({nav, toast}){
         {conv ? <>
           <div className="wa__thread__head"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>{conv.contact && <button className="btn btn--sm btn--ghost right" onClick={()=>nav("contact",c.id)}>Ver ficha</button>}</div>
           <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
-          <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Insertar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
+          {windowOpen ? (
+            <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Insertar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
+          ) : (
+            <div className="wa__compose"><span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Para reabrir la conversación tendrás que enviar una plantilla (próximamente).</span></div>
+          )}
         </> : <div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div>}
       </div>
       {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} onUse={conv?(body)=>{setTxt(body);setShowTpl(false);}:null} toast={toast}/>}
