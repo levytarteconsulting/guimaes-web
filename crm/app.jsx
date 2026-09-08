@@ -1,3 +1,5 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
 
@@ -1626,4 +1628,6 @@ function App(){
     <Toast msg={toast}/>
   </>;
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+export function mountApp(){
+  ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+}

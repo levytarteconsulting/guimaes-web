@@ -1,3 +1,4 @@
+import React from "react";
 /* GUIMAES CRM — Primitivas de UI + iconos */
 const { useState, useMemo, useRef, useEffect } = React;
 
