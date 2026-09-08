@@ -472,7 +472,11 @@ function ContactDetail({id, nav, toast}){
           {tab==="deals" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Deal</th><th>Servicio</th><th>Etapa</th><th>Importe</th><th>Owner</th><th></th></tr></thead><tbody>{deals.map(d=><tr key={d.id} onClick={()=>nav("deal",d.id)}><td className="tbl__name">{d.title}</td><td><ServiceBadge id={d.service}/></td><td><StageBadge id={d.stage}/></td><td className="mono">{CRM.fmtEUR(d.amount)} <span className="muted" style={{fontSize:11}}>/{d.frequency}</span></td><td>{ownerAvatar(d.owner)}</td><td onClick={e=>e.stopPropagation()}><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={()=>deleteDeal(d.id,d.title)}><Icon name="trash" size={14}/></button></td></tr>)}</tbody></table>{deals.length===0&&<Empty icon="briefcase" title="Sin deals"/>}</div>}
           {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Escribe una nota…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir nota</button><div style={{marginTop:18}}>{notes.map(n=><div key={n.id} style={{marginBottom:14}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}</div></div></div>}
           {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length? tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>) : <Empty icon="task" title="Sin tareas"/>}</div></div>}
-          {tab==="whatsapp" && <div className="card"><div className="card__body">{wa.length? wa[0].messages.map((m,i)=><div key={i} className={"bubble "+(m.dir)} style={{marginBottom:8,maxWidth:"70%"}}>{m.body}<div className="bubble__t">{m.t}</div></div>) : <Empty icon="whatsapp" title="Sin conversación de WhatsApp"/>}</div></div>}
+          {tab==="whatsapp" && (
+            !c.phone ? <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Hace falta un teléfono" sub="Añade un número de teléfono a la ficha de este contacto para poder usar WhatsApp."/></div></div>
+            : wa.length ? <div className="card wa-thread-panel"><WaThread conv={wa[0]} toast={toast} onConvChange={updated=>{ Object.assign(wa[0], updated); bump(); }}/></div>
+            : <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Sin conversación de WhatsApp" sub="Todavía no le has escrito a este contacto por WhatsApp." action={<button className="btn btn--sm btn--primary" onClick={()=>setShowStartWa(true)}><Icon name="whatsapp" size={15}/>Iniciar conversación</button>}/></div></div>
+          )}
           {tab==="correos" && <div className="wrap-gap">{emails.length? emails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
           {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Tamaño</th><th>Visible cliente</th><th>Fecha</th></tr></thead><tbody>{docs.map(d=><tr key={d.id}><td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{d.size}</td><td>{d.visible? <Badge label="Compartido" color="#1F9D6B"/> : <span className="muted">No</span>}</td><td className="tbl__sub">{d.at}</td></tr>)}</tbody></table>{docs.length===0&&<Empty icon="documents" title="Sin documentos"/>}</div>}
           {tab==="actividad" && <div className="card"><div className="card__body"><div className="tl">{acts.map((a,i)=><div key={i} className="tl-item"><div className="tl-item__ico"><Icon name={a.type==="call"?"phone":a.type==="note"?"note":a.type==="email"?"mail":a.type==="doc"?"documents":a.type==="stage"?"pipeline":"contacts"} size={11}/></div><div className="tl-item__head">{a.text}</div><div className="tl-item__meta">{a.who?CRM.userById(a.who)?.name+" · ":""}{a.at}</div></div>)}</div></div></div>}
@@ -1026,19 +1030,27 @@ function isWaWindowOpen(conv){
   if(isNaN(t)) return false;
   return (Date.now()-t) < WA_WINDOW_MS;
 }
-function WhatsApp({nav, toast, focusId}){
-  const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
-  const [filter,setFilter]=uState("active");
-  const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
-  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [showStart,setShowStart]=uState(false); const [sending,setSending]=uState(false);
-  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
-  const conv = convs.find(w=>w.id===active);
-  const c = conv && (CRM.contactById[conv.contact] || waFallbackContact(conv));
+// Hilo de WhatsApp reutilizable (mensajes + composer + ventana de 24h +
+// plantillas). Lo usan tanto la vista general de WhatsApp, con la conversación
+// activa de la lista, como la pestaña "WhatsApp" de la ficha de contacto, de
+// forma standalone. La lista de conversaciones (filtro, selección, no
+// leídos) es responsabilidad de cada caller — este componente solo conoce la
+// conversación concreta que le pasan (nunca null).
+// `live`: si es true (por defecto), se suscribe él mismo a los mensajes
+// entrantes por Realtime. Pásalo a false cuando el caller ya tiene su propia
+// suscripción para toda la lista (la vista general de WhatsApp), para no
+// procesar el mismo mensaje dos veces.
+function WaThread({conv, toast, onConvChange, onViewContact, live=true}){
+  const c = CRM.contactById[conv.contact] || waFallbackContact(conv);
   const windowOpen = isWaWindowOpen(conv);
-  const activeRef = uRef(active);
-  uEffect(()=>{ activeRef.current = active; },[active]);
+  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
+  const convRef = uRef(conv);
+  uEffect(()=>{ convRef.current = conv; },[conv]);
+  const onConvChangeRef = uRef(onConvChange);
+  uEffect(()=>{ onConvChangeRef.current = onConvChange; });
+
   const send=async ()=>{
-    if(!txt.trim()||!conv||sending||!windowOpen) return;
+    if(!txt.trim()||sending||!windowOpen) return;
     const to = conv.wa_id || conv.phone;
     if(!to){ toast("Esta conversación no tiene un número de WhatsApp asociado."); return; }
     const body = txt.trim();
@@ -1049,7 +1061,7 @@ function WhatsApp({nav, toast, focusId}){
       if(res.data && res.data.error){ toast(res.data.message || res.data.error); return; }
       const saved = res.data && res.data.message;
       const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", t:"Ahora", body};
-      setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,msg],updated:msg.t}:w));
+      onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,msg], updated:msg.t});
       setTxt("");
     }catch(e){
       toast("No se pudo enviar el mensaje: "+(e && e.message ? e.message : String(e)));
@@ -1057,13 +1069,62 @@ function WhatsApp({nav, toast, focusId}){
       setSending(false);
     }
   };
-  const toggleArchive=(id,e)=>{
+
+  // Realtime: mensajes entrantes nuevos de ESTA conversación se añaden al hilo
+  // en caliente y reabren la ventana de 24h (last_customer_message_at).
+  uEffect(()=>{
+    if(!live || !Auth.client || !CRM.subscribeWhatsapp) return;
+    const channel = CRM.subscribeWhatsapp(Auth.client, (row)=>{
+      if(row.direction!=="in" || row.conversation_id!==convRef.current.id) return;
+      const msg = CRM.rowToWhatsappMessage(row);
+      const prev = convRef.current;
+      onConvChangeRef.current({...prev, messages:[...prev.messages,msg], updated:msg.t, last_customer_message_at: row.created_at});
+    });
+    return ()=>{ if(channel) Auth.client.removeChannel(channel); };
+  },[live, conv.id]);
+
+  return (
+    <div className="wa__thread">
+      <div className="wa__thread__head">
+        <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
+        <div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>
+        <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
+        {onViewContact && <button className="btn btn--sm btn--ghost" onClick={onViewContact}>Ver ficha</button>}
+      </div>
+      <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
+      {windowOpen ? (
+        <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
+      ) : (
+        <div className="wa__compose" style={{justifyContent:"space-between"}}>
+          <span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Necesitas que el cliente responda para volver a escribir texto libre — mientras tanto puedes enviarle una plantilla aprobada.</span>
+          <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
+        </div>
+      )}
+      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message], updated:message.t}); }} toast={toast}/>}
+    </div>
+  );
+}
+function WhatsApp({nav, toast, focusId}){
+  const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
+  const [filter,setFilter]=uState("active");
+  const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
+  const [showStart,setShowStart]=uState(false);
+  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
+  const conv = convs.find(w=>w.id===active);
+  const activeRef = uRef(active);
+  uEffect(()=>{ activeRef.current = active; },[active]);
+  const toggleArchive=async(id,e)=>{
     e.stopPropagation();
-    const w=convs.find(x=>x.id===id); const newVal=!w.archived;
-    CRM.setArchived(id,newVal);
-    setConvs(cs=>cs.map(x=>x.id===id?{...x,archived:newVal}:x));
-    toast(newVal?"Conversación archivada":"Conversación restaurada");
-    if(active===id) setActive(null);
+    const w=convs.find(x=>x.id===id); if(!w) return;
+    const newVal=!w.archived;
+    try{
+      await CRM.setArchived(Auth.client, id, newVal);
+      setConvs(cs=>cs.map(x=>x.id===id?{...x,archived:newVal}:x));
+      toast(newVal?"Conversación archivada":"Conversación restaurada");
+      if(active===id) setActive(null);
+    }catch(e){
+      toast("No se pudo "+(newVal?"archivar":"restaurar")+" la conversación: "+(e && e.message ? e.message : String(e)));
+    }
   };
   uEffect(()=>{
     if(!visible.find(w=>w.id===active)) setActive(visible[0]?.id || null);
@@ -1084,8 +1145,11 @@ function WhatsApp({nav, toast, focusId}){
       setActive(conv.id);
     })();
   },[focusId]);
-  // Realtime: mensajes entrantes nuevos se añaden al hilo en caliente. Si la
-  // conversación no está abierta, solo sube el contador de no leídos.
+  // Realtime: mensajes entrantes nuevos se añaden a la conversación que les
+  // corresponde (para la vista previa en la lista). Si es la conversación
+  // abierta, <WaThread> ya se encarga de sí mismo (ver prop live=false más
+  // abajo), pero igualmente actualizamos aquí su vista previa/hora en la
+  // lista; solo el contador de no leídos distingue abierta vs. no abierta.
   uEffect(()=>{
     if(!Auth.client || !CRM.subscribeWhatsapp) return;
     const channel = CRM.subscribeWhatsapp(Auth.client, (row)=>{
@@ -1095,7 +1159,7 @@ function WhatsApp({nav, toast, focusId}){
         const idx = cs.findIndex(w=>w.id===row.conversation_id);
         if(idx===-1) return cs; // conversación nueva no cargada aún: aparecerá al recargar
         const isOpen = activeRef.current===row.conversation_id;
-        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], updated:msg.t, unread: isOpen ? w.unread : w.unread+1});
+        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], updated:msg.t, last_customer_message_at: row.created_at, unread: isOpen ? w.unread : w.unread+1});
       });
     });
     return ()=>{ if(channel) Auth.client.removeChannel(channel); };
@@ -1103,11 +1167,12 @@ function WhatsApp({nav, toast, focusId}){
   return (
     <div className="wa">
       <div className="wa__list">
+        <div className="wa__list__head">
+          <button className="btn btn--sm btn--primary" onClick={()=>setShowStart(true)}><Icon name="plus" size={15}/>Nueva conversación</button>
+        </div>
         <div className="wa__tabs">
           <button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>Activas</button>
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
-          <button className="wa__tpl-btn" onClick={()=>setShowStart(true)} title="Nueva conversación"><Icon name="plus" size={15}/>Nueva conversación</button>
-          {conv && <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>}
         </div>
         {visible.map(w=>{ const cc=CRM.contactById[w.contact] || waFallbackContact(w); const last=w.messages[w.messages.length-1];
           return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
@@ -1119,21 +1184,10 @@ function WhatsApp({nav, toast, focusId}){
         })}
         {visible.length===0 && <div className="muted" style={{padding:"24px 16px",fontSize:13,textAlign:"center"}}>{filter==="active"?"Sin conversaciones activas.":"No hay conversaciones archivadas."}</div>}
       </div>
-      <div className="wa__thread">
-        {conv ? <>
-          <div className="wa__thread__head"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>{conv.contact && <button className="btn btn--sm btn--ghost right" onClick={()=>nav("contact",c.id)}>Ver ficha</button>}</div>
-          <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
-          {windowOpen ? (
-            <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
-          ) : (
-            <div className="wa__compose" style={{justifyContent:"space-between"}}>
-              <span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Necesitas que el cliente responda para volver a escribir texto libre — mientras tanto puedes enviarle una plantilla aprobada.</span>
-              <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
-            </div>
-          )}
-        </> : <div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div>}
-      </div>
-      {showTpl && conv && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,message],updated:message.t}:w)); }} toast={toast}/>}
+      {conv ? <WaThread conv={conv} toast={toast} live={false}
+        onConvChange={updated=>setConvs(cs=>cs.map(w=>w.id===updated.id?updated:w))}
+        onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}/>
+      : <div className="wa__thread"><div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div></div>}
       {showStart && <StartWhatsappModal onClose={()=>setShowStart(false)} nav={nav} toast={toast}/>}
     </div>
   );

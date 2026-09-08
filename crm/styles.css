@@ -234,6 +234,7 @@ textarea.inp{resize:vertical;min-height:80px;}
 /* ---------------- WhatsApp ---------------- */
 .wa{display:grid;grid-template-columns:320px 1fr;height:calc(100vh - var(--topbar));}
 .wa__list{border-right:1px solid var(--line);background:var(--paper);overflow-y:auto;}
+.wa__list__head{display:flex;justify-content:flex-end;padding:12px 12px 0;}
 .wa__conv{display:flex;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
 .wa__conv:hover{background:var(--mist);}
 .wa__conv.active{background:var(--accent-soft);}
@@ -258,6 +259,9 @@ textarea.inp{resize:vertical;min-height:80px;}
 .wa__tpl-btn{margin-left:auto!important;display:flex;align-items:center;gap:6px;color:var(--accent)!important;}
 .wa__archive{margin-left:2px;color:var(--muted);padding:6px;border-radius:8px;flex:none;}
 .wa__archive:hover{background:var(--mist-2);color:var(--ink);}
+/* <WaThread> embebido en una tarjeta (p. ej. ficha de contacto) en vez de a pantalla completa */
+.wa-thread-panel{height:560px;display:flex;flex-direction:column;overflow:hidden;}
+.wa-thread-panel .wa__thread{flex:1;min-height:0;}
 
 /* ---------------- Inbox ---------------- */
 .inbox{display:grid;grid-template-columns:220px 340px 1fr;height:calc(100vh - var(--topbar));min-width:0;}

@@ -275,9 +275,14 @@
     }catch(e){ if(window.console) console.error("loadWaTemplates:", e); return 0; }
   }
 
-  // ---- Mutations (prototipo: en memoria) ----
-  function setArchived(id, val){
+  // Archiva/desarchiva una conversación de WhatsApp (persiste en Supabase)
+  async function setArchived(client, id, val){
     var w = WHATSAPP.find(function(x){return x.id===id;});
+    if(client){
+      var res = await client.from("whatsapp_conversations").update({archived: val}).eq("id", id).select();
+      if(res.error) throw res.error;
+      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
+    }
     if(w) w.archived = val;
     return w;
   }
