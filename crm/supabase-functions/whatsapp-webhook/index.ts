@@ -120,9 +120,38 @@ async function handleIncomingMessage(supabase: any, message: any) {
 // (mismos valores que delivery_status, se guardan tal cual — sin traducción)
 async function handleStatusUpdate(supabase: any, status: any) {
   if (!status.id || !status.status) return;
+
+  if (status.status === "failed") {
+    console.error("whatsapp-webhook: envío fallido", { wa_message_id: status.id, errors: status.errors ?? null });
+  }
+
+  const update: Record<string, unknown> = { delivery_status: status.status };
+
+  // statuses[].errors[]: { code, title, message, href, error_data: { details } }
+  const firstError = Array.isArray(status.errors) ? status.errors[0] : undefined;
+  if (firstError) {
+    const { data: existing, error: selectErr } = await supabase
+      .from("whatsapp_messages")
+      .select("meta")
+      .eq("wa_message_id", status.id)
+      .maybeSingle();
+    if (selectErr) throw selectErr;
+
+    update.meta = {
+      ...(existing?.meta ?? {}),
+      delivery_error: {
+        code: firstError.code ?? null,
+        title: firstError.title ?? null,
+        message: firstError.message ?? null,
+        details: firstError.error_data?.details ?? null,
+        at: new Date().toISOString(),
+      },
+    };
+  }
+
   const { error } = await supabase
     .from("whatsapp_messages")
-    .update({ delivery_status: status.status })
+    .update(update)
     .eq("wa_message_id", status.id);
   if (error) throw error;
 }
