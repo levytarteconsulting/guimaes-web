@@ -61,6 +61,35 @@ function fillBodyText(bodyText: string, variables: string[]): string {
   });
 }
 
+// Normaliza un teléfono para WhatsApp: quita espacios/guiones/puntos/paréntesis
+// y reconoce '+', '00' (prefijo internacional), código de país español pegado
+// sin '+'/'00' (34 + móvil de 9 dígitos) y móviles españoles de 9 dígitos sin
+// prefijo (6/7/8 inicial). Devuelve null si no reconoce el formato — en ese
+// caso hay que corregir el teléfono a mano en la ficha del contacto.
+function normalizePhone(raw: string | null | undefined): { phone: string; waId: string } | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[\s\-.()]/g, "");
+
+  if (cleaned.startsWith("+")) {
+    const waId = cleaned.slice(1);
+    return /^\d+$/.test(waId) ? { phone: `+${waId}`, waId } : null;
+  }
+  if (cleaned.startsWith("00")) {
+    const waId = cleaned.slice(2);
+    return /^\d+$/.test(waId) ? { phone: `+${waId}`, waId } : null;
+  }
+  // 11 dígitos exactos, "34" + móvil de 9 dígitos (6/7/8 inicial) — sin el
+  // dígito 6/7/8 aquí, cualquier número de 11 dígitos de otro país que
+  // empezara por "34" (p. ej. un fijo francés) se colaría como español.
+  if (/^34[678]\d{8}$/.test(cleaned)) {
+    return { phone: `+${cleaned}`, waId: cleaned };
+  }
+  if (/^[678]\d{8}$/.test(cleaned)) {
+    return { phone: `+34${cleaned}`, waId: `34${cleaned}` };
+  }
+  return null;
+}
+
 // Devuelve null si la plantilla es enviable, o un motivo en castellano si no.
 // Solo se soportan plantillas POSITIONAL, sin CAROUSEL, con HEADER de texto
 // estático (si lo hay) y sin botones de URL dinámica — todo lo demás se
@@ -120,21 +149,29 @@ Deno.serve(async (req) => {
     // type ausente o 'text' => comportamiento idéntico al de antes de plantillas.
     // El "to" del body, si llega, se ignora — el destino real se lee de la
     // conversación en BD (ver más abajo), nunca de lo que mande el cliente.
+    // contact_id es la alternativa a conversation_id para INICIAR una
+    // conversación con un contacto que aún no ha escrito nunca.
     const requestBody = await req.json();
-    const { conversation_id, text, template } = requestBody;
+    const { conversation_id, contact_id, text, template } = requestBody;
     const type: "text" | "template" = requestBody.type === "template" ? "template" : "text";
 
+    if (!conversation_id && !contact_id) {
+      return new Response(
+        JSON.stringify({ error: "Faltan campos obligatorios: conversation_id o contact_id." }),
+        { status: 400, headers: corsHeaders },
+      );
+    }
     if (type === "text") {
-      if (!conversation_id || !text) {
+      if (!text) {
         return new Response(
-          JSON.stringify({ error: "Faltan campos obligatorios: conversation_id, text." }),
+          JSON.stringify({ error: "Falta el campo obligatorio: text." }),
           { status: 400, headers: corsHeaders },
         );
       }
     } else {
-      if (!conversation_id || !template?.name || !template?.language) {
+      if (!template?.name || !template?.language) {
         return new Response(
-          JSON.stringify({ error: "Faltan campos obligatorios: conversation_id, template.name, template.language." }),
+          JSON.stringify({ error: "Faltan campos obligatorios: template.name, template.language." }),
           { status: 400, headers: corsHeaders },
         );
       }
@@ -142,17 +179,80 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(url, serviceKey);
 
-    const { data: conversation, error: convErr } = await supabase
-      .from("whatsapp_conversations")
-      .select("last_customer_message_at, phone")
-      .eq("id", conversation_id)
-      .maybeSingle();
-    if (convErr) throw convErr;
-    if (!conversation) {
-      return new Response(
-        JSON.stringify({ error: "conversacion_no_encontrada", message: "La conversación no existe." }),
-        { status: 404, headers: corsHeaders },
-      );
+    // ---- Resolver la conversación: por conversation_id (caso normal) o por
+    // contact_id (iniciar una conversación nueva con ese contacto) ----
+    let conversation: { id: string; phone: string | null; last_customer_message_at: string | null };
+
+    if (conversation_id) {
+      const { data, error: convErr } = await supabase
+        .from("whatsapp_conversations")
+        .select("id, phone, last_customer_message_at")
+        .eq("id", conversation_id)
+        .maybeSingle();
+      if (convErr) throw convErr;
+      if (!data) {
+        return new Response(
+          JSON.stringify({ error: "conversacion_no_encontrada", message: "La conversación no existe." }),
+          { status: 404, headers: corsHeaders },
+        );
+      }
+      conversation = data;
+    } else {
+      const { data: contact, error: contactErr } = await supabase
+        .from("contactos")
+        .select("id, phone")
+        .eq("id", contact_id)
+        .maybeSingle();
+      if (contactErr) throw contactErr;
+      if (!contact) {
+        return new Response(
+          JSON.stringify({ error: "contacto_no_encontrado", message: "El contacto no existe." }),
+          { status: 404, headers: corsHeaders },
+        );
+      }
+
+      const normalized = normalizePhone(contact.phone);
+      if (!normalized) {
+        return new Response(
+          JSON.stringify({
+            error: "telefono_no_valido",
+            message: `El teléfono del contacto (${contact.phone ? `"${contact.phone}"` : "no tiene teléfono guardado"}) no es válido para WhatsApp. Corrígelo en la ficha del contacto.`,
+          }),
+          { status: 422, headers: corsHeaders },
+        );
+      }
+
+      const { data: existing, error: existingErr } = await supabase
+        .from("whatsapp_conversations")
+        .select("id, phone, last_customer_message_at")
+        .eq("wa_id", normalized.waId)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+
+      if (existing) {
+        conversation = existing;
+      } else {
+        // Sin conversación previa: iniciar solo puede hacerse con una
+        // plantilla — no hay ventana de 24h que abrir con texto libre.
+        if (type !== "template") {
+          return new Response(
+            JSON.stringify({
+              error: "ventana_cerrada",
+              message: "Para iniciar una conversación con este contacto necesitas enviar una plantilla aprobada.",
+            }),
+            { status: 409, headers: corsHeaders },
+          );
+        }
+        // NO se rellena last_customer_message_at: el cliente aún no ha
+        // escrito, la ventana sigue cerrada aunque acabemos de crear la fila.
+        const { data: created, error: createErr } = await supabase
+          .from("whatsapp_conversations")
+          .insert({ contact_id: contact.id, phone: normalized.phone, wa_id: normalized.waId })
+          .select("id, phone, last_customer_message_at")
+          .single();
+        if (createErr) throw createErr;
+        conversation = created;
+      }
     }
 
     const to = conversation.phone;
@@ -317,7 +417,7 @@ Deno.serve(async (req) => {
     const { data: saved, error: insertErr } = await supabase
       .from("whatsapp_messages")
       .insert({
-        conversation_id,
+        conversation_id: conversation.id,
         direction: "out",
         type: messageType,
         body: messageBody,
@@ -333,12 +433,15 @@ Deno.serve(async (req) => {
       // igualmente al CRM para que el agente sepa que el envío sí ocurrió.
       console.error("whatsapp-send: mensaje enviado pero no se pudo guardar", insertErr);
       return new Response(
-        JSON.stringify({ error: "El mensaje se envió pero no se pudo guardar en el CRM.", wa_message_id: waMessageId }),
+        JSON.stringify({ error: "El mensaje se envió pero no se pudo guardar en el CRM.", wa_message_id: waMessageId, conversation_id: conversation.id }),
         { status: 500, headers: corsHeaders },
       );
     }
 
-    return new Response(JSON.stringify({ ok: true, message: saved }), { status: 200, headers: corsHeaders });
+    return new Response(
+      JSON.stringify({ ok: true, message: saved, conversation_id: conversation.id }),
+      { status: 200, headers: corsHeaders },
+    );
   } catch (e) {
     console.error("whatsapp-send: fallo inesperado", e);
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: corsHeaders });

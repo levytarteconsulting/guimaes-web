@@ -373,6 +373,7 @@ function ContactDetail({id, nav, toast}){
   const [showNewDeal,setShowNewDeal]=uState(false);
   const [converting,setConverting]=uState(false);
   const [showNewTask,setShowNewTask]=uState(false);
+  const [showStartWa,setShowStartWa]=uState(false);
   const [editingTask,setEditingTask]=uState(null);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
   const toggleTask=async(t)=>{
@@ -448,7 +449,7 @@ function ContactDetail({id, nav, toast}){
             </div>
             <div className="row" style={{gap:8,marginTop:14}}>
               <button className="btn btn--sm btn--primary" style={{flex:1}} onClick={()=>toast("Abriendo llamada…")}><Icon name="phone" size={15}/>Llamar</button>
-              <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>nav("whatsapp")}><Icon name="whatsapp" size={15}/>WhatsApp</button>
+              <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>setShowStartWa(true)}><Icon name="whatsapp" size={15}/>WhatsApp</button>
             </div>
             {isLead && <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:8}} onClick={doConvert} disabled={converting}><Icon name="refresh" size={15}/>{converting?"Convirtiendo…":"Convertir en contacto"}</button>}
             <div className="row" style={{gap:8,marginTop:8}}>
@@ -513,6 +514,7 @@ function ContactDetail({id, nav, toast}){
           throw e;
         }
       }}/>}
+      {showStartWa && <StartWhatsappModal onClose={()=>setShowStartWa(false)} initialContact={c} nav={nav} toast={toast}/>}
       {editingTask && <EditTask task={editingTask} onClose={()=>setEditingTask(null)} onSave={async(f)=>{
         try{
           await CRM.updateTask(Auth.client, editingTask.id, {title:f.title, due_at:f.due||null, assigned_to:f.owner, contact_id:f.contact||null, deal_id:f.deal||null});
@@ -1024,11 +1026,11 @@ function isWaWindowOpen(conv){
   if(isNaN(t)) return false;
   return (Date.now()-t) < WA_WINDOW_MS;
 }
-function WhatsApp({nav, toast}){
+function WhatsApp({nav, toast, focusId}){
   const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
   const [filter,setFilter]=uState("active");
   const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
-  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
+  const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [showStart,setShowStart]=uState(false); const [sending,setSending]=uState(false);
   const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
   const conv = convs.find(w=>w.id===active);
   const c = conv && (CRM.contactById[conv.contact] || waFallbackContact(conv));
@@ -1066,6 +1068,22 @@ function WhatsApp({nav, toast}){
   uEffect(()=>{
     if(!visible.find(w=>w.id===active)) setActive(visible[0]?.id || null);
   },[filter]);
+  // Enfocar una conversación por id al llegar desde fuera (p. ej. "Nueva
+  // conversación" o el botón de WhatsApp en la ficha de contacto). Si aún no
+  // está cargada en esta sesión (se acaba de crear), se trae de Supabase.
+  uEffect(()=>{
+    if(!focusId) return;
+    const existing = convs.find(w=>w.id===focusId);
+    if(existing){ setFilter(existing.archived?"archived":"active"); setActive(focusId); return; }
+    if(!Auth.client || !CRM.loadWhatsappConversationById) return;
+    (async ()=>{
+      const conv = await CRM.loadWhatsappConversationById(Auth.client, focusId);
+      if(!conv) return;
+      setConvs(cs=>[{...conv, messages:[...conv.messages]}, ...cs]);
+      setFilter(conv.archived?"archived":"active");
+      setActive(conv.id);
+    })();
+  },[focusId]);
   // Realtime: mensajes entrantes nuevos se añaden al hilo en caliente. Si la
   // conversación no está abierta, solo sube el contador de no leídos.
   uEffect(()=>{
@@ -1088,7 +1106,8 @@ function WhatsApp({nav, toast}){
         <div className="wa__tabs">
           <button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>Activas</button>
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
-          <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
+          <button className="wa__tpl-btn" onClick={()=>setShowStart(true)} title="Nueva conversación"><Icon name="plus" size={15}/>Nueva conversación</button>
+          {conv && <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>}
         </div>
         {visible.map(w=>{ const cc=CRM.contactById[w.contact] || waFallbackContact(w); const last=w.messages[w.messages.length-1];
           return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
@@ -1114,11 +1133,12 @@ function WhatsApp({nav, toast}){
           )}
         </> : <div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div>}
       </div>
-      {showTpl && conv && <TemplatesModal onClose={()=>setShowTpl(false)} conv={conv} onSent={(msg)=>{setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,msg],updated:msg.t}:w));}} toast={toast}/>}
+      {showTpl && conv && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) setConvs(cs=>cs.map(w=>w.id===conv.id?{...w,messages:[...w.messages,message],updated:message.t}:w)); }} toast={toast}/>}
+      {showStart && <StartWhatsappModal onClose={()=>setShowStart(false)} nav={nav} toast={toast}/>}
     </div>
   );
 }
-function TemplatesModal({onClose, conv, onSent, toast}){
+function TemplatesModal({onClose, conversationId, contactId, onSent, toast}){
   const [templates,setTemplates]=uState(()=>[...CRM.WA_TEMPLATES]);
   const [importing,setImporting]=uState(false);
   const [selected,setSelected]=uState(null); // plantilla elegida en el paso 2, con bodyText/count precalculados
@@ -1157,16 +1177,16 @@ function TemplatesModal({onClose, conv, onSent, toast}){
   const canSend = !!selected && !sending && (selected.count===0 || values.every(v=>v && v.trim()));
 
   const sendTemplate = async ()=>{
-    if(!canSend || !conv) return;
+    if(!canSend || (!conversationId && !contactId)) return;
     setSending(true);
     try{
-      const res = await Auth.client.functions.invoke("whatsapp-send", {
-        body: { conversation_id: conv.id, type: "template", template: { name: selected.name, language: selected.lang, variables: values } },
-      });
+      const body = { type: "template", template: { name: selected.name, language: selected.lang, variables: values } };
+      if(conversationId) body.conversation_id = conversationId; else body.contact_id = contactId;
+      const res = await Auth.client.functions.invoke("whatsapp-send", { body });
       if(res.error){ toast(res.error.message || "No se pudo enviar la plantilla."); return; }
       if(res.data && res.data.error){ toast(res.data.message || res.data.error); return; }
       const saved = res.data && res.data.message;
-      if(saved && onSent) onSent(CRM.rowToWhatsappMessage(saved));
+      if(onSent) onSent({ message: saved ? CRM.rowToWhatsappMessage(saved) : null, conversationId: res.data && res.data.conversation_id });
       onClose();
     }catch(e){
       toast("No se pudo enviar la plantilla: "+(e && e.message ? e.message : String(e)));
@@ -1212,6 +1232,45 @@ function TemplatesModal({onClose, conv, onSent, toast}){
       })}
     </div>
   </Modal>;
+}
+// Iniciar una conversación de WhatsApp con un contacto que todavía no ha
+// escrito nunca. Sin conversación previa la ventana de 24h está cerrada por
+// definición, así que este flujo va siempre a plantilla (reutiliza
+// TemplatesModal en vez de duplicar el paso de elegir plantilla/variables).
+function StartWhatsappModal({onClose, initialContact, nav, toast}){
+  const [contact,setContact]=uState(initialContact||null);
+  const [q,setQ]=uState("");
+
+  if(!contact){
+    const query = q.trim().toLowerCase();
+    const list = CRM.CONTACTS.filter(c=>{
+      if(!query) return true;
+      return (c.company||"").toLowerCase().includes(query) || (c.full_name||"").toLowerCase().includes(query) || (c.phone||"").includes(query);
+    });
+    return <Modal title="Nueva conversación de WhatsApp" onClose={onClose} footer={<button className="btn btn--ghost" onClick={onClose}>Cancelar</button>}>
+      <div className="searchbox" style={{marginBottom:14}}><Icon name="search" size={16}/><input placeholder="Buscar contacto por empresa, persona o teléfono…" value={q} onChange={e=>setQ(e.target.value)} autoFocus/></div>
+      <div className="wrap-gap" style={{gap:8,maxHeight:360,overflowY:"auto"}}>
+        {list.map(c=>{
+          const hasPhone = !!c.phone;
+          return <div key={c.id} className="card" style={hasPhone?{cursor:"pointer"}:{opacity:0.5}} onClick={()=>{ if(hasPhone) setContact(c); }}>
+            <div className="card__body" style={{padding:12,display:"flex",alignItems:"center",gap:10}}>
+              <Avatar name={c.company} size="sm" color={CRM.colorFor(c.company)}/>
+              <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13.5}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name}</div></div>
+              {hasPhone ? <span className="muted" style={{fontSize:12.5}}>{c.phone}</span> : <span style={{fontSize:12,color:"var(--danger)"}}>Sin teléfono</span>}
+            </div>
+          </div>;
+        })}
+        {list.length===0 && <div className="muted" style={{padding:"20px 0",textAlign:"center",fontSize:13}}>Sin resultados.</div>}
+      </div>
+    </Modal>;
+  }
+
+  return <TemplatesModal
+    onClose={onClose}
+    contactId={contact.id}
+    onSent={({conversationId})=>{ if(conversationId) nav("whatsapp", conversationId); }}
+    toast={toast}
+  />;
 }
 
 /* ============ BANDEJA DE ENTRADA (Gmail) ============ */
@@ -1614,7 +1673,7 @@ function App(){
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
   else if(view.name==="tareas") screen=<Tasks nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
-  else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast}/>;
+  else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;
   else if(view.name==="documents") screen=<Documents toast={fireToast}/>;
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;

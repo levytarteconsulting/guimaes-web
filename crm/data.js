@@ -147,6 +147,22 @@
       return n;
     }catch(e){ if(window.console) console.error("loadWhatsapp:", e); return 0; }
   }
+  // Carga UNA conversación (+ sus mensajes) por id y la añade a WHATSAPP si no
+  // estaba ya — para cuando se acaba de crear (iniciar conversación) o se
+  // navega directo a ella y todavía no se ha cargado en esta sesión.
+  async function loadWhatsappConversationById(client, id){
+    if(!client || !id) return null;
+    try{
+      var convRes = await client.from("whatsapp_conversations").select("*").eq("id", id).maybeSingle();
+      if(convRes.error || !convRes.data) return null;
+      var msgRes = await client.from("whatsapp_messages").select("*").eq("conversation_id", id).order("created_at",{ascending:true});
+      var msgRows = (msgRes.error || !msgRes.data) ? [] : msgRes.data;
+      var conv = rowToWhatsappConversation(convRes.data);
+      conv.messages = msgRows.map(rowToWhatsappMessage);
+      if(!WHATSAPP.some(function(x){return x.id===conv.id;})) WHATSAPP.unshift(conv);
+      return conv;
+    }catch(e){ if(window.console) console.error("loadWhatsappConversationById:", e); return null; }
+  }
   // Suscripción Realtime a mensajes nuevos de WhatsApp (requiere que la tabla
   // whatsapp_messages esté añadida a la publicación "supabase_realtime" en Supabase —
   // Database → Replication — si no, el canal se conecta pero no llegan eventos).
@@ -780,6 +796,7 @@
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
+    loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
