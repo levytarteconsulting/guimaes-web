@@ -308,6 +308,14 @@ textarea.inp{resize:vertical;min-height:80px;}
 .inbox__reply{background:var(--paper);border-top:1px solid var(--line);padding:14px 22px;}
 .inbox__reply textarea{width:100%;min-height:70px;border:1px solid var(--line-strong);border-radius:10px;padding:10px 12px;outline:none;resize:vertical;}
 
+/* ---------------- Install prompt (PWA) ---------------- */
+.install-banner{background:var(--ink);color:#fff;display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:13.5px;flex-wrap:wrap;}
+.install-banner svg{flex:none;color:#fff;}
+.install-banner span{flex:1;min-width:200px;}
+.install-banner b{font-weight:700;}
+.install-banner__x{color:#fff;opacity:.75;padding:6px;border-radius:8px;flex:none;}
+.install-banner__x:hover{opacity:1;background:rgba(255,255,255,.12);}
+
 /* ---------------- Portal ---------------- */
 .portal{min-height:100vh;background:var(--mist);}
 .portal__nav{background:var(--paper);border-bottom:1px solid var(--line);height:64px;display:flex;align-items:center;padding:0 var(--gutter,32px);gap:16px;position:sticky;top:0;z-index:20;}

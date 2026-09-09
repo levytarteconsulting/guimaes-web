@@ -24,3 +24,7 @@ verify_jwt = true  # explícito: la llama el CRM autenticado, a diferencia del w
 [functions.whatsapp-sync-templates]
 entrypoint = "../supabase-functions/whatsapp-sync-templates/index.ts"
 verify_jwt = true  # explícito: la llama el CRM autenticado, igual que whatsapp-send
+
+[functions.push-send]
+entrypoint = "../supabase-functions/push-send/index.ts"
+verify_jwt = true  # bloquea peticiones sin ningún JWT válido; el propio código exige además que sea EXACTAMENTE la service_role key, no cualquier usuario autenticado

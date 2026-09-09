@@ -773,6 +773,29 @@
     return c;
   }
 
+  // ---- Notificaciones push (Web Push + VAPID, ver crm/supabase-push.sql) ----
+  // sub: el objeto que devuelve PushSubscription.toJSON() del navegador
+  // ({endpoint, keys:{p256dh, auth}}). onConflict (user_id, endpoint) hace que
+  // re-suscribirse desde el mismo dispositivo actualice la fila en vez de
+  // duplicarla.
+  async function savePushSubscription(client, userId, sub, deviceLabel){
+    var payload = {
+      user_id: userId,
+      endpoint: sub.endpoint,
+      p256dh: sub.keys.p256dh,
+      auth: sub.keys.auth,
+      device_label: deviceLabel || null,
+      last_seen_at: new Date().toISOString()
+    };
+    var res = await client.from("push_subscriptions").upsert(payload, {onConflict:"user_id,endpoint"}).select().single();
+    if(res.error) throw res.error;
+    return res.data;
+  }
+  async function removePushSubscription(client, endpoint){
+    var res = await client.from("push_subscriptions").delete().eq("endpoint", endpoint);
+    if(res.error) throw res.error;
+  }
+
   // ---- KPIs (dashboard) ----
   function computeKpis(deals){
     var active = deals.filter(function(d){return d.stage==="cliente_activo";});
@@ -803,6 +826,7 @@
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
+    savePushSubscription:savePushSubscription, removePushSubscription:removePushSubscription,
     MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
     addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
     setEmailArchived:setEmailArchived, linkEmail:linkEmail, addEmailReply:addEmailReply, addEmailThread:addEmailThread

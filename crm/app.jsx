@@ -1676,6 +1676,109 @@ function EditAutomation({rule, onClose, onSave}){
   </Modal>;
 }
 
+/* ============ NOTIFICACIONES PUSH (Config) ============ */
+// applicationServerKey debe ser un Uint8Array, no el string base64url que
+// da web-push generate-vapid-keys — conversión estándar del ecosistema.
+function urlBase64ToUint8Array(base64String){
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const out = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function describeDevice(){
+  const ua = navigator.userAgent;
+  if(/iPhone/.test(ua)) return "iPhone";
+  if(/iPad/.test(ua)) return "iPad";
+  if(/Android/.test(ua)) return "Android";
+  if(/Macintosh/.test(ua)) return "Mac";
+  if(/Windows/.test(ua)) return "Windows";
+  return "Este dispositivo";
+}
+function NotificationsSettings({toast}){
+  const supported = typeof Notification!=="undefined" && "serviceWorker" in navigator && "PushManager" in window;
+  const iosNotInstalled = isIosSafari() && !isStandaloneNow();
+  const [permission,setPermission]=uState(()=>supported?Notification.permission:"unsupported");
+  const [subscribed,setSubscribed]=uState(false);
+  const [checked,setChecked]=uState(false);
+  const [busy,setBusy]=uState(false);
+
+  uEffect(()=>{
+    if(!supported){ setChecked(true); return; }
+    (async()=>{
+      try{
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        setSubscribed(!!sub);
+      }catch(e){}
+      setChecked(true);
+    })();
+  },[]);
+
+  const activate=async()=>{
+    if(!supported || iosNotInstalled || busy) return;
+    setBusy(true);
+    try{
+      let perm = Notification.permission;
+      if(perm==="default") perm = await Notification.requestPermission(); // gesto del usuario: dentro del onClick, nunca al cargar
+      setPermission(perm);
+      if(perm!=="granted") return;
+
+      const vapidKey = window.PUSH_CONFIG && window.PUSH_CONFIG.vapidPublicKey;
+      if(!vapidKey || vapidKey.indexOf("REPLACE")===0){
+        toast("Falta configurar la clave pública VAPID en crm/config.js.");
+        return;
+      }
+
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: urlBase64ToUint8Array(vapidKey) });
+
+      const { data } = await Auth.client.auth.getSession();
+      const userId = data.session && data.session.user.id;
+      if(!userId) throw new Error("No se pudo identificar la sesión.");
+
+      await CRM.savePushSubscription(Auth.client, userId, sub.toJSON(), describeDevice());
+      setSubscribed(true);
+      toast("Notificaciones activadas en este dispositivo");
+    }catch(e){
+      toast("No se pudieron activar las notificaciones: "+(e && e.message ? e.message : String(e)));
+    }finally{
+      setBusy(false);
+    }
+  };
+
+  const deactivate=async()=>{
+    setBusy(true);
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        await CRM.removePushSubscription(Auth.client, sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+      toast("Notificaciones desactivadas en este dispositivo");
+    }catch(e){
+      toast("No se pudieron desactivar: "+(e && e.message ? e.message : String(e)));
+    }finally{
+      setBusy(false);
+    }
+  };
+
+  return <div className="card"><div className="card__body">
+    <div style={{fontWeight:700,fontFamily:"var(--display)",marginBottom:6}}>Notificaciones en este dispositivo</div>
+    <p className="muted" style={{fontSize:13,marginBottom:14,maxWidth:480}}>Avisos de leads nuevos y mensajes de WhatsApp entrantes, directamente en este móvil u ordenador.</p>
+    {!checked ? <p className="muted" style={{fontSize:13}}>Comprobando…</p>
+    : !supported ? <p className="muted" style={{fontSize:13}}>Este navegador no soporta notificaciones push.</p>
+    : iosNotInstalled ? <p className="muted" style={{fontSize:13}}>En iPhone/iPad, Safari no permite notificaciones push sin instalar la app: toca <b>Compartir</b> y luego <b>Añadir a pantalla de inicio</b>, y ábrela desde ahí antes de activarlas.</p>
+    : permission==="denied" ? <p className="muted" style={{fontSize:13}}>Bloqueaste las notificaciones para este sitio — no se puede volver a pedir el permiso desde aquí. Actívalas desde los ajustes del navegador (icono del candado o "Ajustes del sitio" junto a la barra de direcciones).</p>
+    : subscribed ? <div className="row" style={{gap:10}}><Badge label="Activadas" color="#1F9D6B"/><button className="btn btn--sm btn--ghost" onClick={deactivate} disabled={busy}>{busy?"Desactivando…":"Desactivar"}</button></div>
+    : <button className="btn btn--sm btn--primary" onClick={activate} disabled={busy}><Icon name="bell" size={15}/>{busy?"Activando…":"Activar notificaciones"}</button>}
+  </div></div>;
+}
+
 /* ============ CONFIG ============ */
 function Config({toast}){
   const [tab,setTab]=uState("servicios");
@@ -1690,7 +1793,7 @@ function Config({toast}){
     toast(error? ("Eliminado del CRM, pero aviso: "+error.message) : "Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
-    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"}]} active={tab} onChange={setTab}/>
+    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"notificaciones",label:"Notificaciones"}]} active={tab} onChange={setTab}/>
     {tab==="servicios" && <>
       <div className="toolbar"><div className="muted" style={{fontSize:13}}>Catálogo de servicios que ofrece el despacho. Puedes crear nuevos.</div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNewSvc(true)}><Icon name="plus" size={16}/>Nuevo servicio</button></div>
       <div className="svc-grid">{services.map(s=><div key={s.id} className="card"><div className="card__body"><div className="row" style={{gap:10}}><div className="lrow__ico" style={{background:s.color+"1A",color:s.color}}><Icon name="briefcase" size={18}/></div><div style={{flex:1}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{s.name}</div><div className="muted" style={{fontSize:12}}>{s.recurring?"Recurrente":"Puntual"} · {s.frequency}</div></div></div></div></div>)}</div>
@@ -1709,6 +1812,7 @@ function Config({toast}){
       </tbody></table></div>
       <p className="muted" style={{fontSize:12,marginTop:10}}>Al crear un administrador aquí se genera directamente su acceso real (email + contraseña temporal) en Supabase. Al eliminarlo, se revoca ese acceso.</p>
     </>}
+    {tab==="notificaciones" && <NotificationsSettings toast={toast}/>}
     {showNewSvc && <NewService onClose={()=>setNewSvc(false)} onSave={addService}/>}
     {showNewUser && <NewUser onClose={()=>setNewUser(false)} onSave={addUser}/>}
     {delUser && <Modal title="Eliminar administrador" onClose={()=>setDelUser(null)} footer={<><button className="btn btn--ghost" onClick={()=>setDelUser(null)}>Cancelar</button><button className="btn btn--danger" onClick={confirmRemoveUser}>Eliminar</button></>}>
@@ -1792,6 +1896,78 @@ function WebLeadDemo({onLead}){
   </>;
 }
 
+/* ============ INSTALL PROMPT (PWA) ============ */
+const INSTALL_DISMISS_KEY = "guimaes_crm_install_dismissed";
+function isStandaloneNow(){
+  return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone===true;
+}
+function isIosSafari(){
+  const ua = window.navigator.userAgent;
+  const isIos = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+  return isIos && isSafari;
+}
+// Aviso discreto de instalación — nunca a pantalla completa. En iOS Safari
+// (sin beforeinstallprompt) solo puede explicar el gesto manual; en
+// Android/Chrome ofrece el botón real vía beforeinstallprompt. No es un
+// estado nuevo del shell: se renderiza como un hijo más dentro de <Shell>
+// (ver App más abajo), así que empuja el contenido hacia abajo en vez de
+// superponerse — evita cualquier choque con el <Toast/>, que sí es fixed.
+function InstallPrompt(){
+  const [standalone,setStandalone]=uState(isStandaloneNow);
+  const [dismissed,setDismissed]=uState(()=>{
+    try{ return localStorage.getItem(INSTALL_DISMISS_KEY)==="1"; }catch(e){ return false; }
+  });
+  const [deferredPrompt,setDeferredPrompt]=uState(null);
+
+  uEffect(()=>{
+    const onBeforeInstall=(e)=>{ e.preventDefault(); setDeferredPrompt(e); };
+    const onInstalled=()=>{ setStandalone(true); setDeferredPrompt(null); };
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onInstalled);
+    return ()=>{
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  },[]);
+
+  const dismiss=()=>{
+    setDismissed(true);
+    try{ localStorage.setItem(INSTALL_DISMISS_KEY,"1"); }catch(e){}
+  };
+  const install=async()=>{
+    if(!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try{ await deferredPrompt.userChoice; }catch(e){}
+    setDeferredPrompt(null);
+  };
+
+  if(standalone || dismissed) return null;
+
+  if(deferredPrompt){
+    return (
+      <div className="install-banner">
+        <Icon name="download" size={16}/>
+        <span>Instala el CRM en este dispositivo para acceso rápido y notificaciones.</span>
+        <button className="btn btn--sm btn--primary" onClick={install}>Instalar</button>
+        <button className="install-banner__x" onClick={dismiss} aria-label="Cerrar aviso"><Icon name="x" size={14}/></button>
+      </div>
+    );
+  }
+
+  if(isIosSafari()){
+    return (
+      <div className="install-banner">
+        <Icon name="download" size={16}/>
+        <span>Instala el CRM: toca <b>Compartir</b> y luego <b>Añadir a pantalla de inicio</b>.</span>
+        <button className="install-banner__x" onClick={dismiss} aria-label="Cerrar aviso"><Icon name="x" size={14}/></button>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 /* ============ ROOT ============ */
 function App(){
   const [user,setUser]=uState(null); const [portal,setPortal]=uState(false);
@@ -1850,6 +2026,7 @@ function App(){
   const activeNav = {contact:"contacts", deal:"pipeline"}[view.name] || view.name;
   return <>
     <Shell user={user} view={activeNav} nav={nav} onLogout={logout} title={title} crumb={crumb}>
+      <InstallPrompt/>
       {flush ? screen : screen}
     </Shell>
     <Toast msg={toast}/>
