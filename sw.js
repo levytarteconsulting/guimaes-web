@@ -8,7 +8,7 @@
 // O crm/styles.css *** — eso basta para que el navegador detecte un SW nuevo,
 // lo instale, descargue el shell entero de cero y active el reemplazo sin
 // esperar a que se cierren las pestañas abiertas.
-const VERSION = "v3";
+const VERSION = "v4";
 
 const SHELL_CACHE = "guimaes-crm-shell-" + VERSION;
 const FONT_CACHE = "guimaes-crm-fonts"; // sin versión: las fuentes de Google no cambian con los despliegues del CRM
@@ -87,10 +87,13 @@ self.addEventListener("fetch", (event) => {
 
   // Shell: stale-while-revalidate — sirve de caché al instante si existe (evita
   // la pantalla en blanco offline) y refresca la caché en segundo plano para
-  // la siguiente carga.
+  // la siguiente carga. ignoreSearch: ahora que crm.html lleva estado en la
+  // query string (?view=...&id=...), Cache.match por defecto compara la URL
+  // completa y nunca encontraría la entrada cacheada de "/crm.html" a secas —
+  // hay que decirle explícitamente que ignore la query string al buscar.
   event.respondWith(
     caches.open(SHELL_CACHE).then((cache) =>
-      cache.match(req).then((cached) => {
+      cache.match(req, { ignoreSearch: true }).then((cached) => {
         const network = fetch(req)
           .then((res) => {
             cache.put(req, res.clone());

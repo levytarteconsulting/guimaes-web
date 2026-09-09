@@ -1968,10 +1968,44 @@ function InstallPrompt(){
   return null;
 }
 
+/* ============ ROUTING (History API, sin librerías) ============ */
+// El estado de navegación vive en la query string del mismo crm.html
+// (?view=whatsapp&id=123), nunca en el path ni en el hash:
+// - El sitio se sirve estático sin reescrituras en Vercel — un path nuevo
+//   tipo /crm/whatsapp/123 daría 404 al recargar, porque ese archivo no
+//   existe. La query string no tiene ese problema: Vercel sigue sirviendo
+//   crm.html tal cual, la query la lee solo el JS del cliente.
+// - El hash (#/whatsapp/123) choca con Supabase Auth, que YA usa el hash de
+//   la URL para el login con Google y para los enlaces de recuperación de
+//   contraseña (#access_token=...). Dos usos del hash a la vez es fuente
+//   garantizada de bugs.
+const ROUTABLE_VIEWS = ["home","contacts","contact","pipeline","deal","tareas","whatsapp","inbox","documents","automations","config"];
+function viewToSearch(name, id){
+  const params = new URLSearchParams();
+  params.set("view", name);
+  if(id) params.set("id", id);
+  return "?"+params.toString();
+}
+// Lee {portal, view} a partir de un search string ("?view=...&id=...").
+// Se reutiliza tanto al arrancar (window.location.search) como al recibir el
+// postMessage del service worker (con la URL del push, ver App más abajo).
+function parseViewFromSearch(search){
+  const params = new URLSearchParams(search);
+  const name = params.get("view");
+  const id = params.get("id");
+  if(name==="portal") return {portal:true, view:{name:"home", id:null}};
+  if(name && ROUTABLE_VIEWS.includes(name)) return {portal:false, view:{name, id:id||null}};
+  return {portal:false, view:{name:"home", id:null}};
+}
+
 /* ============ ROOT ============ */
 function App(){
-  const [user,setUser]=uState(null); const [portal,setPortal]=uState(false);
-  const [view,setView]=uState({name:"home",id:null}); const [toast,fireToast]=useToast();
+  // Estado inicial leído de la URL una sola vez, al montar — cubre tanto una
+  // recarga como un deep-link abierto directamente (p. ej. desde una
+  // notificación push cuando no había ninguna pestaña abierta ya).
+  const initialRoute = uMemo(()=>parseViewFromSearch(window.location.search), []);
+  const [user,setUser]=uState(null); const [portal,setPortal]=uState(initialRoute.portal);
+  const [view,setView]=uState(initialRoute.view); const [toast,fireToast]=useToast();
   const [booting,setBooting]=uState(true); const [recovery,setRecovery]=uState(false);
 
   uEffect(()=>{
@@ -2002,12 +2036,52 @@ function App(){
     return ()=>{mounted=false;};
   },[]);
 
-  const nav=(name,id=null)=>{ if(name==="portal"){ setPortal(true); return; } setView({name,id}); };
+  // pushUrl no toca el estado de React, solo la URL visible/el historial —
+  // nav() (abajo) es quien decide ADEMÁS qué se pinta. Evita empujar una
+  // entrada idéntica a la actual (p. ej. al re-pulsar la sección ya activa).
+  const pushUrl=(name,id)=>{
+    const search = viewToSearch(name,id);
+    if(window.location.search!==search) window.history.pushState({name,id}, "", search);
+  };
+  const nav=(name,id=null)=>{
+    if(name==="portal"){ setPortal(true); pushUrl("portal", null); return; }
+    setView({name,id});
+    pushUrl(name,id);
+  };
+  const exitPortal=()=>{ setPortal(false); pushUrl(view.name, view.id); };
   const logout=async()=>{ await Auth.signOut(); setUser(null); nav("home"); };
+
+  // Atrás/adelante del navegador: la URL ya la actualiza el propio navegador
+  // antes de disparar popstate, así que basta con releer window.location.
+  uEffect(()=>{
+    const onPopState=()=>{
+      const r = parseViewFromSearch(window.location.search);
+      setPortal(r.portal);
+      setView(r.view);
+    };
+    window.addEventListener("popstate", onPopState);
+    return ()=>window.removeEventListener("popstate", onPopState);
+  },[]);
+
+  // El service worker manda esto al pulsar una notificación con una pestaña
+  // del CRM ya abierta (ver notificationclick en sw.js) — reutiliza el mismo
+  // nav() de siempre, así que también actualiza la URL/el historial.
+  uEffect(()=>{
+    if(!("serviceWorker" in navigator)) return;
+    const onMessage=(event)=>{
+      if(!event.data || event.data.type!=="push-navigate" || !event.data.url) return;
+      const targetUrl = new URL(event.data.url, window.location.origin);
+      const r = parseViewFromSearch(targetUrl.search);
+      nav(r.portal?"portal":r.view.name, r.portal?null:r.view.id);
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return ()=>navigator.serviceWorker.removeEventListener("message", onMessage);
+  },[]);
+
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
-  if(!user && !portal) return <><Login onLogin={u=>{setUser(u);nav("home");}} onPortal={()=>setPortal(true)}/><Toast msg={toast}/></>;
-  if(portal) return <><Portal onExit={()=>setPortal(false)} toast={fireToast}/><Toast msg={toast}/></>;
+  if(!user && !portal) return <><Login onLogin={u=>setUser(u)} onPortal={()=>nav("portal")}/><Toast msg={toast}/></>;
+  if(portal) return <><Portal onExit={exitPortal} toast={fireToast}/><Toast msg={toast}/></>;
   const titles={home:["Inicio","Resumen del despacho"],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
