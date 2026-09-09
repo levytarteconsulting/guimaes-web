@@ -6,6 +6,19 @@ const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React
 /* ============ Helpers ============ */
 function Toast({msg}){ return msg ? <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#0B2238",color:"#fff",padding:"12px 20px",borderRadius:12,boxShadow:"var(--shadow-lg)",zIndex:200,fontWeight:600,fontFamily:"var(--display)"}}>{msg}</div> : null; }
 const useToast = () => { const [m,setM]=uState(null); const fire=(t)=>{setM(t);setTimeout(()=>setM(null),2200);}; return [m,fire]; };
+// Único punto de verdad para el breakpoint móvil — debe coincidir con
+// @media(max-width:820px) en styles.css (un valor CSS no se puede leer desde
+// aquí, así que si cambia uno hay que cambiar el otro a mano).
+const MOBILE_BREAKPOINT = 820;
+function useIsMobile(){
+  const [isMobile,setIsMobile]=uState(()=>window.innerWidth<=MOBILE_BREAKPOINT);
+  uEffect(()=>{
+    const onResize=()=>setIsMobile(window.innerWidth<=MOBILE_BREAKPOINT);
+    window.addEventListener("resize", onResize);
+    return ()=>window.removeEventListener("resize", onResize);
+  },[]);
+  return isMobile;
+}
 function ownerAvatar(id){ const u=CRM.userById(id); return u? <Avatar name={u.name} size="sm" color={u.color}/> : null; }
 // id real del servicio "Asesoría Laboral" en CRM.SERVICES — se busca por nombre en vez de
 // hardcodear el id, para no romper en silencio si el catálogo cambia.
@@ -144,7 +157,7 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
   uEffect(()=>{
     if(!drawerOpen) return;
     const onKey = e=>{ if(e.key==="Escape") setDrawerOpen(false); };
-    const onResize = ()=>{ if(window.innerWidth>820) setDrawerOpen(false); };
+    const onResize = ()=>{ if(window.innerWidth>MOBILE_BREAKPOINT) setDrawerOpen(false); };
     window.addEventListener("keydown", onKey);
     window.addEventListener("resize", onResize);
     document.body.classList.add("no-scroll");
@@ -1063,7 +1076,9 @@ function isWaWindowOpen(conv){
 // entrantes por Realtime. Pásalo a false cuando el caller ya tiene su propia
 // suscripción para toda la lista (la vista general de WhatsApp), para no
 // procesar el mismo mensaje dos veces.
-function WaThread({conv, toast, onConvChange, onViewContact, live=true}){
+// `onBack`: opcional — si se pasa, muestra un botón de volver en la cabecera
+// (solo lo usa la vista general en móvil, para volver a la lista).
+function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true}){
   const c = CRM.contactById[conv.contact] || waFallbackContact(conv);
   const windowOpen = isWaWindowOpen(conv);
   const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
@@ -1109,17 +1124,22 @@ function WaThread({conv, toast, onConvChange, onViewContact, live=true}){
   return (
     <div className="wa__thread">
       <div className="wa__thread__head">
-        <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
-        <div><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>
-        <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
-        {onViewContact && <button className="btn btn--sm btn--ghost" onClick={onViewContact}>Ver ficha</button>}
+        {onBack && <button className="wa__back" onClick={onBack} aria-label="Volver a la lista"><Icon name="chevronR" size={20} style={{transform:"rotate(180deg)"}}/></button>}
+        <div className="wa__thread__id">
+          <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
+          <div className="wa__thread__idtext"><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>
+        </div>
+        <div className="wa__thread__actions">
+          <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
+          {onViewContact && <button className="btn btn--sm btn--ghost" onClick={onViewContact}>Ver ficha</button>}
+        </div>
       </div>
       <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
       {windowOpen ? (
         <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
       ) : (
-        <div className="wa__compose" style={{justifyContent:"space-between"}}>
-          <span className="muted" style={{fontSize:13}}>La ventana de 24h ha expirado. Necesitas que el cliente responda para volver a escribir texto libre — mientras tanto puedes enviarle una plantilla aprobada.</span>
+        <div className="wa__compose wa__compose--notice">
+          <span className="muted wa__compose__notice" style={{fontSize:13}}>La ventana de 24h ha expirado. Necesitas que el cliente responda para volver a escribir texto libre — mientras tanto puedes enviarle una plantilla aprobada.</span>
           <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
         </div>
       )}
@@ -1132,8 +1152,16 @@ function WhatsApp({nav, toast, focusId}){
   const [filter,setFilter]=uState("active");
   const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
   const [showStart,setShowStart]=uState(false);
+  const isMobile = useIsMobile();
   const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
   const conv = convs.find(w=>w.id===active);
+  // Maestro-detalle en móvil: en desktop se pintan siempre los dos paneles
+  // (como hoy); en móvil solo uno, según haya o no conversación activa. No es
+  // un estado nuevo — se deriva de `active` en cada render, así que no puede
+  // desincronizarse al cruzar el breakpoint (resize/rotación): si `active`
+  // sigue siendo válido, desktop simplemente vuelve a mostrar los dos paneles.
+  const showList = !isMobile || !conv;
+  const showThread = !isMobile || !!conv;
   const activeRef = uRef(active);
   uEffect(()=>{ activeRef.current = active; },[active]);
   const toggleArchive=async(id,e)=>{
@@ -1189,7 +1217,7 @@ function WhatsApp({nav, toast, focusId}){
   },[]);
   return (
     <div className="wa">
-      <div className="wa__list">
+      {showList && <div className="wa__list">
         <div className="wa__list__head">
           <button className="btn btn--sm btn--primary" onClick={()=>setShowStart(true)}><Icon name="plus" size={15}/>Nueva conversación</button>
         </div>
@@ -1206,11 +1234,12 @@ function WhatsApp({nav, toast, focusId}){
           </div>;
         })}
         {visible.length===0 && <div className="muted" style={{padding:"24px 16px",fontSize:13,textAlign:"center"}}>{filter==="active"?"Sin conversaciones activas.":"No hay conversaciones archivadas."}</div>}
-      </div>
-      {conv ? <WaThread conv={conv} toast={toast} live={false}
+      </div>}
+      {showThread && (conv ? <WaThread conv={conv} toast={toast} live={false}
         onConvChange={updated=>setConvs(cs=>cs.map(w=>w.id===updated.id?updated:w))}
-        onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}/>
-      : <div className="wa__thread"><div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div></div>}
+        onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}
+        onBack={isMobile?()=>setActive(null):undefined}/>
+      : <div className="wa__thread"><div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div></div>)}
       {showStart && <StartWhatsappModal onClose={()=>setShowStart(false)} nav={nav} toast={toast}/>}
     </div>
   );
