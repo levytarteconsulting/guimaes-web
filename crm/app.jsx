@@ -134,15 +134,37 @@ const NAV = [
   {id:"config", label:"Configuración", icon:"settings"}
 ];
 function Shell({user, view, nav, onLogout, children, title, crumb}){
+  const [drawerOpen,setDrawerOpen]=uState(false);
+  // Drawer móvil (<=820px, ver styles.css): se cierra solo, con Escape, al
+  // elegir una sección o si la ventana crece por encima del breakpoint
+  // (p. ej. al rotar un móvil grande a horizontal) — y bloquea el scroll del
+  // body mientras está abierto. Por encima del breakpoint nunca llega a
+  // abrirse (el botón que lo abre está oculto por CSS), así que nada de esto
+  // toca el comportamiento de escritorio.
+  uEffect(()=>{
+    if(!drawerOpen) return;
+    const onKey = e=>{ if(e.key==="Escape") setDrawerOpen(false); };
+    const onResize = ()=>{ if(window.innerWidth>820) setDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    document.body.classList.add("no-scroll");
+    return ()=>{
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+      document.body.classList.remove("no-scroll");
+    };
+  },[drawerOpen]);
+  const goTo=(id)=>{ nav(id); setDrawerOpen(false); };
   return (
     <div className="app">
-      <aside className="sidebar">
+      {drawerOpen && <div className="sb-overlay" onClick={()=>setDrawerOpen(false)}></div>}
+      <aside className={"sidebar"+(drawerOpen?" open":"")}>
         <div className="sb-brand"><span className="sb-brand__logo">GUIMAES</span><span className="sb-brand__dot"></span></div>
         <div className="sb-tag">CRM interno</div>
         <nav className="sb-nav">
           {NAV.map(n=>{
             const b = n.badge && n.badge();
-            return <a key={n.id} className={"sb-item"+(view===n.id?" active":"")} onClick={()=>nav(n.id)}>
+            return <a key={n.id} className={"sb-item"+(view===n.id?" active":"")} onClick={()=>goTo(n.id)}>
               <Icon name={n.icon} size={18}/>{n.label}{b?<span className="sb-item__badge">{b}</span>:null}
             </a>;
           })}
@@ -155,6 +177,7 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
       </aside>
       <div className="main">
         <header className="topbar">
+          <button className="sb-toggle" onClick={()=>setDrawerOpen(true)} aria-label="Abrir menú"><Icon name="list" size={20}/></button>
           <div><div className="topbar__title">{title}</div>{crumb && <div className="topbar__crumb">{crumb}</div>}</div>
           <div className="topbar__search"><Icon name="search" size={16}/><input placeholder="Buscar contactos, deals…"/></div>
           <button className="topbar__icon"><Icon name="bell" size={18}/><span className="dot"></span></button>
