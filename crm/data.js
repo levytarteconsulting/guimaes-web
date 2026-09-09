@@ -487,7 +487,7 @@
       city: row.city || "",
       province: row.province || "",
       employees: row.employees,
-      lifecycle: row.lifecycle || "lead",
+      lifecycle: row.lifecycle || LIFECYCLE[0].id, // "lead" no existe en el catálogo actual (ver LIFECYCLE arriba) — un contacto con ese valor no aparece en ninguna columna del pipeline
       priority: row.priority || "medium",
       owner: row.owner || "",
       source: row.source || "",
@@ -520,7 +520,7 @@
     var fields = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
-    if(!payload.lifecycle) payload.lifecycle = "lead";
+    if(!payload.lifecycle) payload.lifecycle = LIFECYCLE[0].id; // ver nota en rowToContact: "lead" no está en el catálogo
     if(!payload.source) payload.source = "Alta manual";
     var res = await client.from("contactos").insert(payload).select();
     if(res.error) throw res.error;
@@ -752,7 +752,7 @@
       email: lead.email || "",
       phone: lead.phone || "",
       source: "Formulario web",
-      lifecycle: "lead",
+      lifecycle: LIFECYCLE[0].id, // ver nota en rowToContact: "lead" no está en el catálogo
       lead_id: leadUuid
     };
     var res = await client.from("contactos").insert(payload).select();

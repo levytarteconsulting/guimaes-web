@@ -226,7 +226,7 @@ h1,h2,h3,h4{font-family:var(--display);font-weight:700;line-height:1.15;color:va
 .inp{width:100%;padding:10px 12px;border:1px solid var(--line-strong);border-radius:9px;background:var(--paper);outline:none;transition:border .13s,box-shadow .13s;}
 .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
 textarea.inp{resize:vertical;min-height:80px;}
-.fld-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.fld-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;}
 .upload-drop{position:relative;border:1.5px dashed var(--line-strong);border-radius:10px;padding:18px;display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--muted);font-size:13px;text-align:center;background:var(--mist);}
 
 /* empty state */
@@ -235,7 +235,16 @@ textarea.inp{resize:vertical;min-height:80px;}
 .empty h4{font-size:16px;margin-bottom:6px;color:var(--ink);}
 
 /* ---------------- WhatsApp ---------------- */
-.wa{display:grid;grid-template-columns:320px 1fr;height:calc(100vh - var(--topbar));}
+/* flex:1 (no height:calc(100vh - topbar)): .wa es hijo directo de .main, que
+   además del topbar puede tener el aviso de instalación (InstallPrompt) antes
+   de .wa — un cálculo fijo de "100vh menos topbar" no cuenta ese aviso, así
+   que .wa quedaba más bajo que el hueco real y la sidebar (height:100vh fijo)
+   no encajaba con el alto real de .main: el hueco sobrante se veía como una
+   franja en blanco. flex:1 hace que ocupe exactamente el espacio que quede,
+   sea cual sea; min-height:0 evita que un listado largo fuerce la fila entera
+   a crecer por encima de ese hueco (el scroll interno de .wa__list ya existe
+   para eso). */
+.wa{display:grid;grid-template-columns:320px 1fr;flex:1;min-height:0;}
 .wa__list{border-right:1px solid var(--line);background:var(--paper);overflow-y:auto;}
 .wa__list__head{display:flex;justify-content:flex-end;padding:12px 12px 0;}
 .wa__conv{display:flex;gap:11px;padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
@@ -277,7 +286,8 @@ textarea.inp{resize:vertical;min-height:80px;}
 .wa-thread-panel .wa__thread{flex:1;min-height:0;}
 
 /* ---------------- Inbox ---------------- */
-.inbox{display:grid;grid-template-columns:220px 340px 1fr;height:calc(100vh - var(--topbar));min-width:0;}
+/* Mismo motivo que .wa arriba (no lo pediste para Inbox, pero es idéntico). */
+.inbox{display:grid;grid-template-columns:220px 340px 1fr;flex:1;min-height:0;min-width:0;}
 .inbox__folders{background:var(--paper);border-right:1px solid var(--line);padding:16px 12px;overflow-y:auto;min-width:0;}
 .inbox__compose{width:100%;margin-bottom:14px;}
 .folder-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--slate);cursor:pointer;}

@@ -413,7 +413,7 @@ function Contacts({nav, toast}){
   );
 }
 function NewContact({onClose,onSave}){
-  const [f,setF]=uState({company:"",full_name:"",email:"",phone:"",lifecycle:"lead",owner:CRM.USERS[0]?.id||""});
+  const [f,setF]=uState({company:"",full_name:"",email:"",phone:"",lifecycle:CRM.LIFECYCLE[0].id,owner:CRM.USERS[0]?.id||""});
   const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
   const save=async()=>{
@@ -936,6 +936,16 @@ function DealDetail({id, nav, toast, user}){
       setDeleting(false);
     }
   };
+  const moveStage=async(stageId)=>{
+    if(stageId===d.stage) return;
+    try{
+      await CRM.updateDeal(Auth.client, d.id, {stage:stageId});
+      toast("Movido a "+CRM.stageById[stageId].label);
+      bump();
+    }catch(e){
+      toast("No se pudo mover el deal: "+e.message);
+    }
+  };
   const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
   const notes=CRM.NOTES.filter(n=>n.deal===id); const docs=CRM.DOCUMENTS.filter(x=>x.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
   const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
@@ -956,7 +966,7 @@ function DealDetail({id, nav, toast, user}){
           </div>
         </div>
         <div>
-          <div className="card" style={{marginBottom:16}}><div className="card__body"><div className="section-title" style={{marginBottom:10}}>Progreso en el pipeline</div><div className="row stage-chart" style={{gap:0}}>{CRM.STAGES.filter(x=>x.id!=="perdido").map((x,i)=><div key={x.id} className="stage-col" style={{flex:1,textAlign:"center"}}><div style={{height:6,background:i<=stageIdx?x.color:"var(--line)",borderRadius:20,margin:"0 2px"}}></div><div className="stage-label" style={{fontSize:10.5,marginTop:6,color:i<=stageIdx?"var(--ink)":"var(--muted)",fontWeight:i===stageIdx?700:400}}>{x.label}</div></div>)}</div></div></div>
+          <div className="card" style={{marginBottom:16}}><div className="card__body"><div className="section-title" style={{marginBottom:10}}>Progreso en el pipeline</div><div className="row stage-chart" style={{gap:0}}>{CRM.STAGES.filter(x=>x.id!=="perdido").map((x,i)=><div key={x.id} className="stage-col" style={{flex:1,textAlign:"center",cursor:"pointer"}} title={"Mover a "+x.label} onClick={()=>moveStage(x.id)}><div style={{height:6,background:i<=stageIdx?x.color:"var(--line)",borderRadius:20,margin:"0 2px"}}></div><div className="stage-label" style={{fontSize:10.5,marginTop:6,color:i<=stageIdx?"var(--ink)":"var(--muted)",fontWeight:i===stageIdx?700:400}}>{x.label}</div></div>)}</div></div></div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="card"><div className="card__body"><div className="grid-2"><KV k="Proveedor actual">Gestoría local</KV><KV k="Cuota actual">{CRM.fmtEUR(Math.round(d.amount*1.2))}</KV><KV k="Ahorro estimado">{CRM.fmtEUR(Math.round(d.amount*0.2))}/{d.frequency}</KV><KV k="Frecuencia pago">{d.frequency}</KV></div></div></div>}
           {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Nota interna del deal…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir</button><div style={{marginTop:16}}>{notes.map(n=><div key={n.id} style={{marginBottom:12}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div></div></div>}
