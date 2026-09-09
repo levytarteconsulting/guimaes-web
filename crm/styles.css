@@ -342,7 +342,7 @@ textarea.inp{resize:vertical;min-height:80px;}
 .right{margin-left:auto;}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .hide-sc{scrollbar-width:thin;}
-@media(max-width:1100px){.detail{grid-template-columns:1fr;}.detail__aside{position:static;}.kpi-grid{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:1100px){.detail{grid-template-columns:minmax(0,1fr);}.detail__aside{position:static;}.kpi-grid{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:820px){.login{grid-template-columns:1fr;}.login__aside{display:none;}.wa{grid-template-columns:1fr;}.inbox{grid-template-columns:1fr;}}
 /* Shell móvil (Fase 0): la sidebar deja de ocupar espacio en el flujo y pasa a
    ser un drawer fijo que se abre con el botón hamburguesa de la topbar. Todo
@@ -375,14 +375,28 @@ body.no-scroll{overflow:hidden;}
   .wa__compose--notice{flex-wrap:wrap;row-gap:8px;}
   .wa__compose__notice{min-width:0;flex:1 1 200px;}
 }
-/* Inicio móvil (Fase 2): KPIs y las dos tarjetas de abajo a 1 columna, y el
-   gráfico de barras por etapa sin forzar overflow horizontal. Nada de esto
-   existe en escritorio. */
+/* Inicio móvil (Fase 2): KPIs y las dos tarjetas de abajo a 1 columna. .stage-*
+   son las clases del gráfico de barras por etapa — las reutiliza también el
+   "Progreso en el pipeline" de DealDetail (Fase 2b), mismo patrón. Nada de
+   esto existe en escritorio. */
 @media(max-width:820px){
   .kpi-grid{grid-template-columns:1fr;}
   .kpi__val{font-size:24px;}
   .grid-2{grid-template-columns:1fr;}
-  .home-stage-col{min-width:0;}
-  .home-stage-chart{gap:4px;}
-  .home-stage-label{font-size:10px;}
+  .stage-col{min-width:0;}
+  .stage-chart{gap:4px;}
+  .stage-label{font-size:10px;}
+}
+/* ContactDetail/DealDetail móvil (Fase 2b): .field__v (valores Email,
+   Teléfono, CIF/NIF…) es un item de flex sin min-width:0 — Safari no reduce
+   su tamaño mínimo automático solo por tener overflow-wrap:anywhere, así que
+   se queda "duro" en el ancho de su contenido y fuerza la única pista del
+   grid de .detail (arriba, minmax(0,1fr)) a crecer más que la pantalla. Ese
+   es también el origen del hueco vacío sobre la cabecera de la ficha: al
+   ensancharse la tarjeta, el bloque centrado (avatar/nombre) queda fuera de
+   la franja visible. Arreglando esto no hace falta tocar nada más — los
+   botones de acción y el badge de lead caben solos una vez la tarjeta vuelve
+   a su ancho real. Nada de esto existe en escritorio. */
+@media(max-width:820px){
+  .field__v{min-width:0;}
 }

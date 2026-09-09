@@ -254,12 +254,12 @@ function Home({user, nav}){
       <div className="card" style={{marginTop:18}}>
         <div className="card__head"><Icon name="pipeline" size={17} style={{color:"var(--accent)"}}/><h3>Pipeline por etapa</h3><button className="right btn btn--sm btn--subtle" onClick={()=>nav("pipeline")}>Abrir pipeline</button></div>
         <div className="card__body">
-          <div className="home-stage-chart" style={{display:"flex",gap:10,alignItems:"flex-end",height:120}}>
+          <div className="stage-chart" style={{display:"flex",gap:10,alignItems:"flex-end",height:120}}>
             {byStage.map(({s,n})=>(
-              <div key={s.id} className="home-stage-col" style={{flex:1,textAlign:"center"}}>
+              <div key={s.id} className="stage-col" style={{flex:1,textAlign:"center"}}>
                 <div style={{height:80,display:"flex",alignItems:"flex-end"}}><div style={{width:"100%",background:s.color,height:(n/maxN*80||3)+"px",borderRadius:"6px 6px 0 0"}}></div></div>
                 <div style={{fontWeight:700,fontFamily:"var(--display)",marginTop:6}}>{n}</div>
-                <div className="muted home-stage-label" style={{fontSize:11.5,lineHeight:1.2}}>{s.label}</div>
+                <div className="muted stage-label" style={{fontSize:11.5,lineHeight:1.2}}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -956,7 +956,7 @@ function DealDetail({id, nav, toast, user}){
           </div>
         </div>
         <div>
-          <div className="card" style={{marginBottom:16}}><div className="card__body"><div className="section-title" style={{marginBottom:10}}>Progreso en el pipeline</div><div className="row" style={{gap:0}}>{CRM.STAGES.filter(x=>x.id!=="perdido").map((x,i)=><div key={x.id} style={{flex:1,textAlign:"center"}}><div style={{height:6,background:i<=stageIdx?x.color:"var(--line)",borderRadius:20,margin:"0 2px"}}></div><div style={{fontSize:10.5,marginTop:6,color:i<=stageIdx?"var(--ink)":"var(--muted)",fontWeight:i===stageIdx?700:400}}>{x.label}</div></div>)}</div></div></div>
+          <div className="card" style={{marginBottom:16}}><div className="card__body"><div className="section-title" style={{marginBottom:10}}>Progreso en el pipeline</div><div className="row stage-chart" style={{gap:0}}>{CRM.STAGES.filter(x=>x.id!=="perdido").map((x,i)=><div key={x.id} className="stage-col" style={{flex:1,textAlign:"center"}}><div style={{height:6,background:i<=stageIdx?x.color:"var(--line)",borderRadius:20,margin:"0 2px"}}></div><div className="stage-label" style={{fontSize:10.5,marginTop:6,color:i<=stageIdx?"var(--ink)":"var(--muted)",fontWeight:i===stageIdx?700:400}}>{x.label}</div></div>)}</div></div></div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="card"><div className="card__body"><div className="grid-2"><KV k="Proveedor actual">Gestoría local</KV><KV k="Cuota actual">{CRM.fmtEUR(Math.round(d.amount*1.2))}</KV><KV k="Ahorro estimado">{CRM.fmtEUR(Math.round(d.amount*0.2))}/{d.frequency}</KV><KV k="Frecuencia pago">{d.frequency}</KV></div></div></div>}
           {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Nota interna del deal…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir</button><div style={{marginTop:16}}>{notes.map(n=><div key={n.id} style={{marginBottom:12}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div></div></div>}
