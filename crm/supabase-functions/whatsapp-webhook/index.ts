@@ -8,8 +8,8 @@
 //   WHATSAPP_VERIFY_TOKEN      — token que tú eliges; debe coincidir con el que
 //                                pongas al configurar el webhook en Meta App Dashboard
 //   APP_SECRET                 — App Secret de la app de Meta, para validar X-Hub-Signature-256
-//   SUPABASE_URL                — inyectada automáticamente por Supabase
-//   SUPABASE_SERVICE_ROLE_KEY   — inyectada automáticamente por Supabase
+//   SUPABASE_URL                — inyectada automáticamente por Supabase (también para llamar a push-send)
+//   SUPABASE_SERVICE_ROLE_KEY   — inyectada automáticamente por Supabase (también credencial de push-send)
 //
 // IMPORTANTE al desplegar: Meta no manda ninguna cabecera de autenticación de
 // Supabase en sus peticiones, así que esta función necesita --no-verify-jwt o
@@ -59,6 +59,31 @@ function toInternalType(waType: string): string {
   return "text"; // audio, vídeo, ubicación, stickers, botones... se guardan como texto hasta que se soporten
 }
 
+function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
+
+// Llama a push-send servidor a servidor con la service_role key — igual que
+// notify-new-lead, no la comparto entre funciones (cada Edge Function de este
+// proyecto es autocontenida, sin imports cruzados entre carpetas). tag agrupa
+// varios mensajes seguidos de la misma conversación en una sola notificación
+// que se reemplaza en vez de acumularse (ver comentario en handleIncomingMessage).
+async function notifyTeamPush(title: string, body: string, tag: string): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) throw new Error("Faltan SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY.");
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ all: true, title, body, url: "/crm.html", tag }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`push-send respondió ${res.status}: ${errText}`);
+  }
+}
+
 function extractBody(message: any): string {
   switch (message.type) {
     case "text": return message.text?.body ?? "";
@@ -89,7 +114,7 @@ async function findOrCreateConversationId(supabase: any, waId: string): Promise<
   return created.id;
 }
 
-async function handleIncomingMessage(supabase: any, message: any) {
+async function handleIncomingMessage(supabase: any, message: any, senderProfile: { name?: string } | undefined) {
   const waId = message.from;
   if (!waId) return;
 
@@ -102,17 +127,33 @@ async function handleIncomingMessage(supabase: any, message: any) {
     .eq("id", conversationId);
   if (updErr) throw updErr;
 
+  const body = extractBody(message);
   const { error: msgErr } = await supabase.from("whatsapp_messages").insert({
     conversation_id: conversationId,
     direction: "in",
     type: toInternalType(message.type),
-    body: extractBody(message),
+    body,
     wa_message_id: message.id,
   });
   if (msgErr) {
     // 23505 = violación del índice único de wa_message_id: Meta reintentó un
-    // mensaje que ya habíamos guardado. No es un error real, se ignora.
+    // mensaje que ya habíamos guardado. No es un error real, se ignora — y
+    // tampoco se reenvía el push, porque ya se avisó la primera vez.
     if (msgErr.code !== "23505") throw msgErr;
+    return;
+  }
+
+  // Push best-effort: en su propio try/catch para que un fallo aquí nunca
+  // impida guardar el RESTO de mensajes del lote (el for de processPayload
+  // seguiría abortando si esto lanzara sin capturarlo) ni la respuesta 200 a
+  // Meta. tag agrupa mensajes seguidos de la misma conversación: el navegador
+  // reemplaza la notificación anterior con el mismo tag en vez de apilarla
+  // (y por defecto no vuelve a sonar/vibrar al reemplazar) — con 5 mensajes
+  // seguidos solo se ve el último, pero solo suena una vez.
+  try {
+    await notifyTeamPush(senderProfile?.name || `+${waId}`, truncate(body, 140), `wa-${conversationId}`);
+  } catch (e) {
+    console.error("whatsapp-webhook: push falló (no bloquea el mensaje)", e);
   }
 }
 
@@ -161,11 +202,13 @@ async function processPayload(supabase: any, payload: any) {
     for (const change of entry.changes ?? []) {
       const value = change.value ?? {};
       // value.contacts[].profile.name trae el nombre de perfil de WhatsApp del
-      // remitente; no se persiste todavía (whatsapp_conversations no tiene
-      // columna de nombre) — disponible aquí si se quiere usar más adelante
-      // para crear un contacto automáticamente.
+      // remitente; no se persiste en whatsapp_conversations (no tiene columna
+      // de nombre) pero sí se usa para el título del push (ver notifyTeamPush
+      // en handleIncomingMessage) — disponible aquí también por si se quiere
+      // usar más adelante para crear un contacto automáticamente.
+      const senderProfile = value.contacts?.[0]?.profile;
       for (const message of value.messages ?? []) {
-        await handleIncomingMessage(supabase, message);
+        await handleIncomingMessage(supabase, message, senderProfile);
       }
       for (const status of value.statuses ?? []) {
         await handleStatusUpdate(supabase, status);

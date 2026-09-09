@@ -1,9 +1,9 @@
 // Supabase Edge Function: push-send
-// Envía notificaciones Web Push (VAPID) a uno o varios usuarios, buscando sus
-// suscripciones en public.push_subscriptions (esquema en crm/supabase-push.sql).
-// Esta pieza es SOLO infraestructura: nadie la llama todavía en automático —
-// se prueba a mano (curl) hasta que la siguiente fase la enganche a los
-// disparadores (lead nuevo, WhatsApp entrante).
+// Envía notificaciones Web Push (VAPID) a uno o varios usuarios (user_ids), o
+// a todo el equipo (all:true), buscando sus suscripciones en
+// public.push_subscriptions (esquema en crm/supabase-push.sql). La llaman
+// notify-new-lead y whatsapp-webhook (servidor a servidor, con la
+// service_role key) cada vez que hay un lead nuevo o un WhatsApp entrante.
 //
 // Función INTERNA, no pensada para invocarse desde el navegador del agente:
 // a diferencia de whatsapp-send (que valida "¿eres un agente logueado?"),
@@ -53,12 +53,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No autorizado." }), { status: 401, headers: corsHeaders });
     }
 
-    const { user_ids, title, body, url } = await req.json();
+    const { user_ids, all, title, body, url, tag } = await req.json();
     const userIds: string[] = Array.isArray(user_ids) ? user_ids : (user_ids ? [user_ids] : []);
+    const sendToAll = all === true; // avisar a todo el equipo (todas las suscripciones), sin filtrar por usuario
 
-    if (userIds.length === 0 || !title || !body) {
+    if (!sendToAll && userIds.length === 0) {
       return new Response(
-        JSON.stringify({ error: "Faltan campos obligatorios: user_ids (string o array), title, body." }),
+        JSON.stringify({ error: "Faltan campos obligatorios: user_ids (string o array), o all:true." }),
+        { status: 400, headers: corsHeaders },
+      );
+    }
+    if (!title || !body) {
+      return new Response(
+        JSON.stringify({ error: "Faltan campos obligatorios: title, body." }),
         { status: 400, headers: corsHeaders },
       );
     }
@@ -76,16 +83,21 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
 
-    const { data: subs, error: subsErr } = await supabase
-      .from("push_subscriptions")
-      .select("id, endpoint, p256dh, auth")
-      .in("user_id", userIds);
+    // all:true (notificar a todo el equipo) omite el filtro por usuario en vez
+    // de que cada disparador tenga que consultar esta tabla por su cuenta —
+    // "a quién avisar" es responsabilidad de esta función, no de sus llamantes.
+    let subsQuery = supabase.from("push_subscriptions").select("id, endpoint, p256dh, auth");
+    if (!sendToAll) subsQuery = subsQuery.in("user_id", userIds);
+    const { data: subs, error: subsErr } = await subsQuery;
     if (subsErr) throw subsErr;
 
     // url: reservado para cuando el CRM tenga rutas de verdad y el service
     // worker pueda navegar a una vista concreta al pulsar la notificación
     // (ver sw.js) — hoy solo abre/enfoca la app.
-    const payload = JSON.stringify({ title, body, url: url || "/crm.html" });
+    // tag: si se manda, agrupa notificaciones relacionadas (p. ej. varios
+    // mensajes seguidos de la misma conversación de WhatsApp) — el navegador
+    // reemplaza la anterior con el mismo tag en vez de apilarlas.
+    const payload = JSON.stringify({ title, body, url: url || "/crm.html", ...(tag ? { tag } : {}) });
 
     let sent = 0, failed = 0, removed = 0;
     await Promise.all((subs || []).map(async (sub) => {
