@@ -644,8 +644,8 @@ function TaskRow({t, toast, onToggle, onEdit, onDelete}){
       <div className="lrow__title" style={{textDecoration:done?"line-through":"none",opacity:done?.6:1}}>{t.title}</div>
       <div className="lrow__sub" style={overdue?{color:"var(--danger)",fontWeight:600}:undefined}>{overdue?"Vencida":"Vence"} {fmtDue(t.due)} · {CRM.userById(t.owner)?.name?.split(" ")[0] || "Sin asignar"}</div>
     </div>
-    {onEdit && <button className="btn btn--sm btn--ghost" title="Editar tarea" onClick={onEdit}><Icon name="edit" size={14}/></button>}
-    {onDelete && <button className="btn btn--sm btn--ghost" title="Eliminar tarea" onClick={onDelete}><Icon name="trash" size={14}/></button>}
+    {onEdit && <button className="btn btn--sm btn--ghost task-row-action" title="Editar tarea" onClick={onEdit}><Icon name="edit" size={14}/></button>}
+    {onDelete && <button className="btn btn--sm btn--ghost task-row-action" title="Eliminar tarea" onClick={onDelete}><Icon name="trash" size={14}/></button>}
   </div>;
 }
 function toDatetimeLocal(iso){
