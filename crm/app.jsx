@@ -254,12 +254,12 @@ function Home({user, nav}){
       <div className="card" style={{marginTop:18}}>
         <div className="card__head"><Icon name="pipeline" size={17} style={{color:"var(--accent)"}}/><h3>Pipeline por etapa</h3><button className="right btn btn--sm btn--subtle" onClick={()=>nav("pipeline")}>Abrir pipeline</button></div>
         <div className="card__body">
-          <div style={{display:"flex",gap:10,alignItems:"flex-end",height:120}}>
+          <div className="home-stage-chart" style={{display:"flex",gap:10,alignItems:"flex-end",height:120}}>
             {byStage.map(({s,n})=>(
-              <div key={s.id} style={{flex:1,textAlign:"center"}}>
+              <div key={s.id} className="home-stage-col" style={{flex:1,textAlign:"center"}}>
                 <div style={{height:80,display:"flex",alignItems:"flex-end"}}><div style={{width:"100%",background:s.color,height:(n/maxN*80||3)+"px",borderRadius:"6px 6px 0 0"}}></div></div>
                 <div style={{fontWeight:700,fontFamily:"var(--display)",marginTop:6}}>{n}</div>
-                <div className="muted" style={{fontSize:11.5,lineHeight:1.2}}>{s.label}</div>
+                <div className="muted home-stage-label" style={{fontSize:11.5,lineHeight:1.2}}>{s.label}</div>
               </div>
             ))}
           </div>
@@ -274,6 +274,7 @@ function Contacts({nav, toast}){
   const [contacts,setContacts]=uState(()=>CRM.CONTACTS.map(c=>({...c})));
   const [q,setQ]=uState(""); const [lc,setLc]=uState("all"); const [sel,setSel]=uState([]); const [showNew,setNew]=uState(false);
   const [mode,setMode]=uState("list");
+  const isMobile = useIsMobile();
   const [drag,setDrag]=uState(null); const [over,setOver]=uState(null);
   const list = contacts.filter(c=>(lc==="all"||c.lifecycle===lc) && (q==="" || (c.company+c.full_name+c.email).toLowerCase().includes(q.toLowerCase())));
   const toggle=(id)=>setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
@@ -298,19 +299,24 @@ function Contacts({nav, toast}){
     <div className={mode==="pipeline"?"content--flush":"content"} style={mode==="pipeline"?{flex:1,display:"flex",flexDirection:"column",minHeight:0}:undefined}>
       <div className="toolbar" style={mode==="pipeline"?{padding:"16px 26px 0",marginBottom:0}:undefined}>
         <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar por empresa, persona o email…" value={q} onChange={e=>setQ(e.target.value)}/></div>
-        {mode==="list" && <>
+        {mode==="list" && (isMobile ? (
+          <select className="inp" style={{width:"auto",flex:"none"}} value={lc} onChange={e=>setLc(e.target.value)}>
+            <option value="all">Todos ({contacts.length})</option>
+            {CRM.LIFECYCLE.map(l=>{ const n=contacts.filter(c=>c.lifecycle===l.id).length; return <option key={l.id} value={l.id}>{l.label} ({n})</option>; })}
+          </select>
+        ) : <>
           <button className={"chip"+(lc==="all"?" active":"")} onClick={()=>setLc("all")}>Todos <span className="chip__count">{contacts.length}</span></button>
           {CRM.LIFECYCLE.map(l=>{ const n=contacts.filter(c=>c.lifecycle===l.id).length; return <button key={l.id} className={"chip"+(lc===l.id?" active":"")} onClick={()=>setLc(l.id)}><span className="dot" style={{background:l.color}}></span>{l.label} <span className="chip__count">{n}</span></button>; })}
-        </>}
+        </>)}
         <div className="toolbar__spacer"></div>
         <div className="viewtoggle">
           <button className={mode==="list"?"active":""} onClick={()=>setMode("list")} title="Vista de lista"><Icon name="list" size={16}/></button>
           <button className={mode==="pipeline"?"active":""} onClick={()=>setMode("pipeline")} title="Vista de pipeline (ciclo de vida)"><Icon name="pipeline" size={16}/></button>
         </div>
-        {mode==="list" && <button className="btn btn--ghost"><Icon name="upload" size={16}/>Importar</button>}
+        {mode==="list" && !isMobile && <button className="btn btn--ghost"><Icon name="upload" size={16}/>Importar</button>}
         <button className="btn btn--primary" onClick={()=>setNew(true)}><Icon name="plus" size={16}/>Nuevo contacto</button>
       </div>
-      {mode==="list" && sel.length>0 && (
+      {mode==="list" && !isMobile && sel.length>0 && (
         <div className="selbar">
           <span className="selbar__count">{sel.length} seleccionados</span>
           <button className="btn btn--sm btn--ghost"><Icon name="user" size={15}/>Cambiar owner</button>
@@ -322,6 +328,29 @@ function Contacts({nav, toast}){
         </div>
       )}
       {mode==="list" ? (
+        isMobile ? (
+          <div className="wrap-gap">
+            {list.map(c=>(
+              <div key={c.id} className="card" style={{cursor:"pointer"}} onClick={()=>nav("contact",c.id)}>
+                <div className="card__body" style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div className="row" style={{justifyContent:"space-between",gap:8}}>
+                      <span style={{fontWeight:600,fontSize:14}}>{c.company}</span>
+                      <PriorityDot id={c.priority}/>
+                    </div>
+                    <div className="muted" style={{fontSize:12.5,marginTop:2}}>{c.full_name}</div>
+                    <div className="row" style={{marginTop:8,justifyContent:"space-between"}}>
+                      <LifecycleBadge id={c.lifecycle}/>
+                      {ownerAvatar(c.owner)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {list.length===0 && <Empty icon="search" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
+          </div>
+        ) : (
         <div className="tbl-wrap">
           <table className="tbl">
             <thead><tr>
@@ -345,6 +374,7 @@ function Contacts({nav, toast}){
           </table>
           {list.length===0 && <Empty icon="search" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
         </div>
+        )
       ) : (
         <div className="kanban">
           {CRM.LIFECYCLE.map(l=>{
@@ -1519,6 +1549,7 @@ function EmailThreadCard({email, toast, bump}){
 function Documents({toast}){
   const [docs,setDocs]=uState(CRM.DOCUMENTS.map(d=>({...d})));
   const [preview,setPreview]=uState(null);
+  const isMobile = useIsMobile();
   const toggle=(id)=>{ setDocs(ds=>ds.map(d=>d.id===id?{...d,visible:!d.visible}:d)); toast("Visibilidad actualizada"); };
   const download=(doc)=>{
     toast("Descargando "+doc.name+"…");
@@ -1536,6 +1567,36 @@ function Documents({toast}){
   };
   return <div className="content">
     <div className="toolbar"><div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento…"/></div><div className="toolbar__spacer"></div><button className="btn btn--primary"><Icon name="upload" size={16}/>Subir documento</button></div>
+    {isMobile ? (
+      <div className="wrap-gap">
+        {docs.map(d=>(
+          <div key={d.id} className="card">
+            <div className="card__body">
+              <div className="row" style={{gap:10}}>
+                <div className="lrow__ico"><Icon name="documents" size={17}/></div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div className="tbl__name">{d.name}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{CRM.contactById[d.contact]?.company || "—"} · {d.at}</div>
+                </div>
+                <Badge label={d.type} color="#6E8298"/>
+              </div>
+              <div className="row" style={{marginTop:12,justifyContent:"space-between"}}>
+                <label className="row" style={{gap:8,cursor:"pointer"}}>
+                  <div className={"tbl-check"+(d.visible?" on":"")} onClick={()=>toggle(d.id)}>{d.visible&&<Icon name="check" size={12}/>}</div>
+                  {d.visible?<span style={{color:"var(--ok)",fontSize:13,fontWeight:600}}>Compartido</span>:<span className="muted" style={{fontSize:13}}>Privado</span>}
+                </label>
+                <div className="row" style={{gap:4}}>
+                  <button className="btn btn--sm btn--ghost" title="Ver" onClick={()=>setPreview(d)}><Icon name="eye" size={14}/></button>
+                  <button className="btn btn--sm btn--ghost" title="Descargar" onClick={()=>download(d)}><Icon name="download" size={14}/></button>
+                  <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>remove(d)}><Icon name="trash" size={14}/></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+        {docs.length===0 && <Empty icon="documents" title="Sin documentos"/>}
+      </div>
+    ) : (
     <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Cliente</th><th>Tamaño</th><th>Subido por</th><th>Fecha</th><th>Visible en portal</th><th></th></tr></thead><tbody>
       {docs.map(d=><tr key={d.id}><td className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{CRM.contactById[d.contact]?.company}</td><td className="tbl__sub">{d.size}</td><td>{ownerAvatar(d.by)}</td><td className="tbl__sub">{d.at}</td><td onClick={e=>e.stopPropagation()}><label className="row" style={{gap:8,cursor:"pointer"}}><div className={"tbl-check"+(d.visible?" on":"")} onClick={()=>toggle(d.id)}>{d.visible&&<Icon name="check" size={12}/>}</div>{d.visible?<span style={{color:"var(--ok)",fontSize:13,fontWeight:600}}>Compartido</span>:<span className="muted" style={{fontSize:13}}>Privado</span>}</label></td>
         <td onClick={e=>e.stopPropagation()}><div className="row" style={{gap:4}}>
@@ -1545,6 +1606,7 @@ function Documents({toast}){
         </div></td>
       </tr>)}
     </tbody></table>{docs.length===0 && <Empty icon="documents" title="Sin documentos"/>}</div>
+    )}
     {preview && <Modal title={preview.name} onClose={()=>setPreview(null)} footer={<><button className="btn btn--ghost" onClick={()=>setPreview(null)}>Cerrar</button><button className="btn btn--primary" onClick={()=>{download(preview);}}><Icon name="download" size={15}/>Descargar</button></>}>
       <KV k="Tipo"><Badge label={preview.type} color="#6E8298"/></KV>
       <KV k="Cliente">{CRM.contactById[preview.contact]?.company || "—"}</KV>
