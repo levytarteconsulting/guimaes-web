@@ -19,5 +19,5 @@ window.SUPABASE_CONFIG = {
       identidad de servidor pensada para ir en el cliente, igual que la
       anon key de arriba. */
 window.PUSH_CONFIG = {
-  vapidPublicKey: "REPLACE-WITH-VAPID-PUBLIC-KEY"
+  vapidPublicKey: "BNJsB3Z3RbNjL-jCKtqX_4VM_AR_jmi3N_bx_sVpKPXmyjvmBTWu-X3v1ZQ5jc2zHvZPk0ynzsxEOxxwl8w2Xlo"
 };

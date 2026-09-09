@@ -8,7 +8,7 @@
 // O crm/styles.css *** — eso basta para que el navegador detecte un SW nuevo,
 // lo instale, descargue el shell entero de cero y active el reemplazo sin
 // esperar a que se cierren las pestañas abiertas.
-const VERSION = "v2";
+const VERSION = "v3";
 
 const SHELL_CACHE = "guimaes-crm-shell-" + VERSION;
 const FONT_CACHE = "guimaes-crm-fonts"; // sin versión: las fuentes de Google no cambian con los despliegues del CRM
