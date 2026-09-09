@@ -8,12 +8,19 @@
 // O crm/styles.css *** — eso basta para que el navegador detecte un SW nuevo,
 // lo instale, descargue el shell entero de cero y active el reemplazo sin
 // esperar a que se cierren las pestañas abiertas.
-const VERSION = "v4";
+const VERSION = "v5";
 
 const SHELL_CACHE = "guimaes-crm-shell-" + VERSION;
 const FONT_CACHE = "guimaes-crm-fonts"; // sin versión: las fuentes de Google no cambian con los despliegues del CRM
 
+// vercel.json tiene cleanUrls:true: /crm.html SIEMPRE redirige (308) a /crm,
+// así que el documento que de verdad carga el navegador vive en "/crm", no en
+// "/crm.html" — sin esta entrada, isShell() nunca hacía match para el propio
+// HTML y el cacheo de shell para la página en sí no funcionaba. Se mantiene
+// también "/crm.html" por si algo (un enlace viejo, un push) abre esa URL
+// directamente estando offline, antes de que Vercel pueda redirigir.
 const SHELL_URLS = [
+  "/crm",
   "/crm.html",
   "/crm/styles.css",
   "/crm/dist/main.js",

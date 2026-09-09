@@ -48,22 +48,7 @@ Deno.serve(async (req) => {
 
     // ---- Autenticación: solo el propio backend (service_role), nunca un agente ----
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const authHeaderRaw = req.headers.get("Authorization") || "";
-    const authHeader = authHeaderRaw.replace(/^Bearer\s+/i, "");
-    // DIAGNÓSTICO TEMPORAL — quitar en cuanto se resuelva el 401. No vuelca
-    // ninguna clave completa, solo longitudes y los extremos (8+8 caracteres).
-    console.log("push-send/auth-debug", {
-      envVarExists: typeof serviceKey === "string" && serviceKey.length > 0,
-      envVarLength: serviceKey ? serviceKey.length : 0,
-      rawHeaderLength: authHeaderRaw.length,
-      headerAfterBearerStripLength: authHeader.length,
-      headerHadBearerPrefix: /^Bearer\s+/i.test(authHeaderRaw),
-      headerStart8: authHeader.slice(0, 8),
-      headerEnd8: authHeader.slice(-8),
-      envStart8: serviceKey ? serviceKey.slice(0, 8) : null,
-      envEnd8: serviceKey ? serviceKey.slice(-8) : null,
-      match: authHeader === serviceKey,
-    });
+    const authHeader = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
     if (!authHeader || authHeader !== serviceKey) {
       return new Response(JSON.stringify({ error: "No autorizado." }), { status: 401, headers: corsHeaders });
     }

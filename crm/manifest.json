@@ -1,7 +1,7 @@
 {
   "name": "Guimaes CRM",
   "short_name": "Guimaes",
-  "start_url": "/crm.html",
+  "start_url": "/crm",
   "scope": "/crm",
   "display": "standalone",
   "background_color": "#F3F7FC",

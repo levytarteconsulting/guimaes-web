@@ -1256,7 +1256,7 @@ function WhatsApp({nav, toast, focusId}){
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
         </div>
         {visible.map(w=>{ const cc=CRM.contactById[w.contact] || waFallbackContact(w); const last=w.messages[w.messages.length-1];
-          return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
+          return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);nav("whatsapp",w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
             <Avatar name={cc.company} size="md" color={CRM.colorFor(cc.company)}/>
             <div className="wa__conv__main"><div className="wa__conv__name"><span>{cc.company}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
             {w.unread>0 && <span className="wa__unread">{w.unread}</span>}
@@ -1268,7 +1268,7 @@ function WhatsApp({nav, toast, focusId}){
       {showThread && (conv ? <WaThread conv={conv} toast={toast} live={false}
         onConvChange={updated=>setConvs(cs=>cs.map(w=>w.id===updated.id?updated:w))}
         onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}
-        onBack={isMobile?()=>setActive(null):undefined}/>
+        onBack={isMobile?()=>{setActive(null);nav("whatsapp",null);}:undefined}/>
       : <div className="wa__thread"><div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div></div>)}
       {showStart && <StartWhatsappModal onClose={()=>setShowStart(false)} nav={nav} toast={toast}/>}
     </div>

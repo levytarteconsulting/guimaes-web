@@ -68,7 +68,7 @@ function truncate(text: string, max: number): string {
 // proyecto es autocontenida, sin imports cruzados entre carpetas). tag agrupa
 // varios mensajes seguidos de la misma conversación en una sola notificación
 // que se reemplaza en vez de acumularse (ver comentario en handleIncomingMessage).
-async function notifyTeamPush(title: string, body: string, tag: string): Promise<void> {
+async function notifyTeamPush(title: string, body: string, tag: string, url: string): Promise<void> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceKey) throw new Error("Faltan SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY.");
@@ -76,7 +76,7 @@ async function notifyTeamPush(title: string, body: string, tag: string): Promise
   const res = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ all: true, title, body, url: "/crm.html", tag }),
+    body: JSON.stringify({ all: true, title, body, url, tag }),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -151,7 +151,7 @@ async function handleIncomingMessage(supabase: any, message: any, senderProfile:
   // (y por defecto no vuelve a sonar/vibrar al reemplazar) — con 5 mensajes
   // seguidos solo se ve el último, pero solo suena una vez.
   try {
-    await notifyTeamPush(senderProfile?.name || `+${waId}`, truncate(body, 140), `wa-${conversationId}`);
+    await notifyTeamPush(senderProfile?.name || `+${waId}`, truncate(body, 140), `wa-${conversationId}`, "/crm.html?view=whatsapp&id=" + conversationId);
   } catch (e) {
     console.error("whatsapp-webhook: push falló (no bloquea el mensaje)", e);
   }
