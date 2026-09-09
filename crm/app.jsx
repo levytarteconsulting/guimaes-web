@@ -429,7 +429,7 @@ function NewContact({onClose,onSave}){
 }
 
 /* ============ CONTACT DETAIL ============ */
-function ContactDetail({id, nav, toast}){
+function ContactDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const c = CRM.contactById[id];
   const [tab,setTab]=uState("resumen");
@@ -441,7 +441,20 @@ function ContactDetail({id, nav, toast}){
   const [showNewTask,setShowNewTask]=uState(false);
   const [showStartWa,setShowStartWa]=uState(false);
   const [editingTask,setEditingTask]=uState(null);
+  const [noteText,setNoteText]=uState(""); const [savingNote,setSavingNote]=uState(false);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
+  const addNoteHandler=async()=>{
+    if(!noteText.trim()) return;
+    setSavingNote(true);
+    try{ await CRM.addNote(Auth.client, {body:noteText, author:user?.id, contact_id:id}); setNoteText(""); toast("Nota añadida"); bump(); }
+    catch(e){ toast("No se pudo añadir la nota: "+e.message); }
+    finally{ setSavingNote(false); }
+  };
+  const deleteNoteHandler=async(n)=>{
+    if(!window.confirm("¿Eliminar esta nota? Esta acción no se puede deshacer.")) return;
+    try{ await CRM.removeNote(Auth.client, n.id); toast("Nota eliminada"); bump(); }
+    catch(e){ toast("No se pudo eliminar: "+e.message); }
+  };
   const toggleTask=async(t)=>{
     try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
     catch(e){ toast("No se pudo completar: "+e.message); }
@@ -536,7 +549,17 @@ function ContactDetail({id, nav, toast}){
             </div></div>
           </div>}
           {tab==="deals" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Deal</th><th>Servicio</th><th>Etapa</th><th>Importe</th><th>Owner</th><th></th></tr></thead><tbody>{deals.map(d=><tr key={d.id} onClick={()=>nav("deal",d.id)}><td className="tbl__name">{d.title}</td><td><ServiceBadge id={d.service}/></td><td><StageBadge id={d.stage}/></td><td className="mono">{CRM.fmtEUR(d.amount)} <span className="muted" style={{fontSize:11}}>/{d.frequency}</span></td><td>{ownerAvatar(d.owner)}</td><td onClick={e=>e.stopPropagation()}><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={()=>deleteDeal(d.id,d.title)}><Icon name="trash" size={14}/></button></td></tr>)}</tbody></table>{deals.length===0&&<Empty icon="briefcase" title="Sin deals"/>}</div>}
-          {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Escribe una nota…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir nota</button><div style={{marginTop:18}}>{notes.map(n=><div key={n.id} style={{marginBottom:14}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}</div></div></div>}
+          {tab==="notas" && <div className="card"><div className="card__body">
+            <textarea className="inp" placeholder="Escribe una nota…" style={{marginBottom:10}} value={noteText} onChange={e=>setNoteText(e.target.value)}></textarea>
+            <button className="btn btn--sm btn--primary" onClick={addNoteHandler} disabled={savingNote||!noteText.trim()}>{savingNote?"Añadiendo…":"Añadir nota"}</button>
+            <div style={{marginTop:18}}>{notes.map(n=><div key={n.id} style={{marginBottom:14}}>
+              <div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span>
+                {user && n.author===user.id && <button className="btn btn--sm btn--ghost right" title="Eliminar nota" onClick={()=>deleteNoteHandler(n)}><Icon name="trash" size={13}/></button>}
+              </div>
+              <div className="tl-item__body">{n.body}</div>
+            </div>)}
+            {notes.length===0 && <span className="muted">Sin notas.</span>}</div>
+          </div></div>}
           {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length? tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>) : <Empty icon="task" title="Sin tareas"/>}</div></div>}
           {tab==="whatsapp" && (
             !c.phone ? <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Hace falta un teléfono" sub="Añade un número de teléfono a la ficha de este contacto para poder usar WhatsApp."/></div></div>
@@ -912,9 +935,22 @@ function DealDetail({id, nav, toast, user}){
   const [showEdit,setShowEdit]=uState(false); const [showUpload,setShowUpload]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false); const [deleting,setDeleting]=uState(false);
   const [showNewTask,setShowNewTask]=uState(false); const [editingTask,setEditingTask]=uState(null);
+  const [noteText,setNoteText]=uState(""); const [savingNote,setSavingNote]=uState(false);
   const d = CRM.DEALS.find(x=>x.id===id);
   const [tab,setTab]=uState("resumen");
   if(!d) return <div className="content"><Empty title="Deal no encontrado"/></div>;
+  const addNoteHandler=async()=>{
+    if(!noteText.trim()) return;
+    setSavingNote(true);
+    try{ await CRM.addNote(Auth.client, {body:noteText, author:user?.id, deal_id:id}); setNoteText(""); toast("Nota añadida"); bump(); }
+    catch(e){ toast("No se pudo añadir la nota: "+e.message); }
+    finally{ setSavingNote(false); }
+  };
+  const deleteNoteHandler=async(n)=>{
+    if(!window.confirm("¿Eliminar esta nota? Esta acción no se puede deshacer.")) return;
+    try{ await CRM.removeNote(Auth.client, n.id); toast("Nota eliminada"); bump(); }
+    catch(e){ toast("No se pudo eliminar: "+e.message); }
+  };
   const toggleTask=async(t)=>{
     try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
     catch(e){ toast("No se pudo completar: "+e.message); }
@@ -969,7 +1005,16 @@ function DealDetail({id, nav, toast, user}){
           <div className="card" style={{marginBottom:16}}><div className="card__body"><div className="section-title" style={{marginBottom:10}}>Progreso en el pipeline</div><div className="row stage-chart" style={{gap:0}}>{CRM.STAGES.filter(x=>x.id!=="perdido").map((x,i)=><div key={x.id} className="stage-col" style={{flex:1,textAlign:"center",cursor:"pointer"}} title={"Mover a "+x.label} onClick={()=>moveStage(x.id)}><div style={{height:6,background:i<=stageIdx?x.color:"var(--line)",borderRadius:20,margin:"0 2px"}}></div><div className="stage-label" style={{fontSize:10.5,marginTop:6,color:i<=stageIdx?"var(--ink)":"var(--muted)",fontWeight:i===stageIdx?700:400}}>{x.label}</div></div>)}</div></div></div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="card"><div className="card__body"><div className="grid-2"><KV k="Proveedor actual">Gestoría local</KV><KV k="Cuota actual">{CRM.fmtEUR(Math.round(d.amount*1.2))}</KV><KV k="Ahorro estimado">{CRM.fmtEUR(Math.round(d.amount*0.2))}/{d.frequency}</KV><KV k="Frecuencia pago">{d.frequency}</KV></div></div></div>}
-          {tab==="notas" && <div className="card"><div className="card__body"><textarea className="inp" placeholder="Nota interna del deal…" style={{marginBottom:10}}></textarea><button className="btn btn--sm btn--primary" onClick={()=>toast("Nota añadida")}>Añadir</button><div style={{marginTop:16}}>{notes.map(n=><div key={n.id} style={{marginBottom:12}}><div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span></div><div className="tl-item__body">{n.body}</div></div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div></div></div>}
+          {tab==="notas" && <div className="card"><div className="card__body">
+            <textarea className="inp" placeholder="Nota interna del deal…" style={{marginBottom:10}} value={noteText} onChange={e=>setNoteText(e.target.value)}></textarea>
+            <button className="btn btn--sm btn--primary" onClick={addNoteHandler} disabled={savingNote||!noteText.trim()}>{savingNote?"Añadiendo…":"Añadir"}</button>
+            <div style={{marginTop:16}}>{notes.map(n=><div key={n.id} style={{marginBottom:12}}>
+              <div className="row" style={{gap:8,marginBottom:4}}>{ownerAvatar(n.author)}<b style={{fontSize:13}}>{CRM.userById(n.author)?.name}</b><span className="muted" style={{fontSize:12}}>{n.created}</span>
+                {user && n.author===user.id && <button className="btn btn--sm btn--ghost right" title="Eliminar nota" onClick={()=>deleteNoteHandler(n)}><Icon name="trash" size={13}/></button>}
+              </div>
+              <div className="tl-item__body">{n.body}</div>
+            </div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div>
+          </div></div>}
           {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length?tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>):<Empty icon="task" title="Sin tareas"/>}</div></div>}
           {tab==="docs" && <>
             <div className="row" style={{justifyContent:"flex-end",marginBottom:12}}><button className="btn btn--sm btn--primary" onClick={()=>setShowUpload(true)}><Icon name="upload" size={14}/>Subir documento</button></div>
@@ -2027,6 +2072,7 @@ function App(){
           if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
+          if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
           if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
           if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client);
           if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client);
@@ -2036,7 +2082,7 @@ function App(){
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
             if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session)); })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });
@@ -2097,7 +2143,7 @@ function App(){
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
-  else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast}/>;
+  else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
   else if(view.name==="tareas") screen=<Tasks nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;

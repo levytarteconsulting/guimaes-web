@@ -618,6 +618,16 @@
       return n;
     }catch(e){ if(window.console) console.error("loadTasks:", e); return 0; }
   }
+  // Un lead sin convertir usa un id sintético "lead-<uuid>" (ver isLead en
+  // ContactDetail) — no es un uuid válido, y contact_id/deal_id son columnas
+  // uuid tanto en tareas como en notas. Sin este filtro, crear una tarea o
+  // nota desde la ficha de un lead sin convertir fallaría en Postgres en vez
+  // de simplemente guardarse sin el enlace.
+  function sanitizeFkPayload(payload){
+    if(payload.contact_id!==undefined && payload.contact_id!==null && !isUuidLike(payload.contact_id)) delete payload.contact_id;
+    if(payload.deal_id!==undefined && payload.deal_id!==null && !isUuidLike(payload.deal_id)) delete payload.deal_id;
+    return payload;
+  }
   // Crea una tarea real en Supabase y la inyecta en TASKS
   async function addTask(client, data){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
@@ -625,6 +635,7 @@
     var fields = ["title","assigned_to","due_at","contact_id","deal_id","status","archived"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
+    sanitizeFkPayload(payload);
     if(!payload.status) payload.status = "pending";
     if(payload.archived===undefined) payload.archived = false;
     var res = await client.from("tareas").insert(payload).select();
@@ -642,11 +653,23 @@
       TAREAS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
       delete payload.id;
       delete payload.created_at;
+      sanitizeFkPayload(payload);
       var res = await client.from("tareas").update(payload).eq("id", id).select();
       if(res.error) throw res.error;
       if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
     }
-    Object.assign(t, patch);
+    // patch llega con nombres de columna de BD (due_at, assigned_to,
+    // contact_id, deal_id); el objeto en memoria usa los nombres de
+    // rowToTask (due, owner, contact, deal). Sin este mapeo, Object.assign
+    // añadía propiedades nuevas sin tocar las que de verdad lee la UI —
+    // "Editar tarea" guardaba bien en BD pero no se veía en pantalla hasta recargar.
+    if(patch.title!==undefined) t.title = patch.title;
+    if(patch.due_at!==undefined) t.due = patch.due_at;
+    if(patch.assigned_to!==undefined) t.owner = patch.assigned_to;
+    if(patch.status!==undefined) t.status = patch.status;
+    if(patch.archived!==undefined) t.archived = patch.archived;
+    if(patch.contact_id!==undefined) t.contact = patch.contact_id;
+    if(patch.deal_id!==undefined) t.deal = patch.deal_id;
     return t;
   }
   async function removeTask(client, id){
@@ -660,6 +683,56 @@
   // Completar una tarea = marcarla hecha y archivarla de una vez
   async function toggleTaskDone(client, id){
     return updateTask(client, id, {status:"done", archived:true});
+  }
+
+  // ---- Notas (esquema en crm/supabase-notas.sql) — ligadas a un contacto,
+  // a un deal, a ambos o a ninguno; sin edición, solo crear/borrar. ----
+  function rowToNote(row){
+    return {
+      id: row.id,
+      body: row.body || "",
+      author: row.author || "",
+      contact: row.contact_id || null,
+      deal: row.deal_id || null,
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  // Carga las notas reales de Supabase y las inyecta en NOTES (una sola vez, al arrancar)
+  async function loadNotes(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("notas").select("*").order("created_at",{ascending:false});
+      if(res.error || !res.data) return 0;
+      var n = 0;
+      res.data.forEach(function(row){
+        var note = rowToNote(row);
+        if(NOTES.some(function(x){return x.id===note.id;})) return; // evitar duplicados
+        NOTES.push(note);
+        n++;
+      });
+      return n;
+    }catch(e){ if(window.console) console.error("loadNotes:", e); return 0; }
+  }
+  // Crea una nota real en Supabase y la inyecta en NOTES
+  async function addNote(client, data){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    if(!data.body || !data.body.trim()) throw new Error("La nota no puede estar vacía");
+    var payload = { body: data.body.trim(), author: data.author || null, contact_id: data.contact_id || null, deal_id: data.deal_id || null };
+    sanitizeFkPayload(payload);
+    var res = await client.from("notas").insert(payload).select();
+    if(res.error) throw res.error;
+    if(!res.data || res.data.length===0) throw new Error("No se creó la nota");
+    var note = rowToNote(res.data[0]);
+    NOTES.unshift(note);
+    return note;
+  }
+  async function removeNote(client, id){
+    if(client){
+      var res = await client.from("notas").delete().eq("id", id);
+      if(res.error) throw res.error;
+    }
+    var idx = NOTES.findIndex(function(x){return x.id===id;});
+    if(idx>-1) NOTES.splice(idx,1);
   }
 
   // ---- Leads reales de la web (tabla "leads" de Supabase) ----
@@ -821,6 +894,7 @@
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
+    loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
