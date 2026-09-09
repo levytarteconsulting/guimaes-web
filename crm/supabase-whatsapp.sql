@@ -182,3 +182,31 @@ alter table public.whatsapp_templates
 
 alter table public.whatsapp_messages
   add column if not exists meta jsonb; -- metadatos del envío (p. ej. plantilla usada + variables); nullable
+
+-- ============================================================
+-- Pieza 3 — Realtime: whatsapp_messages nunca estuvo en la publicación
+-- supabase_realtime. Sin esto, CRM.subscribeWhatsapp (crm/data.js) se
+-- conecta al canal sin ningún error — no hay excepción, no hay log, nada que
+-- avise — pero Postgres nunca emite el evento de INSERT hacia ese canal, así
+-- que los mensajes entrantes jamás llegan en caliente al CRM abierto (solo
+-- aparecen al recargar y volver a cargar desde la tabla). Es un fallo
+-- completamente silencioso: todo parece conectado y no pasa nada.
+--
+-- ALTER PUBLICATION ... ADD TABLE no admite IF NOT EXISTS (y volver a
+-- ejecutarlo sin más lanza "relation is already member of publication"), así
+-- que la idempotencia hay que hacerla a mano comprobando antes en
+-- pg_publication_tables. Bloque seguro de repetir tantas veces como haga
+-- falta, tanto en una BD nueva como en la actual (ya arreglada a mano en
+-- producción con este mismo ALTER).
+-- ============================================================
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'whatsapp_messages'
+  ) then
+    alter publication supabase_realtime add table public.whatsapp_messages;
+  end if;
+end $$;
