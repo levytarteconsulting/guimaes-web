@@ -227,12 +227,12 @@
   }
 
   /* ---------- Banner de cookies (RGPD / LSSI-CE) ---------- */
-  var COOKIE_KEY = "guimaes_cookie_consent";
+  var COOKIE_KEY = "guimaes_cookie_consent_v2";
   function getConsent() {
     try { return JSON.parse(localStorage.getItem(COOKIE_KEY)); } catch (e) { return null; }
   }
-  function setConsent(analytics) {
-    var consent = { analytics: !!analytics, ts: Date.now() };
+  function setConsent(analytics, ads) {
+    var consent = { analytics: !!analytics, ads: !!ads, ts: Date.now() };
     try { localStorage.setItem(COOKIE_KEY, JSON.stringify(consent)); } catch (e) {}
     window.guimaesConsent = consent;
     document.dispatchEvent(new CustomEvent("guimaes:consent", { detail: consent }));
@@ -241,18 +241,33 @@
     var c = getConsent();
     return !!(c && c.analytics);
   };
+  window.hasAdsConsent = function () {
+    var c = getConsent();
+    return !!(c && c.ads);
+  };
 
   /* ---------- Puente hacia Google Consent Mode v2 ---------- */
   document.addEventListener("guimaes:consent", function (e) {
     if (typeof gtag === "function") {
       gtag('consent', 'update', {
-        analytics_storage: e.detail.analytics ? 'granted' : 'denied'
+        analytics_storage: e.detail.analytics ? 'granted' : 'denied',
+        ad_storage: e.detail.ads ? 'granted' : 'denied',
+        ad_user_data: e.detail.ads ? 'granted' : 'denied',
+        ad_personalization: e.detail.ads ? 'granted' : 'denied'
       });
     }
   });
-  if (window.hasAnalyticsConsent() && typeof gtag === "function") {
-    gtag('consent', 'update', { analytics_storage: 'granted' });
-  }
+  (function () {
+    var existing = getConsent();
+    if (existing && typeof gtag === "function") {
+      gtag('consent', 'update', {
+        analytics_storage: existing.analytics ? 'granted' : 'denied',
+        ad_storage: existing.ads ? 'granted' : 'denied',
+        ad_user_data: existing.ads ? 'granted' : 'denied',
+        ad_personalization: existing.ads ? 'granted' : 'denied'
+      });
+    }
+  })();
 
   function initCookieBanner() {
     var existing = getConsent();
@@ -275,6 +290,7 @@
         '<div class="cookie-banner__prefs" hidden>' +
           '<label class="cookie-toggle"><input type="checkbox" checked disabled /><span><b><span data-lang-es>Técnicas</span><span data-lang-en>Technical</span></b><span data-lang-es> — siempre activas, imprescindibles para el funcionamiento.</span><span data-lang-en> — always on, required for the site to work.</span></span></label>' +
           '<label class="cookie-toggle"><input type="checkbox" data-cookie-analytics /><span><b><span data-lang-es>Analíticas</span><span data-lang-en>Analytics</span></b><span data-lang-es> — nos ayudan a entender el uso del sitio.</span><span data-lang-en> — help us understand site usage.</span></span></label>' +
+          '<label class="cookie-toggle"><input type="checkbox" data-cookie-ads /><span><b><span data-lang-es>Publicidad</span><span data-lang-en>Advertising</span></b><span data-lang-es> — nos permite medir la eficacia de nuestras campañas publicitarias.</span><span data-lang-en> — lets us measure the effectiveness of our ad campaigns.</span></span></label>' +
           '<button type="button" class="btn btn--primary btn--sm" data-cookie-save><span data-lang-es>Guardar preferencias</span><span data-lang-en>Save preferences</span></button>' +
         '</div>' +
       '</div>';
@@ -284,17 +300,18 @@
     var prefs = wrap.querySelector(".cookie-banner__prefs");
     var actions = wrap.querySelector(".cookie-banner__actions");
     wrap.querySelector("[data-cookie-accept]").addEventListener("click", function () {
-      setConsent(true); wrap.remove();
+      setConsent(true, true); wrap.remove();
     });
     wrap.querySelector("[data-cookie-reject]").addEventListener("click", function () {
-      setConsent(false); wrap.remove();
+      setConsent(false, false); wrap.remove();
     });
     wrap.querySelector("[data-cookie-configure]").addEventListener("click", function () {
       prefs.hidden = !prefs.hidden;
     });
     wrap.querySelector("[data-cookie-save]").addEventListener("click", function () {
       var analytics = wrap.querySelector("[data-cookie-analytics]").checked;
-      setConsent(analytics); wrap.remove();
+      var ads = wrap.querySelector("[data-cookie-ads]").checked;
+      setConsent(analytics, ads); wrap.remove();
     });
   }
 
