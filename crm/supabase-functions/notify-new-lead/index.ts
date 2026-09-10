@@ -42,7 +42,7 @@ async function notifyTeamPush(title: string, body: string): Promise<void> {
   const res = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ all: true, title, body, url: "/crm.html?view=contacts" }),
+    body: JSON.stringify({ all: true, title, body, url: "/crm?view=contacts" }),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => "");

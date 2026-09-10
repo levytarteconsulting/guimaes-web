@@ -8,20 +8,19 @@
 // O crm/styles.css *** — eso basta para que el navegador detecte un SW nuevo,
 // lo instale, descargue el shell entero de cero y active el reemplazo sin
 // esperar a que se cierren las pestañas abiertas.
-const VERSION = "v6";
+const VERSION = "v7";
 
 const SHELL_CACHE = "guimaes-crm-shell-" + VERSION;
 const FONT_CACHE = "guimaes-crm-fonts"; // sin versión: las fuentes de Google no cambian con los despliegues del CRM
 
-// vercel.json tiene cleanUrls:true: /crm.html SIEMPRE redirige (308) a /crm,
-// así que el documento que de verdad carga el navegador vive en "/crm", no en
-// "/crm.html" — sin esta entrada, isShell() nunca hacía match para el propio
-// HTML y el cacheo de shell para la página en sí no funcionaba. Se mantiene
-// también "/crm.html" por si algo (un enlace viejo, un push) abre esa URL
-// directamente estando offline, antes de que Vercel pueda redirigir.
+// vercel.json tiene cleanUrls:true: "/crm.html" SIEMPRE redirige (308) a
+// "/crm" — por eso NO va en esta lista. El documento real que carga el
+// navegador vive en "/crm"; cachear "/crm.html" guardaba una respuesta de
+// tipo redirect, y Safari rechaza de plano que un service worker responda a
+// una navegación con una respuesta redirigida ("Response served by service
+// worker has redirections") — la página entera fallaba al abrir la PWA.
 const SHELL_URLS = [
   "/crm",
-  "/crm.html",
   "/crm/styles.css",
   "/crm/dist/main.js",
   "/crm/manifest.json",
@@ -35,14 +34,36 @@ const SHELL_URLS = [
 
 const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
+// Un service worker no puede responder a una navegación con una respuesta
+// redirigida (ver nota de "/crm.html" arriba) — y da igual que la redirección
+// venga de una entrada en caché o de un fetch a red en caliente, Safari la
+// rechaza en los dos casos. Esta función reconstruye una Response "limpia" a
+// partir del cuerpo, sin el flag redirected, ANTES de guardar nada en caché o
+// de pasarla a respondWith — así ninguna redirección (de Vercel o de
+// cualquier otro origen) puede volver a colarse, aunque en el futuro se
+// añada por error una URL a SHELL_URLS que redirija.
+async function stripRedirect(res) {
+  if (!res || !res.redirected) return res;
+  const body = await res.clone().blob();
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
 self.addEventListener("install", (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) =>
-      // addAll aborta todo si UNA sola URL falla; con cache.add() por
-      // separado, un icono que falte (ver el aviso en el diff) no impide que
-      // el resto del shell quede cacheado.
-      Promise.all(SHELL_URLS.map((url) => cache.add(url).catch(() => {})))
+      // No se usa cache.add() (no deja interceptar la respuesta antes de
+      // guardarla): fetch + stripRedirect + put a mano. catch() por URL por
+      // separado — un icono que falte no debe impedir que el resto del
+      // shell quede cacheado.
+      Promise.all(
+        SHELL_URLS.map((url) =>
+          fetch(url)
+            .then(stripRedirect)
+            .then((res) => cache.put(url, res))
+            .catch(() => {})
+        )
+      )
     )
   );
 });
@@ -82,10 +103,12 @@ self.addEventListener("fetch", (event) => {
         cache.match(req).then(
           (cached) =>
             cached ||
-            fetch(req).then((res) => {
-              cache.put(req, res.clone());
-              return res;
-            })
+            fetch(req)
+              .then(stripRedirect)
+              .then((res) => {
+                cache.put(req, res.clone());
+                return res;
+              })
         )
       )
     );
@@ -94,22 +117,24 @@ self.addEventListener("fetch", (event) => {
 
   // Shell: stale-while-revalidate — sirve de caché al instante si existe (evita
   // la pantalla en blanco offline) y refresca la caché en segundo plano para
-  // la siguiente carga. ignoreSearch: ahora que crm.html lleva estado en la
-  // query string (?view=...&id=...), Cache.match por defecto compara la URL
-  // completa y nunca encontraría la entrada cacheada de "/crm.html" a secas —
-  // hay que decirle explícitamente que ignore la query string al buscar.
+  // la siguiente carga. ignoreSearch: crm.html lleva estado en la query
+  // string (?view=...&id=...), y Cache.match por defecto compara la URL
+  // completa — sin esto nunca encontraría la entrada cacheada de "/crm" a
+  // secas. stripRedirect se aplica tanto a lo que sale de caché (por si
+  // quedó algo redirigido de una versión anterior) como a lo que llega de red.
   event.respondWith(
-    caches.open(SHELL_CACHE).then((cache) =>
-      cache.match(req, { ignoreSearch: true }).then((cached) => {
-        const network = fetch(req)
-          .then((res) => {
-            cache.put(req, res.clone());
-            return res;
-          })
-          .catch(() => cached);
-        return cached || network;
-      })
-    )
+    caches.open(SHELL_CACHE).then(async (cache) => {
+      const cachedRaw = await cache.match(req, { ignoreSearch: true });
+      const cached = cachedRaw ? await stripRedirect(cachedRaw) : undefined;
+      const network = fetch(req)
+        .then(stripRedirect)
+        .then((res) => {
+          cache.put(req, res.clone());
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
   );
 });
 

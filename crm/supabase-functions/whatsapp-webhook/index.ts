@@ -151,7 +151,7 @@ async function handleIncomingMessage(supabase: any, message: any, senderProfile:
   // (y por defecto no vuelve a sonar/vibrar al reemplazar) — con 5 mensajes
   // seguidos solo se ve el último, pero solo suena una vez.
   try {
-    await notifyTeamPush(senderProfile?.name || `+${waId}`, truncate(body, 140), `wa-${conversationId}`, "/crm.html?view=whatsapp&id=" + conversationId);
+    await notifyTeamPush(senderProfile?.name || `+${waId}`, truncate(body, 140), `wa-${conversationId}`, "/crm?view=whatsapp&id=" + conversationId);
   } catch (e) {
     console.error("whatsapp-webhook: push falló (no bloquea el mensaje)", e);
   }
