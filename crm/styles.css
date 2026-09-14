@@ -392,16 +392,27 @@ body.no-scroll{overflow:hidden;}
    aquí es solo la cabecera del hilo, que a 320px+ deja de caber en una fila,
    y algo de aire extra en mensajes/composer. Nada de esto existe en escritorio. */
 @media(max-width:820px){
-  .wa__thread__head{flex-wrap:wrap;row-gap:8px;}
+  /* flex-shrink:0 en cabecera y compose: por defecto un flex item puede
+     encogerse (flex-shrink:1), y en escritorio nunca hay presión real de
+     espacio para que eso se note. En móvil sí la hay (teclado en pantalla,
+     barra de Safari cambiando de alto) — sin esto, cabecera y compose
+     podían comprimirse en vez de ser SOLO .wa__msgs quien cede espacio
+     (que es justo para lo que tiene overflow-y:auto). */
+  .wa__thread__head{flex-wrap:wrap;row-gap:8px;flex-shrink:0;}
   .wa__thread__id{display:flex;align-items:center;gap:12px;min-width:0;flex:1;}
   .wa__thread__idtext{min-width:0;overflow:hidden;}
   .wa__thread__idtext>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .wa__thread__actions{display:flex;flex-basis:100%;justify-content:flex-end;gap:8px;}
-  .wa__msgs{padding:14px;}
+  /* overscroll-behavior:contain + -webkit-overflow-scrolling:touch: mismo
+     motivo que ya usa .tbl-wrap en este proyecto — asegura que iOS trate
+     .wa__msgs como su propio contenedor de scroll (con inercia) y que,
+     llegado al límite, el gesto no se escape hacia un ancestro. */
+  .wa__msgs{padding:14px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
   .bubble{max-width:82%;}
-  .wa__compose{padding:10px 12px;}
+  .wa__compose{padding:10px 12px;flex-shrink:0;}
   .wa__compose--notice{flex-wrap:wrap;row-gap:8px;}
   .wa__compose__notice{min-width:0;flex:1 1 200px;}
+  .wa__list{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
 }
 /* Inicio móvil (Fase 2): KPIs y las dos tarjetas de abajo a 1 columna. .stage-*
    son las clases del gráfico de barras por etapa — las reutiliza también el
