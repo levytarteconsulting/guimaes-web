@@ -193,7 +193,10 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
           <button className="sb-toggle" onClick={()=>setDrawerOpen(true)} aria-label="Abrir menú"><Icon name="list" size={20}/></button>
           <div><div className="topbar__title">{title}</div>{crumb && <div className="topbar__crumb">{crumb}</div>}</div>
           <div className="topbar__search"><Icon name="search" size={16}/><input placeholder="Buscar contactos, deals…"/></div>
-          <button className="topbar__icon"><Icon name="bell" size={18}/><span className="dot"></span></button>
+          {/* Provisional: hasta que exista un panel de notificaciones real, el
+              icono solo abre Configuración → Notificaciones (donde ya se
+              gestiona la suscripción push). */}
+          <button className="topbar__icon" title="Notificaciones" onClick={()=>nav("config","notificaciones")}><Icon name="bell" size={18}/></button>
         </header>
         {children}
       </div>
@@ -1167,10 +1170,22 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
   const c = CRM.contactById[conv.contact] || waFallbackContact(conv);
   const windowOpen = isWaWindowOpen(conv);
   const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
+  const [showLink,setShowLink]=uState(false);
   const convRef = uRef(conv);
   uEffect(()=>{ convRef.current = conv; },[conv]);
   const onConvChangeRef = uRef(onConvChange);
   uEffect(()=>{ onConvChangeRef.current = onConvChange; });
+
+  const linkTo=async(contactId)=>{
+    try{
+      await CRM.linkWhatsappConversation(Auth.client, conv.id, contactId);
+      onConvChangeRef.current({...convRef.current, contact: contactId});
+      setShowLink(false);
+      toast(contactId?"Conversación vinculada al contacto":"Conversación desvinculada");
+    }catch(e){
+      toast("No se pudo actualizar el vínculo: "+(e && e.message ? e.message : String(e)));
+    }
+  };
 
   const send=async ()=>{
     if(!txt.trim()||sending||!windowOpen) return;
@@ -1217,6 +1232,9 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
         <div className="wa__thread__actions">
           <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
           {onViewContact && <button className="btn btn--sm btn--ghost" onClick={onViewContact}>Ver ficha</button>}
+          {conv.contact
+            ? <button className="btn btn--sm btn--ghost" onClick={()=>linkTo(null)}><Icon name="tag" size={13}/>Desvincular</button>
+            : <button className="btn btn--sm btn--ghost" onClick={()=>setShowLink(true)}><Icon name="tag" size={13}/>Vincular a contacto</button>}
         </div>
       </div>
       <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
@@ -1229,8 +1247,18 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
         </div>
       )}
       {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message], updated:message.t}); }} toast={toast}/>}
+      {showLink && <LinkWhatsapp conv={conv} onClose={()=>setShowLink(false)} onSave={linkTo}/>}
     </div>
   );
+}
+// Mismo patrón que LinkEmail (Inbox): un select sobre CRM.CONTACTS dentro
+// de un Modal. Aquí no hay campo de "deal" porque solo se pide vincular a
+// un contacto.
+function LinkWhatsapp({conv, onClose, onSave}){
+  const [contact,setContact]=uState(conv.contact||"");
+  return <Modal title="Vincular a contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={()=>contact&&onSave(contact)} disabled={!contact}>Guardar</button></>}>
+    <Field label="Contacto"><select className="inp" value={contact} onChange={e=>setContact(e.target.value)}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>
+  </Modal>;
 }
 function WhatsApp({nav, toast, focusId}){
   const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
@@ -1835,8 +1863,8 @@ function NotificationsSettings({toast}){
 }
 
 /* ============ CONFIG ============ */
-function Config({toast}){
-  const [tab,setTab]=uState("servicios");
+function Config({toast, initialTab}){
+  const [tab,setTab]=uState(initialTab||"servicios");
   const [services,setServices]=uState(CRM.SERVICES.map(s=>({...s}))); const [showNewSvc,setNewSvc]=uState(false);
   const [users,setUsers]=uState(CRM.USERS.map(u=>({...u}))); const [showNewUser,setNewUser]=uState(false); const [delUser,setDelUser]=uState(null);
   const activeCount = users.filter(u=>u.activo).length;
@@ -2165,7 +2193,7 @@ function App(){
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;
   else if(view.name==="documents") screen=<Documents toast={fireToast}/>;
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
-  else if(view.name==="config") screen=<Config toast={fireToast}/>;
+  else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp";
   const activeNav = {contact:"contacts", deal:"pipeline"}[view.name] || view.name;
   return <>

@@ -94,8 +94,11 @@ function extractBody(message: any): string {
 }
 
 // ---- Conversación: la busca por wa_id o la crea ----
-// Nota: no intenta enlazar automáticamente con public.contactos por teléfono;
-// contact_id queda null y se puede asociar manualmente desde el CRM.
+// Al crearla, intenta enlazarla con public.contactos comparando los últimos
+// 9 dígitos del teléfono (public.find_contact_by_phone_last9, definida en
+// crm/supabase-whatsapp-match.sql — debe haberse ejecutado ya). Solo enlaza
+// si hay EXACTAMENTE un contacto que coincide; con 0 o varias coincidencias
+// contact_id queda null y se puede asociar a mano desde el CRM.
 async function findOrCreateConversationId(supabase: any, waId: string): Promise<string> {
   const { data: existing, error: selectErr } = await supabase
     .from("whatsapp_conversations")
@@ -105,9 +108,12 @@ async function findOrCreateConversationId(supabase: any, waId: string): Promise<
   if (selectErr) throw selectErr;
   if (existing) return existing.id;
 
+  const { data: matchedContactId, error: matchErr } = await supabase.rpc("find_contact_by_phone_last9", { raw_phone: waId });
+  if (matchErr) throw matchErr;
+
   const { data: created, error: insertErr } = await supabase
     .from("whatsapp_conversations")
-    .insert({ wa_id: waId, phone: `+${waId}` })
+    .insert({ wa_id: waId, phone: `+${waId}`, contact_id: matchedContactId ?? null })
     .select("id")
     .single();
   if (insertErr) throw insertErr;

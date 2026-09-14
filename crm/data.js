@@ -283,6 +283,18 @@
     if(w) w.archived = val;
     return w;
   }
+  // Vincula (contactId = uuid) o desvincula (contactId = null) una
+  // conversación de WhatsApp a un contacto — persiste en Supabase.
+  async function linkWhatsappConversation(client, id, contactId){
+    var w = WHATSAPP.find(function(x){return x.id===id;});
+    if(client){
+      var res = await client.from("whatsapp_conversations").update({contact_id: contactId}).eq("id", id).select();
+      if(res.error) throw res.error;
+      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
+    }
+    if(w) w.contact = contactId;
+    return w;
+  }
   // ---- Admins (public.admins) ----
   function rowToAdmin(row){
     return {
@@ -926,6 +938,7 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
+    linkWhatsappConversation:linkWhatsappConversation,
     fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,
