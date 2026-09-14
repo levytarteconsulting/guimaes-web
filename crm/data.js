@@ -7,6 +7,69 @@
   var AV_COLORS = ["#1F6FEB","#16B8A6","#C8A24B","#7C5CFC","#E0518A","#2E8B57","#D9822B","#4B637B"];
   var colorFor = function(str){ var h=0; str=str||""; for(var i=0;i<str.length;i++)h=(h*31+str.charCodeAt(i))>>>0; return AV_COLORS[h%AV_COLORS.length]; };
 
+  // ---- Zona horaria fija de Madrid para tareas (due_at) ----
+  // El CRM es de uso exclusivo del despacho en España: en vez de que la
+  // hora de una tarea dependa de en qué zona esté configurado el navegador
+  // de quien la crea o la mira (portátil mal configurado, alguien de
+  // viaje...), se fija siempre a Europe/Madrid en los dos sentidos — al
+  // guardar (aquí) y al mostrar (fmtDue en app.jsx). Antes, el string crudo
+  // del <input type="datetime-local"> (sin zona) se mandaba tal cual a una
+  // columna timestamptz, y Postgres lo guardaba como si esos dígitos ya
+  // fueran UTC — 18:00 escritas en Madrid se guardaban como 18:00 UTC
+  // (20:00 reales), un desfase de 1-2h según la época del año.
+  var MADRID_TZ = "Europe/Madrid";
+  function pad2(n){ return String(n).padStart(2,"0"); }
+  // Desfase en minutos de Europe/Madrid respecto a UTC para el instante
+  // dado (+60 en invierno CET, +120 en verano CEST) — se calcula con Intl
+  // en vez de codificar a mano las fechas de cambio de hora, para que el
+  // horario de verano se resuelva solo, siempre.
+  function madridOffsetMinutesAt(utcMs){
+    var dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: MADRID_TZ, hourCycle: "h23",
+      year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"
+    });
+    var parts = {};
+    dtf.formatToParts(new Date(utcMs)).forEach(function(p){ if(p.type!=="literal") parts[p.type]=p.value; });
+    var asIfUTC = Date.UTC(+parts.year, +parts.month-1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+    return (asIfUTC - utcMs) / 60000;
+  }
+  // "YYYY-MM-DDTHH:mm" (de un <input type="datetime-local">, sin zona) →
+  // ISO con el offset real de Madrid para esa fecha (+01:00 o +02:00 según
+  // DST). Si el valor ya trae zona (Z o ±HH:MM) se deja tal cual, para no
+  // convertir dos veces si alguna vez llega ya en ISO.
+  function madridDatetimeLocalToISO(value){
+    if(!value) return value;
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+    if(!m) return value;
+    var y=+m[1], mo=+m[2], d=+m[3], h=+m[4], mi=+m[5], s=+(m[6]||0);
+    // Aproximación: tratar los dígitos tal cual como si ya fueran UTC, solo
+    // para saber en qué lado del cambio de hora cae esta fecha — el margen
+    // de error de esa aproximación es como mucho el propio offset (1-2h),
+    // así que solo fallaría en el minuto exacto del cambio de hora.
+    var approxUTC = Date.UTC(y, mo-1, d, h, mi, s);
+    var offsetMin = madridOffsetMinutesAt(approxUTC);
+    var sign = offsetMin>=0 ? "+" : "-";
+    var abs = Math.abs(offsetMin);
+    return y+"-"+pad2(mo)+"-"+pad2(d)+"T"+pad2(h)+":"+pad2(mi)+":"+pad2(s)+sign+pad2(Math.floor(abs/60))+":"+pad2(abs%60);
+  }
+  // Inverso: un due_at ya guardado (ISO/timestamptz) → "YYYY-MM-DDTHH:mm"
+  // con los dígitos de reloj de Madrid, para precargar el <input
+  // datetime-local> al editar una tarea — independiente del navegador de
+  // quien la edita (si no, reabrir y guardar sin tocar la fecha podía
+  // desplazarla otra vez, con el navegador equivocado).
+  function isoToMadridDatetimeLocal(iso){
+    if(!iso) return "";
+    var d = new Date(iso);
+    if(isNaN(d.getTime())) return "";
+    var dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: MADRID_TZ, hourCycle: "h23",
+      year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"
+    });
+    var parts = {};
+    dtf.formatToParts(d).forEach(function(p){ if(p.type!=="literal") parts[p.type]=p.value; });
+    return parts.year+"-"+parts.month+"-"+parts.day+"T"+parts.hour+":"+parts.minute;
+  }
+
   // ---- Users / Admins (public.admins — ver crm/supabase-admins.sql) ----
   // Rol de administración del propio CRM: 'admin' puede gestionar
   // administradores, 'miembro' tiene acceso normal pero no. No confundir
@@ -680,6 +743,7 @@
     var fields = ["title","assigned_to","due_at","contact_id","deal_id","status","archived"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
+    if(payload.due_at) payload.due_at = madridDatetimeLocalToISO(payload.due_at);
     sanitizeFkPayload(payload);
     if(!payload.status) payload.status = "pending";
     if(payload.archived===undefined) payload.archived = false;
@@ -693,6 +757,11 @@
   var TAREAS_COLUMNS = ["title","assigned_to","due_at","contact_id","deal_id","status","archived"];
   async function updateTask(client, id, patch){
     var t = TASKS.find(function(x){return x.id===id;}); if(!t) return null;
+    // Se convierte una sola vez, aquí, antes de repartirse tanto al payload
+    // de BD como a la copia en memoria de abajo — si cada uno convirtiera
+    // por su lado (o uno lo hiciera y el otro no), t.due podría quedar
+    // desincronizado del valor real guardado hasta el próximo recargar.
+    if(patch.due_at) patch = Object.assign({}, patch, {due_at: madridDatetimeLocalToISO(patch.due_at)});
     if(client){
       var payload = {};
       TAREAS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
@@ -941,6 +1010,7 @@
     linkWhatsappConversation:linkWhatsappConversation,
     fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
+    isoToMadridDatetimeLocal:isoToMadridDatetimeLocal,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,

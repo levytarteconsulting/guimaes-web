@@ -650,11 +650,15 @@ function EditContact({contact, onClose, onSave}){
     <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
   </Modal>;
 }
+// timeZone fijo a Madrid (no la del navegador): el CRM es de uso exclusivo
+// del despacho en España, así que una tarea se escribe en hora de Madrid
+// (ver madridDatetimeLocalToISO en data.js) y tiene que mostrarse igual,
+// sin importar desde dónde ni con qué reloj la esté mirando cada persona.
 function fmtDue(iso){
   if(!iso) return "sin fecha";
   var d = new Date(iso);
   if(isNaN(d.getTime())) return "sin fecha";
-  return d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"});
+  return d.toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric",timeZone:"Europe/Madrid"})+" "+d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Madrid"});
 }
 function isOverdue(t){
   if(!t.due || t.status==="done") return false;
@@ -673,13 +677,6 @@ function TaskRow({t, toast, onToggle, onEdit, onDelete}){
     {onEdit && <button className="btn btn--sm btn--ghost task-row-action" title="Editar tarea" onClick={onEdit}><Icon name="edit" size={14}/></button>}
     {onDelete && <button className="btn btn--sm btn--ghost task-row-action" title="Eliminar tarea" onClick={onDelete}><Icon name="trash" size={14}/></button>}
   </div>;
-}
-function toDatetimeLocal(iso){
-  if(!iso) return "";
-  var d = new Date(iso);
-  if(isNaN(d.getTime())) return "";
-  var pad=function(n){return String(n).padStart(2,"0");};
-  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
 }
 function NewTask({contactId, dealId, defaultOwner, onClose, onSave}){
   const [f,setF]=uState({title:"", due:"", owner:defaultOwner||CRM.USERS[0]?.id||"", contact:contactId||"", deal:dealId||""});
@@ -707,7 +704,7 @@ function NewTask({contactId, dealId, defaultOwner, onClose, onSave}){
 function EditTask({task, onClose, onSave}){
   const [f,setF]=uState(()=>({
     title: task.title||"",
-    due: toDatetimeLocal(task.due),
+    due: CRM.isoToMadridDatetimeLocal(task.due),
     owner: task.owner||"",
     contact: task.contact||"",
     deal: task.deal||""
@@ -734,13 +731,21 @@ function EditTask({task, onClose, onSave}){
 }
 
 /* ============ TASKS ============ */
-function Tasks({nav, toast, user}){
+// `view` hace de único selector de filtro: "mine"/"all"/"archived", o
+// directamente el id de un administrador (public.admins) cuando se elige
+// "Por miembro" — así el filtrado vive en una sola expresión en vez de
+// tener un estado de "miembro seleccionado" aparte que duplicara la lógica
+// de list de abajo.
+function Tasks({nav, toast, user, focusId}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const knownUser = !!CRM.userById(user?.id);
   const [view,setView]=uState(knownUser?"mine":"all");
   const [showNew,setNew]=uState(false);
   const [editing,setEditing]=uState(null);
-  const list = (view==="archived" ? CRM.TASKS.filter(t=>t.archived) : CRM.TASKS.filter(t=>!t.archived && (view==="all" || t.owner===user?.id)))
+  const memberFilter = CRM.USERS.find(u=>u.id===view);
+  const list = (view==="archived" ? CRM.TASKS.filter(t=>t.archived) : CRM.TASKS.filter(t=>!t.archived && (
+      view==="all" ? true : view==="mine" ? t.owner===user?.id : t.owner===view
+    )))
     .slice()
     .sort((a,b)=>{
       if(!a.due && !b.due) return 0;
@@ -748,6 +753,14 @@ function Tasks({nav, toast, user}){
       if(!b.due) return -1;
       return new Date(a.due)-new Date(b.due);
     });
+  // Deep-link desde un push/email de "tarea asignada" (?view=tareas&id=...)
+  // — abre directamente el modal de edición de esa tarea, igual que
+  // WhatsApp hace con focusId para una conversación.
+  uEffect(()=>{
+    if(!focusId) return;
+    const t = CRM.TASKS.find(x=>x.id===focusId);
+    if(t) setEditing(t);
+  },[focusId]);
   const doToggle=async(t)=>{
     try{ await CRM.toggleTaskDone(Auth.client, t.id); toast("Tarea completada"); bump(); }
     catch(e){ toast("No se pudo completar: "+e.message); }
@@ -763,6 +776,10 @@ function Tasks({nav, toast, user}){
         <button className={"chip"+(view==="mine"?" active":"")} onClick={()=>setView("mine")}>Mis tareas</button>
         <button className={"chip"+(view==="all"?" active":"")} onClick={()=>setView("all")}>Todas</button>
         <button className={"chip"+(view==="archived"?" active":"")} onClick={()=>setView("archived")}>Archivadas</button>
+        <select className="inp" style={{width:"auto",padding:"7px 10px",fontSize:13}} value={memberFilter?view:""} onChange={e=>setView(e.target.value||"all")}>
+          <option value="">Por miembro…</option>
+          {CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
         <div className="toolbar__spacer"></div>
         <button className="btn btn--primary" onClick={()=>setNew(true)}><Icon name="plus" size={16}/>Nueva tarea</button>
       </div>
@@ -771,7 +788,7 @@ function Tasks({nav, toast, user}){
           onToggle={t.archived?undefined:()=>doToggle(t)}
           onEdit={()=>setEditing(t)}
           onDelete={()=>doDelete(t)}
-        />) : <Empty icon="task" title={view==="archived"?"Sin tareas archivadas":"Sin tareas"} sub={view==="mine"?"Estás al día.":undefined}/>}
+        />) : <Empty icon="task" title={view==="archived"?"Sin tareas archivadas":memberFilter?("Sin tareas de "+memberFilter.name.split(" ")[0]):"Sin tareas"} sub={view==="mine"?"Estás al día.":undefined}/>}
       </div></div>
       {showNew && <NewTask defaultOwner={knownUser?user.id:undefined} onClose={()=>setNew(false)} onSave={async(f)=>{
         try{
@@ -2215,7 +2232,7 @@ function App(){
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
-  else if(view.name==="tareas") screen=<Tasks nav={nav} toast={fireToast} user={user}/>;
+  else if(view.name==="tareas") screen=<Tasks nav={nav} toast={fireToast} user={user} focusId={view.id}/>;
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;

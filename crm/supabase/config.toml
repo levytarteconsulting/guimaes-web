@@ -13,6 +13,13 @@ entrypoint = "../supabase-functions/admin-users/index.ts"
 [functions.notify-new-lead]
 entrypoint = "../supabase-functions/notify-new-lead/index.ts"
 
+[functions.notify-task-assignment]
+entrypoint = "../supabase-functions/notify-task-assignment/index.ts"
+# Sin verify_jwt explícito, igual que notify-new-lead: el trigger manda la
+# anon key como Authorization (un JWT válido, aunque anónimo) y el
+# secreto real de "esto es nuestro propio trigger" es x-hook-secret,
+# comprobado dentro del propio código de la función.
+
 [functions.whatsapp-webhook]
 entrypoint = "../supabase-functions/whatsapp-webhook/index.ts"
 verify_jwt = false
