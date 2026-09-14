@@ -7,6 +7,26 @@
 
   var client = (configured && window.supabase) ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
 
+  // PASSWORD_RECOVERY: Supabase lo dispara UNA sola vez, muy pronto (dentro
+  // de su propio setTimeout(0) al detectar el token de recuperación en la
+  // URL, justo al crear el cliente) — mucho antes de que React monte y
+  // llame a Auth.onAuthStateChange() desde app.jsx. Si nadie está
+  // escuchando en ese instante exacto, el evento se pierde para siempre y
+  // el enlace de "olvidé mi contraseña" no muestra el formulario de nueva
+  // contraseña (el resto del login sigue funcionando, por eso este fallo
+  // pasa desapercibido). Por eso nos suscribimos aquí mismo, en la misma
+  // línea en que se crea el cliente — lo antes posible — y guardamos el
+  // evento si todavía nadie lo ha reclamado, para repetírselo al primer
+  // callback que se registre después (ver onAuthStateChange más abajo).
+  var authListeners = [];
+  var pendingRecoverySession = null;
+  if (client) {
+    client.auth.onAuthStateChange(function (event, session) {
+      if (event === "PASSWORD_RECOVERY") pendingRecoverySession = session;
+      authListeners.forEach(function (cb) { cb(event, session); });
+    });
+  }
+
   // Consulta real contra public.admins (sustituye a la antigua lista
   // hardcodeada en crm/data.js). Se comprueba por auth_user_id, no por
   // email, porque es el dato ya verificado por Supabase Auth en `user` —
@@ -56,7 +76,11 @@
 
   async function sendPasswordReset(email) {
     if (!client) return { error: { message: "El acceso aún no está configurado (Supabase)." } };
-    var res = await client.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split("#")[0] });
+    // Fijo (no window.location.href): el Site URL del proyecto de Supabase
+    // es la raíz del dominio (no se puede cambiar, la usará el área
+    // cliente), así que sin esto el enlace del correo manda siempre a
+    // https://guimaes.es y nunca aquí.
+    var res = await client.auth.resetPasswordForEmail(email, { redirectTo: "https://guimaes.es/crm" });
     if (res.error) return { error: { message: friendlyError(res.error.message) } };
     return {};
   }
@@ -86,7 +110,13 @@
 
   async function signOut() { if (client) await client.auth.signOut(); }
   async function getSession() { if (!client) return null; var r = await client.auth.getSession(); return r.data.session; }
-  function onAuthStateChange(cb) { if (client) client.auth.onAuthStateChange(cb); }
+  function onAuthStateChange(cb) {
+    authListeners.push(cb);
+    if (pendingRecoverySession) {
+      cb("PASSWORD_RECOVERY", pendingRecoverySession);
+      pendingRecoverySession = null;
+    }
+  }
 
   window.Auth = {
     configured: configured, isAllowed: isAllowed, client: client,

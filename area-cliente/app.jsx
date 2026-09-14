@@ -72,6 +72,38 @@ function AuthScreen({ onAuthed }) {
   );
 }
 
+/* ============ RECUPERAR CONTRASEÑA ============ */
+function ClientPasswordRecovery({ onDone }) {
+  const [pw, setPw] = uState(""); const [pw2, setPw2] = uState("");
+  const [err, setErr] = uState(null); const [busy, setBusy] = uState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pw.length < 6) { setErr("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (pw !== pw2) { setErr("Las contraseñas no coinciden."); return; }
+    setBusy(true); setErr(null);
+    const { error } = await ClientAuth.updatePassword(pw);
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    onDone();
+  };
+  return (
+    <div className="ac-wrap">
+      <div className="ac-card">
+        <div className="ac-brand">GUIMAES</div>
+        <div className="ac-tag">Área cliente</div>
+        <h2 style={{ fontSize: 20, marginBottom: 6 }}>Nueva contraseña</h2>
+        <p className="muted" style={{ fontSize: 13.5, marginBottom: 18 }}>Elige una nueva contraseña para tu cuenta.</p>
+        {err && <div className="ac-err">{err}</div>}
+        <form onSubmit={submit}>
+          <Field label="Nueva contraseña"><input className="inp" type="password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} required minLength={6} /></Field>
+          <Field label="Repite la contraseña"><input className="inp" type="password" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} required minLength={6} /></Field>
+          <button className="btn btn--primary" type="submit" style={{ width: "100%" }} disabled={busy}>{busy ? "Guardando…" : "Guardar contraseña"}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function profileKey(session) { return "guimaes_client_profile_" + session.user.id; }
 function loadProfile(session) {
   try { const raw = localStorage.getItem(profileKey(session)); if (raw) return JSON.parse(raw); } catch (e) {}
@@ -119,6 +151,7 @@ function Dashboard({ session, onLogout }) {
 
 function App() {
   const [session, setSession] = uState(null); const [booting, setBooting] = uState(true);
+  const [recovery, setRecovery] = uState(false);
   uEffect(() => {
     let mounted = true;
     (async () => {
@@ -126,6 +159,7 @@ function App() {
         const s = await ClientAuth.getSession();
         if (mounted && s) setSession(s);
         ClientAuth.onAuthStateChange((event, s) => {
+          if (event === "PASSWORD_RECOVERY") { setRecovery(true); return; }
           if (event === "SIGNED_IN") setSession(s);
           if (event === "SIGNED_OUT") setSession(null);
         });
@@ -135,7 +169,16 @@ function App() {
     return () => { mounted = false; };
   }, []);
   const logout = async () => { await ClientAuth.signOut(); setSession(null); };
+  // Tras guardar la nueva contraseña, la sesión de recuperación ya es una
+  // sesión válida como cualquier otra — se recupera para entrar directo al
+  // panel en vez de obligar a iniciar sesión otra vez.
+  const onRecoveryDone = async () => {
+    setRecovery(false);
+    const s = await ClientAuth.getSession();
+    if (s) setSession(s);
+  };
   if (booting) return <div className="ac-wrap"></div>;
+  if (recovery) return <ClientPasswordRecovery onDone={onRecoveryDone} />;
   if (!session) return <AuthScreen onAuthed={setSession} />;
   return <Dashboard session={session} onLogout={logout} />;
 }

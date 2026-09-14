@@ -1862,6 +1862,33 @@ function NotificationsSettings({toast}){
   </div></div>;
 }
 
+/* ============ MI CUENTA ============ */
+function MyAccount({toast}){
+  const [pw,setPw]=uState(""); const [pw2,setPw2]=uState("");
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const submit=async(e)=>{
+    e.preventDefault();
+    if(pw.length<8){ setErr("La contraseña debe tener al menos 8 caracteres."); return; }
+    if(pw!==pw2){ setErr("Las contraseñas no coinciden."); return; }
+    setBusy(true); setErr(null);
+    const {error} = await Auth.updatePassword(pw);
+    setBusy(false);
+    if(error){ setErr(error.message); return; }
+    setPw(""); setPw2("");
+    toast("Contraseña actualizada");
+  };
+  return <div className="card" style={{maxWidth:420}}><div className="card__body">
+    <h3 style={{fontSize:15,marginBottom:4}}>Cambiar contraseña</h3>
+    <p className="muted" style={{fontSize:13,marginBottom:16}}>Se aplica a la cuenta con la que has iniciado sesión ahora mismo.</p>
+    {err && <div className="login__err">{err}</div>}
+    <form onSubmit={submit}>
+      <Field label="Nueva contraseña"><input className="inp" type="password" autoComplete="new-password" value={pw} onChange={e=>setPw(e.target.value)} required/></Field>
+      <Field label="Repite la contraseña"><input className="inp" type="password" autoComplete="new-password" value={pw2} onChange={e=>setPw2(e.target.value)} required/></Field>
+      <button className="btn btn--primary" type="submit" disabled={busy}>{busy?"Guardando…":"Guardar contraseña"}</button>
+    </form>
+  </div></div>;
+}
+
 /* ============ CONFIG ============ */
 function Config({toast, initialTab}){
   const [tab,setTab]=uState(initialTab||"servicios");
@@ -1887,7 +1914,7 @@ function Config({toast, initialTab}){
     toast("Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
-    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"notificaciones",label:"Notificaciones"}]} active={tab} onChange={setTab}/>
+    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"notificaciones",label:"Notificaciones"},{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
     {tab==="servicios" && <>
       <div className="toolbar"><div className="muted" style={{fontSize:13}}>Catálogo de servicios que ofrece el despacho. Puedes crear nuevos.</div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNewSvc(true)}><Icon name="plus" size={16}/>Nuevo servicio</button></div>
       <div className="svc-grid">{services.map(s=><div key={s.id} className="card"><div className="card__body"><div className="row" style={{gap:10}}><div className="lrow__ico" style={{background:s.color+"1A",color:s.color}}><Icon name="briefcase" size={18}/></div><div style={{flex:1}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{s.name}</div><div className="muted" style={{fontSize:12}}>{s.recurring?"Recurrente":"Puntual"} · {s.frequency}</div></div></div></div></div>)}</div>
@@ -1909,6 +1936,7 @@ function Config({toast, initialTab}){
       <p className="muted" style={{fontSize:12,marginTop:10}}>Al crear un administrador aquí se genera directamente su acceso real (email + contraseña temporal) en Supabase. Desactivar le quita el acceso sin borrar su cuenta; eliminar revoca su cuenta de Supabase por completo.</p>
     </>}
     {tab==="notificaciones" && <NotificationsSettings toast={toast}/>}
+    {tab==="cuenta" && <MyAccount toast={toast}/>}
     {showNewSvc && <NewService onClose={()=>setNewSvc(false)} onSave={addService}/>}
     {showNewUser && <NewUser onClose={()=>setNewUser(false)} onSave={addUser}/>}
     {delUser && <Modal title="Eliminar administrador" onClose={()=>setDelUser(null)} footer={<><button className="btn btn--ghost" onClick={()=>setDelUser(null)}>Cancelar</button><button className="btn btn--danger" onClick={confirmRemoveUser}>Eliminar</button></>}>
