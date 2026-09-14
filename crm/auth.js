@@ -7,11 +7,23 @@
 
   var client = (configured && window.supabase) ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
 
-  // Lista cerrada de administradores permitidos (fuente: crm/data.js, se recalcula siempre)
-  function isAllowed(email) {
-    if (!email || !window.CRM) return false;
-    var e = email.toLowerCase();
-    return CRM.USERS.some(function (u) { return u.email.toLowerCase() === e; });
+  // Consulta real contra public.admins (sustituye a la antigua lista
+  // hardcodeada en crm/data.js). Se comprueba por auth_user_id, no por
+  // email, porque es el dato ya verificado por Supabase Auth en `user` —
+  // comparar por email otra vez sería fiarse de una cadena que en teoría ya
+  // no puede mentir, pero sin ganar nada a cambio. Cualquier fallo de la
+  // consulta (red, RLS, tabla inexistente) deniega el acceso: nunca hay que
+  // "abrir por defecto" ante un error.
+  async function isAllowed(user) {
+    if (!user || !client) return false;
+    try {
+      var res = await client.from("admins").select("id").eq("auth_user_id", user.id).eq("activo", true).maybeSingle();
+      if (res.error) { if (window.console) console.error("Auth.isAllowed:", res.error); return false; }
+      return !!res.data;
+    } catch (e) {
+      if (window.console) console.error("Auth.isAllowed:", e);
+      return false;
+    }
   }
 
   function friendlyError(msg) {
@@ -27,7 +39,7 @@
     if (!client) return { error: { message: "El acceso aún no está configurado (Supabase)." } };
     var res = await client.auth.signInWithPassword({ email: email, password: password });
     if (res.error) return { error: { message: friendlyError(res.error.message) } };
-    if (!isAllowed(res.data.user.email)) {
+    if (!(await isAllowed(res.data.user))) {
       await client.auth.signOut();
       return { error: { message: "Esta cuenta no tiene acceso al CRM." } };
     }
@@ -56,9 +68,9 @@
     return {};
   }
 
-  async function createAdminUser(email, password, name) {
+  async function createAdminUser(email, password, name, rol) {
     if (!client) return { error: { message: "El acceso aún no está configurado (Supabase)." } };
-    const res = await client.functions.invoke("admin-users", { body: { action: "create", email, password, name } });
+    const res = await client.functions.invoke("admin-users", { body: { action: "create", email, password, name, rol } });
     if (res.error) return { error: { message: friendlyError(res.error.message) } };
     if (res.data && res.data.error) return { error: { message: friendlyError(res.data.error) } };
     return { data: res.data };

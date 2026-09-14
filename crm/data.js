@@ -7,21 +7,18 @@
   var AV_COLORS = ["#1F6FEB","#16B8A6","#C8A24B","#7C5CFC","#E0518A","#2E8B57","#D9822B","#4B637B"];
   var colorFor = function(str){ var h=0; str=str||""; for(var i=0;i<str.length;i++)h=(h*31+str.charCodeAt(i))>>>0; return AV_COLORS[h%AV_COLORS.length]; };
 
-  // ---- Users (5 admins) ----
+  // ---- Users / Admins (public.admins — ver crm/supabase-admins.sql) ----
+  // Rol de administración del propio CRM: 'admin' puede gestionar
+  // administradores, 'miembro' tiene acceso normal pero no. No confundir
+  // con el "owner" libre de deals/contactos/tareas.
   var ROLES = [
     {id:"admin", label:"Administrador"},
-    {id:"asesor", label:"Asesor"},
-    {id:"viewer", label:"Solo lectura"}
+    {id:"miembro", label:"Miembro"}
   ];
   var roleById={}; ROLES.forEach(function(r){roleById[r.id]=r;});
-  var USERS = [
-    {id:"u1", name:"Guillermo Guimaes", email:"guillermo@guimaes.es", role:"admin", title:"Socio director", color:"#1F6FEB"},
-    {id:"u2", name:"Juan Manuel", email:"juanmanuel@guimaes.es", role:"admin", title:"Socio · Fiscal", color:"#16B8A6"},
-    {id:"u3", name:"Macarena", email:"macarena@guimaes.es", role:"admin", title:"Asesora · Laboral", color:"#E0518A"},
-    {id:"u4", name:"J. Chávarri", email:"jchavarrisantiago@gmail.com", role:"admin", title:"Asesor · Contable", color:"#C8A24B"},
-    {id:"u5", name:"Levy Tarte", email:"levytarteconsulting@gmail.com", role:"admin", title:"Consultor · Estrategia", color:"#7C5CFC"},
-    {id:"u6", name:"Guillermo Guimaes", email:"guillermogteran@gmail.com", role:"admin", title:"Socio director", color:"#1F6FEB"}
-  ];
+  // Se rellena en caliente con loadAdmins() tras el login — ver
+  // crm/app.jsx (arranque de App y onAuthStateChange). Vacío hasta entonces.
+  var USERS = [];
 
   // ---- Services catalog (6 + user can add) ----
   var SERVICES = [
@@ -286,22 +283,58 @@
     if(w) w.archived = val;
     return w;
   }
-  // ---- Mutations (prototipo: en memoria) ----
-  var AV_PALETTE = AV_COLORS;
-  function addUser(u){
-    var id = "u"+Date.now().toString(36);
-    var full = Object.assign({id:id, role:"admin", color:AV_PALETTE[USERS.length%AV_PALETTE.length]}, u);
-    USERS.push(full);
-    return full;
+  // ---- Admins (public.admins) ----
+  function rowToAdmin(row){
+    return {
+      id: row.id,
+      auth_user_id: row.auth_user_id || null,
+      name: row.nombre || "",
+      email: row.email || "",
+      role: row.rol || "miembro",
+      activo: row.activo!==false,
+      color: colorFor(row.email||row.nombre||row.id)
+    };
   }
-  function updateUser(id, patch){
-    var u = USERS.find(function(x){return x.id===id;}); if(!u) return null;
-    Object.assign(u, patch);
+  // Inserta o reemplaza en USERS por id — usado tras cualquier escritura
+  // confirmada en BD (alta, edición, activar/desactivar), para que el resto
+  // de la UI (selects de "owner", avatares, CRM.userById...) vea el cambio
+  // sin necesidad de recargar toda la lista.
+  function cacheAdmin(u){
+    var i = USERS.findIndex(function(x){return x.id===u.id;});
+    if(i>-1) USERS[i]=u; else USERS.push(u);
     return u;
   }
-  function removeUser(id){
+  function removeAdminLocal(id){
     var idx = USERS.findIndex(function(u){return u.id===id;});
     if(idx>-1) USERS.splice(idx,1);
+  }
+  async function loadAdmins(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("admins").select("*").order("nombre",{ascending:true});
+      if(res.error || !res.data) return 0;
+      USERS.length = 0;
+      res.data.forEach(function(row){ USERS.push(rowToAdmin(row)); });
+      return USERS.length;
+    }catch(e){ if(window.console) console.error("loadAdmins:", e); return 0; }
+  }
+  // Edita nombre/rol de un administrador ya existente — activo se cambia
+  // aparte con setAdminActivo. No toca auth.users (email/contraseña siguen
+  // gestionándose vía la Edge Function admin-users).
+  async function updateAdmin(client, id, patch){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var payload = {};
+    if(patch.nombre!==undefined) payload.nombre = patch.nombre;
+    if(patch.rol!==undefined) payload.rol = patch.rol;
+    var res = await client.from("admins").update(payload).eq("id", id).select().single();
+    if(res.error) throw res.error;
+    return cacheAdmin(rowToAdmin(res.data));
+  }
+  async function setAdminActivo(client, id, activo){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var res = await client.from("admins").update({activo: activo}).eq("id", id).select().single();
+    if(res.error) throw res.error;
+    return cacheAdmin(rowToAdmin(res.data));
   }
   var CONTACTOS_COLUMNS = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source","kyc","registered"];
   async function updateContact(client, id, patch){
@@ -883,7 +916,8 @@
   window.CRM = {
     USERS:USERS, userById:function(id){return USERS.filter(function(u){return u.id===id;})[0];},
     ROLES:ROLES, roleById:roleById,
-    addUser:addUser, updateUser:updateUser, removeUser:removeUser,
+    rowToAdmin:rowToAdmin, cacheAdmin:cacheAdmin, removeAdminLocal:removeAdminLocal,
+    loadAdmins:loadAdmins, updateAdmin:updateAdmin, setAdminActivo:setAdminActivo,
     SERVICES:SERVICES, serviceById:function(id){var m={};SERVICES.forEach(function(s){m[s.id]=s;});return m[id];},
     STAGES:STAGES, stageById:stageById,
     LIFECYCLE:LIFECYCLE, lifecycleById:lifecycleById,

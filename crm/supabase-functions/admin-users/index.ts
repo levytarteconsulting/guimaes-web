@@ -33,14 +33,45 @@ Deno.serve(async (req) => {
 
     // Cliente con permisos de administrador — solo se usa aquí, en el servidor.
     const admin = createClient(url, serviceKey);
-    const { action, email, password, name } = await req.json();
+
+    // Esta función usa la service role key, que ignora las RLS de
+    // public.admins por completo — así que la comprobación de que quien
+    // llama tiene rol 'admin' (no solo "está logueado") hay que hacerla a
+    // mano aquí, si no cualquier cuenta con acceso al CRM podría crear o
+    // borrar administradores sin importar su rol.
+    const { data: caller, error: callerErr } = await admin
+      .from("admins")
+      .select("rol, activo")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+    if (callerErr) return new Response(JSON.stringify({ error: callerErr.message }), { status: 500, headers: corsHeaders });
+    if (!caller || !caller.activo || caller.rol !== "admin") {
+      return new Response(JSON.stringify({ error: "Solo los administradores con rol 'admin' pueden gestionar accesos." }), { status: 403, headers: corsHeaders });
+    }
+
+    const { action, email, password, name, rol } = await req.json();
 
     if (action === "create") {
       const { data, error } = await admin.auth.admin.createUser({
         email, password, email_confirm: true, user_metadata: { name },
       });
       if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
-      return new Response(JSON.stringify({ user: data.user }), { headers: corsHeaders });
+
+      // La fila de public.admins se crea aquí, en la misma llamada que el
+      // usuario de Auth — si esto falla, se deshace la creación de Auth en
+      // vez de dejar una cuenta huérfana sin fila (inerte para el login,
+      // pero invisible y no reutilizable: el email ya estaría "gastado"
+      // en Auth aunque nadie lo vea en la pantalla de Usuarios).
+      const { data: adminRow, error: adminErr } = await admin
+        .from("admins")
+        .insert({ auth_user_id: data.user.id, nombre: name, email, rol: rol === "admin" ? "admin" : "miembro" })
+        .select()
+        .single();
+      if (adminErr) {
+        await admin.auth.admin.deleteUser(data.user.id);
+        return new Response(JSON.stringify({ error: adminErr.message }), { status: 400, headers: corsHeaders });
+      }
+      return new Response(JSON.stringify({ user: data.user, admin: adminRow }), { headers: corsHeaders });
     }
 
     if (action === "delete") {
@@ -50,6 +81,9 @@ Deno.serve(async (req) => {
       if (!target) return new Response(JSON.stringify({ error: "Ese usuario no existe en Supabase." }), { status: 404, headers: corsHeaders });
       const { error } = await admin.auth.admin.deleteUser(target.id);
       if (error) return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
+      // Limpia también la fila de admins — si no, el email queda "ocupado"
+      // por la unique constraint y no se puede volver a dar de alta.
+      await admin.from("admins").delete().eq("auth_user_id", target.id);
       return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
     }
 

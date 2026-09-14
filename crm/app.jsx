@@ -1839,13 +1839,24 @@ function Config({toast}){
   const [tab,setTab]=uState("servicios");
   const [services,setServices]=uState(CRM.SERVICES.map(s=>({...s}))); const [showNewSvc,setNewSvc]=uState(false);
   const [users,setUsers]=uState(CRM.USERS.map(u=>({...u}))); const [showNewUser,setNewUser]=uState(false); const [delUser,setDelUser]=uState(null);
+  const activeCount = users.filter(u=>u.activo).length;
   const addService=(svc)=>{ setServices(ss=>[...ss,{...svc,id:"s"+(ss.length+1)}]); setNewSvc(false); toast("Servicio creado"); };
-  const changeRole=(id,role)=>{ CRM.updateUser(id,{role}); setUsers(us=>us.map(u=>u.id===id?{...u,role}:u)); toast("Rol actualizado"); };
-  const addUser=(u)=>{ const full=CRM.addUser(u); setUsers(us=>[...us,full]); setNewUser(false); toast("Administrador creado — ya puede iniciar sesión con la contraseña temporal"); };
+  const changeRole=async(id,rol)=>{
+    try{ const u=await CRM.updateAdmin(Auth.client,id,{rol}); setUsers(us=>us.map(x=>x.id===id?u:x)); toast("Rol actualizado"); }
+    catch(e){ toast("No se pudo actualizar el rol: "+e.message); }
+  };
+  const toggleActivo=async(u)=>{
+    if(u.activo && activeCount<=1){ toast("No puedes desactivar al último administrador activo."); return; }
+    try{ const updated=await CRM.setAdminActivo(Auth.client,u.id,!u.activo); setUsers(us=>us.map(x=>x.id===u.id?updated:x)); toast(updated.activo?"Administrador reactivado":"Administrador desactivado — ya no puede iniciar sesión"); }
+    catch(e){ toast("No se pudo cambiar el estado: "+e.message); }
+  };
+  const addUser=(admin)=>{ CRM.cacheAdmin(admin); setUsers(us=>[...us,admin]); setNewUser(false); toast("Administrador creado — ya puede iniciar sesión con la contraseña temporal"); };
   const confirmRemoveUser=async()=>{
+    if(activeCount<=1 && delUser.activo){ toast("No puedes eliminar al último administrador activo."); setDelUser(null); return; }
     const {error} = await Auth.deleteAdminUser(delUser.email);
-    CRM.removeUser(delUser.id); setUsers(us=>us.filter(u=>u.id!==delUser.id)); setDelUser(null);
-    toast(error? ("Eliminado del CRM, pero aviso: "+error.message) : "Administrador eliminado y acceso revocado en Supabase");
+    if(error){ toast("No se pudo eliminar: "+error.message); setDelUser(null); return; }
+    CRM.removeAdminLocal(delUser.id); setUsers(us=>us.filter(u=>u.id!==delUser.id)); setDelUser(null);
+    toast("Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
     <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"notificaciones",label:"Notificaciones"}]} active={tab} onChange={setTab}/>
@@ -1855,17 +1866,19 @@ function Config({toast}){
     </>}
     {tab==="usuarios" && <>
       <div className="toolbar"><div className="muted" style={{fontSize:13}}>Administradores con acceso al CRM. Solo estos emails pueden iniciar sesión.</div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNewUser(true)}><Icon name="plus" size={16}/>Nuevo administrador</button></div>
-      <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Puesto</th><th>Estado</th><th></th></tr></thead><tbody>
+      <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody>
         {users.map(u=><tr key={u.id}>
           <td className="row" style={{gap:10}}><Avatar name={u.name} size="md" color={u.color}/><span className="tbl__name">{u.name}</span></td>
           <td className="tbl__sub">{u.email}</td>
-          <td onClick={e=>e.stopPropagation()}><select className="inp" style={{padding:"6px 10px",fontSize:13,width:"auto"}} value={u.role||"admin"} onChange={e=>changeRole(u.id,e.target.value)}>{CRM.ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></td>
-          <td className="tbl__sub">{u.title}</td>
-          <td><Badge label="Activo" color="#1F9D6B"/></td>
-          <td onClick={e=>e.stopPropagation()}><button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>setDelUser(u)} disabled={users.length<=1}><Icon name="trash" size={14}/></button></td>
+          <td onClick={e=>e.stopPropagation()}><select className="inp" style={{padding:"6px 10px",fontSize:13,width:"auto"}} value={u.role||"miembro"} onChange={e=>changeRole(u.id,e.target.value)}>{CRM.ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></td>
+          <td>{u.activo? <Badge label="Activo" color="#1F9D6B"/> : <Badge label="Inactivo" color="#6E8298"/>}</td>
+          <td onClick={e=>e.stopPropagation()} className="row" style={{gap:4,justifyContent:"flex-end"}}>
+            <button className="btn btn--sm btn--ghost" title={u.activo?"Desactivar":"Reactivar"} onClick={()=>toggleActivo(u)} disabled={u.activo && activeCount<=1}><Icon name={u.activo?"archive":"refresh"} size={14}/></button>
+            <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>setDelUser(u)} disabled={u.activo && activeCount<=1}><Icon name="trash" size={14}/></button>
+          </td>
         </tr>)}
       </tbody></table></div>
-      <p className="muted" style={{fontSize:12,marginTop:10}}>Al crear un administrador aquí se genera directamente su acceso real (email + contraseña temporal) en Supabase. Al eliminarlo, se revoca ese acceso.</p>
+      <p className="muted" style={{fontSize:12,marginTop:10}}>Al crear un administrador aquí se genera directamente su acceso real (email + contraseña temporal) en Supabase. Desactivar le quita el acceso sin borrar su cuenta; eliminar revoca su cuenta de Supabase por completo.</p>
     </>}
     {tab==="notificaciones" && <NotificationsSettings toast={toast}/>}
     {showNewSvc && <NewService onClose={()=>setNewSvc(false)} onSave={addService}/>}
@@ -1877,25 +1890,22 @@ function Config({toast}){
 }
 function NewUser({onClose,onSave}){
   const genPassword=()=>{ const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"; let p=""; for(let i=0;i<10;i++) p+=chars[Math.floor(Math.random()*chars.length)]; return p; };
-  const [f,setF]=uState({name:"",email:"",title:"",role:"admin",password:genPassword()});
+  const [f,setF]=uState({name:"",email:"",role:"miembro",password:genPassword()});
   const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
   const submit=async()=>{
     if(!f.name||!f.email||!f.password){ setErr("Completa nombre, email y contraseña."); return; }
     setBusy(true); setErr(null);
-    const {error} = await Auth.createAdminUser(f.email, f.password, f.name);
+    const {data,error} = await Auth.createAdminUser(f.email, f.password, f.name, f.role);
     setBusy(false);
     if(error){ setErr(error.message); return; }
-    onSave(f);
+    onSave(CRM.rowToAdmin(data.admin));
   };
   return <Modal title="Nuevo administrador" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={submit} disabled={busy}>{busy?"Creando…":"Crear acceso"}</button></>}>
     {err && <div className="login__err">{err}</div>}
     <Field label="Nombre completo"><input className="inp" placeholder="Nombre y apellidos" value={f.name} onChange={set("name")}/></Field>
     <Field label="Correo electrónico"><input className="inp" type="email" placeholder="nombre@guimaes.es" value={f.email} onChange={set("email")}/></Field>
-    <div className="fld-row">
-      <Field label="Puesto"><input className="inp" placeholder="Ej. Asesora · Fiscal" value={f.title} onChange={set("title")}/></Field>
-      <Field label="Rol"><select className="inp" value={f.role} onChange={set("role")}>{CRM.ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></Field>
-    </div>
+    <Field label="Rol"><select className="inp" value={f.role} onChange={set("role")}>{CRM.ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></Field>
     <Field label="Contraseña temporal"><div className="row" style={{gap:8}}><input className="inp" value={f.password} onChange={set("password")}/><button type="button" className="btn btn--sm btn--ghost" onClick={()=>setF({...f,password:genPassword()})}>Generar</button></div></Field>
     <p className="muted" style={{fontSize:12}}>Se crea directamente su acceso en Supabase. Compártele el email y esta contraseña — podrá cambiarla luego con ¿Olvidaste tu contraseña?.</p>
   </Modal>;
@@ -2068,7 +2078,8 @@ function App(){
     (async()=>{
       if(Auth.configured){
         const session = await Auth.getSession();
-        if(session && Auth.isAllowed(session.user.email)){
+        if(session && await Auth.isAllowed(session.user)){
+          if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
           if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
@@ -2081,8 +2092,11 @@ function App(){
         Auth.onAuthStateChange((event, session)=>{
           if(event==="PASSWORD_RECOVERY"){ setRecovery(true); return; }
           if(event==="SIGNED_IN" && session){
-            if(!Auth.isAllowed(session.user.email)){ Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
-            (async()=>{ if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session)); })();
+            (async()=>{
+              if(!(await Auth.isAllowed(session.user))){ await Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
+              if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
+              if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
+            })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
         });
