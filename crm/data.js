@@ -140,6 +140,9 @@
   var CONTACTS = [];
   var contactById={}; CONTACTS.forEach(function(c){contactById[c.id]=c;});
 
+  // ---- Empresas (datos reales desde Supabase, ver loadEmpresas) ----
+  var EMPRESAS = [];
+
   // ---- Deals (datos reales desde Supabase, ver loadDeals) ----
   var DEALS = [];
 
@@ -668,10 +671,17 @@
       return n;
     }catch(e){ if(window.console) console.error("loadContactos:", e); return 0; }
   }
-  // Crea un contacto real en Supabase y lo inyecta en CONTACTS
+  // Crea un contacto real en Supabase y lo inyecta en CONTACTS.
+  // "company" ya NO se manda en el insert: contactos.company lo mantiene
+  // al día un trigger a partir de la empresa enlazada (ver
+  // crm/supabase-empresas.sql) — el contacto se crea primero (para tener
+  // id) y la empresa se enlaza justo después, aquí mismo.
+  // data.empresaId: id de una empresa ya existente elegida en el formulario.
+  // data.newEmpresa: {razon_social, cif, address, city, province} para crear una nueva.
+  // Exactamente una de las dos debe venir (todo contacto pertenece a una empresa).
   async function addContact(client, data){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
-    var fields = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source"];
+    var fields = ["full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
     if(!payload.lifecycle) payload.lifecycle = LIFECYCLE[0].id; // ver nota en rowToContact: "lead" no está en el catálogo
@@ -679,9 +689,87 @@
     var res = await client.from("contactos").insert(payload).select();
     if(res.error) throw res.error;
     var c = rowToContact(res.data[0]);
+
+    var empresa = null;
+    if(data.empresaId){
+      empresa = EMPRESAS.filter(function(e){return e.id===data.empresaId;})[0] || null;
+      if(!empresa) throw new Error("La empresa seleccionada ya no existe.");
+      await linkContactoEmpresa(client, c.id, empresa.id, true);
+    }else if(data.newEmpresa){
+      empresa = await addEmpresa(client, data.newEmpresa);
+      await linkContactoEmpresa(client, c.id, empresa.id, true);
+    }else{
+      throw new Error("Falta la empresa del contacto.");
+    }
+    c.company = empresa.razon_social;
+
     CONTACTS.unshift(c);
     contactById[c.id] = c;
     return c;
+  }
+
+  // ---- Empresas reales (tabla "empresas" + "contacto_empresa" de Supabase) ----
+  function rowToEmpresa(row){
+    return {
+      id: row.id,
+      razon_social: row.razon_social || "",
+      cif: row.cif || "",
+      address: row.address || "",
+      city: row.city || "",
+      province: row.province || "",
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  function normalizeCompanyName(s){ return String(s||"").trim().replace(/\s+/g," ").toLowerCase(); }
+  function normalizeCif(s){ return String(s||"").trim().replace(/\s+/g,"").toUpperCase(); }
+  // Carga las empresas reales de Supabase (una sola vez, al arrancar)
+  async function loadEmpresas(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("empresas").select("*").order("razon_social",{ascending:true});
+      if(res.error || !res.data) return 0;
+      EMPRESAS.length = 0;
+      res.data.forEach(function(row){ EMPRESAS.push(rowToEmpresa(row)); });
+      return EMPRESAS.length;
+    }catch(e){ if(window.console) console.error("loadEmpresas:", e); return 0; }
+  }
+  // Coincidencia exacta por CIF normalizado (mayúsculas, sin espacios) — ver empresas_cif_key
+  function findEmpresaByCif(cif){
+    var norm = normalizeCif(cif);
+    if(!norm) return null;
+    return EMPRESAS.filter(function(e){ return e.cif && normalizeCif(e.cif)===norm; })[0] || null;
+  }
+  // Coincidencias por nombre normalizado (substring) — para el desplegable de "¿es esta empresa?"
+  function searchEmpresasByName(name){
+    var norm = normalizeCompanyName(name);
+    if(!norm) return [];
+    return EMPRESAS.filter(function(e){ return normalizeCompanyName(e.razon_social).indexOf(norm) > -1; });
+  }
+  // Crea una empresa real en Supabase y la inyecta en EMPRESAS
+  async function addEmpresa(client, data){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var payload = {
+      razon_social: (data.razon_social||"").trim() || "Por definir",
+      cif: data.cif ? data.cif.trim() : null,
+      address: data.address || null,
+      city: data.city || null,
+      province: data.province || null
+    };
+    var res = await client.from("empresas").insert(payload).select();
+    if(res.error) throw res.error;
+    var e = rowToEmpresa(res.data[0]);
+    EMPRESAS.push(e);
+    return e;
+  }
+  // Enlaza un contacto a una empresa. 23505 (ya enlazados) se ignora: es
+  // el mismo criterio de idempotencia que el resto de este archivo (ver
+  // convertLeadToContact) — un reintento no debe fallar por algo que ya
+  // quedó hecho en un intento anterior.
+  async function linkContactoEmpresa(client, contactId, empresaId, principal){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var payload = { contact_id: contactId, empresa_id: empresaId, principal: !!principal };
+    var res = await client.from("contacto_empresa").insert(payload).select();
+    if(res.error && res.error.code !== "23505") throw res.error;
   }
 
   // ---- Deals reales (tabla "deals" de Supabase) ----
@@ -1034,7 +1122,6 @@
     if(!lead) throw new Error("No se encontró el lead a convertir");
 
     var payload = {
-      company: lead.company || "",
       full_name: lead.full_name || "",
       email: lead.email || "",
       phone: lead.phone || "",
@@ -1053,12 +1140,33 @@
       contactRow = res.data[0];
     }
 
-    // El contacto ya existe de verdad (recién creado, o ya existía y lo
-    // acabamos de recuperar arriba) — ahora sí se marca 'converted'. Si
-    // esto fallara, el lead se queda en 'new' con su contacto ya creado:
-    // el próximo loadWebLeads lo reintentará, chocará con el índice único
-    // de arriba (el contacto ya existe) y lo resolverá solo, sin duplicar
-    // nada — nunca se pierde.
+    // Empresa: igual que el alta manual, todo contacto debe tener una —
+    // pero aquí no hay nadie que desambigüe, así que la resolución es
+    // automática: CIF si el lead trae uno y coincide, si no nombre
+    // normalizado SOLO si hay una única coincidencia, y si no (ninguna o
+    // varias) se crea una empresa nueva — nunca se adivina entre varias.
+    // Se comprueba primero si el contacto YA tiene empresa enlazada por si
+    // esta función se reintenta tras un fallo que llegó hasta aquí en un
+    // intento anterior (mismo criterio de idempotencia que el índice único
+    // de contactos.lead_id de más arriba).
+    var linkCheck = await client.from("contacto_empresa").select("id").eq("contact_id", contactRow.id).limit(1);
+    if(!linkCheck.error && (!linkCheck.data || linkCheck.data.length===0)){
+      var companyRaw = (lead.company||"").trim() || "Por definir";
+      var empresa = searchEmpresasByName(companyRaw).filter(function(e){
+        return normalizeCompanyName(e.razon_social) === normalizeCompanyName(companyRaw);
+      })[0] || null;
+      if(!empresa) empresa = await addEmpresa(client, {razon_social: companyRaw});
+      await linkContactoEmpresa(client, contactRow.id, empresa.id, true);
+      contactRow.company = empresa.razon_social;
+    }
+
+    // El contacto ya existe de verdad y ya tiene empresa — ahora sí se
+    // marca 'converted'. Si esto fallara, el lead se queda en 'new' con su
+    // contacto ya creado y ya enlazado: el próximo loadWebLeads lo
+    // reintentará, chocará con el índice único de arriba (el contacto ya
+    // existe), el chequeo de empresa de arriba verá que ya está enlazada y
+    // la saltará, y solo reintentará marcar 'converted' — nunca se pierde
+    // ni se duplica nada.
     var statusRes = await client.from("leads")
       .update({status:"converted", error_message:null})
       .eq("id", leadUuid).select();
@@ -1124,6 +1232,9 @@
     LOSS_REASONS:LOSS_REASONS, PRIORITIES:PRIORITIES,
     priorityById:function(id){var m={};PRIORITIES.forEach(function(p){m[p.id]=p;});return m[id];},
     CONTACTS:CONTACTS, contactById:contactById,
+    EMPRESAS:EMPRESAS, loadEmpresas:loadEmpresas, addEmpresa:addEmpresa, linkContactoEmpresa:linkContactoEmpresa,
+    findEmpresaByCif:findEmpresaByCif, searchEmpresasByName:searchEmpresasByName,
+    normalizeCompanyName:normalizeCompanyName, normalizeCif:normalizeCif,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,

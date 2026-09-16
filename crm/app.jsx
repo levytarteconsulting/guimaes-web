@@ -354,13 +354,13 @@ function Contacts({nav, toast}){
             {list.map(c=>(
               <div key={c.id} className="card" style={{cursor:"pointer"}} onClick={()=>nav("contact",c.id)}>
                 <div className="card__body" style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-                  <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
+                  <Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div className="row" style={{justifyContent:"space-between",gap:8}}>
-                      <span style={{fontWeight:600,fontSize:14}}>{c.company}</span>
+                      <span style={{fontWeight:600,fontSize:14}}>{c.full_name||c.company||"—"}</span>
                       <PriorityDot id={c.priority}/>
                     </div>
-                    <div className="muted" style={{fontSize:12.5,marginTop:2}}>{c.full_name}</div>
+                    <div className="muted" style={{fontSize:12.5,marginTop:2}}>{c.company}</div>
                     <div className="row" style={{marginTop:8,justifyContent:"space-between"}}>
                       <LifecycleBadge id={c.lifecycle}/>
                       {ownerAvatar(c.owner)}
@@ -376,13 +376,13 @@ function Contacts({nav, toast}){
           <table className="tbl">
             <thead><tr>
               <th style={{width:20}}><div className={"tbl-check"+(allSel?" on":"")} onClick={()=>setSel(allSel?[]:list.map(c=>c.id))}>{allSel&&<Icon name="check" size={12}/>}</div></th>
-              <th>Empresa / Contacto</th><th>Ciclo de vida</th><th>Owner</th><th>Ciudad</th><th>Origen</th><th>Prioridad</th><th>Creado</th>
+              <th>Contacto / Empresa</th><th>Ciclo de vida</th><th>Owner</th><th>Ciudad</th><th>Origen</th><th>Prioridad</th><th>Creado</th>
             </tr></thead>
             <tbody>
               {list.map(c=>(
                 <tr key={c.id} className={sel.includes(c.id)?"sel":""} onClick={()=>nav("contact",c.id)}>
                   <td onClick={e=>{e.stopPropagation();toggle(c.id);}}><div className={"tbl-check"+(sel.includes(c.id)?" on":"")}>{sel.includes(c.id)&&<Icon name="check" size={12}/>}</div></td>
-                  <td><div className="row"><Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/><div><div className="tbl__name">{c.company}</div><div className="tbl__sub">{c.full_name} · {c.email}</div></div></div></td>
+                  <td><div className="row"><Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/><div><div className="tbl__name">{c.full_name||c.company||"—"}</div><div className="tbl__sub">{[c.company,c.email].filter(Boolean).join(" · ")}</div></div></div></td>
                   <td><LifecycleBadge id={c.lifecycle}/></td>
                   <td><div className="row">{ownerAvatar(c.owner)}<span style={{fontSize:13}}>{CRM.userById(c.owner)?.name.split(" ")[0]}</span></div></td>
                   <td>{c.city}</td>
@@ -434,16 +434,58 @@ function Contacts({nav, toast}){
   );
 }
 function NewContact({onClose,onSave}){
-  const [f,setF]=uState({company:"",full_name:"",email:"",phone:"",lifecycle:CRM.LIFECYCLE[0].id,owner:CRM.USERS[0]?.id||""});
+  const [f,setF]=uState({company:"",cif:"",full_name:"",email:"",phone:"",lifecycle:CRM.LIFECYCLE[0].id,owner:CRM.USERS[0]?.id||""});
+  // Empresa a la que se enlazará el contacto: null mientras no se haya
+  // elegido una existente o decidido crear una nueva — "nunca crear una
+  // empresa duplicada en silencio" se traduce aquí en no dejar guardar
+  // hasta que el usuario elija explícitamente una opción.
+  const [empresaChoice,setEmpresaChoice]=uState(null); // {mode:"existing",empresa} | {mode:"new",razon_social,cif}
   const [saving,setSaving]=uState(false);
-  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const set=(k)=>(e)=>{
+    const v=e.target.value;
+    setF(f=>({...f,[k]:v}));
+    if(k==="company"||k==="cif") setEmpresaChoice(null);
+  };
+
+  const cifMatch = f.cif.trim() ? CRM.findEmpresaByCif(f.cif) : null;
+  const nameMatches = (!cifMatch && f.company.trim()) ? CRM.searchEmpresasByName(f.company) : [];
+
+  uEffect(()=>{
+    if(cifMatch) setEmpresaChoice({mode:"existing", empresa:cifMatch});
+  },[cifMatch && cifMatch.id]);
+
+  const canSave = f.full_name.trim() && empresaChoice && !saving;
   const save=async()=>{
+    if(!empresaChoice) return;
     setSaving(true);
-    try{ await onSave(f); }
+    try{
+      const payload = {...f};
+      if(empresaChoice.mode==="existing") payload.empresaId = empresaChoice.empresa.id;
+      else payload.newEmpresa = {razon_social:empresaChoice.razon_social, cif:empresaChoice.cif||null};
+      await onSave(payload);
+    }
     finally{ setSaving(false); }
   };
-  return <Modal title="Nuevo contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear contacto"}</button></>}>
-    <div className="fld-row"><Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={f.company} onChange={set("company")}/></Field><Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={f.full_name} onChange={set("full_name")}/></Field></div>
+  return <Modal title="Nuevo contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={!canSave}>{saving?"Creando…":"Crear contacto"}</button></>}>
+    <div className="fld-row"><Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={f.full_name} onChange={set("full_name")}/></Field><Field label="CIF / NIF de la empresa (opcional)"><input className="inp" placeholder="B00000000" value={f.cif} onChange={set("cif")}/></Field></div>
+    <Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={f.company} onChange={set("company")}/></Field>
+    {empresaChoice && (
+      <div className="muted" style={{fontSize:12.5,margin:"-8px 0 12px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        {empresaChoice.mode==="existing"
+          ? <span>Empresa: <strong>{empresaChoice.empresa.razon_social}</strong></span>
+          : <span>Se creará la empresa <strong>{empresaChoice.razon_social}</strong></span>}
+        <button className="btn btn--sm btn--ghost" onClick={()=>setEmpresaChoice(null)}>Cambiar</button>
+      </div>
+    )}
+    {!empresaChoice && f.company.trim() && (
+      <div style={{margin:"-8px 0 12px",display:"flex",flexDirection:"column",gap:4}}>
+        {nameMatches.length>0 && <div className="muted" style={{fontSize:12}}>¿Es alguna de estas?</div>}
+        {nameMatches.map(e=>(
+          <button key={e.id} className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>setEmpresaChoice({mode:"existing",empresa:e})}>Es esta: {e.razon_social}</button>
+        ))}
+        <button className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>setEmpresaChoice({mode:"new",razon_social:f.company.trim(),cif:f.cif.trim()})}>+ Crear empresa nueva: "{f.company.trim()}"</button>
+      </div>
+    )}
     <div className="fld-row"><Field label="Email"><input className="inp" placeholder="email@empresa.es" value={f.email} onChange={set("email")}/></Field><Field label="Teléfono"><input className="inp" placeholder="+34 …" value={f.phone} onChange={set("phone")}/></Field></div>
     <div className="fld-row"><Field label="Ciclo de vida"><select className="inp" value={f.lifecycle} onChange={set("lifecycle")}>{CRM.LIFECYCLE.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></Field><Field label="Owner"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field></div>
   </Modal>;
@@ -2319,6 +2361,7 @@ function App(){
         const session = await Auth.getSession();
         if(session && await Auth.isAllowed(session.user)){
           if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
+          if(CRM.loadEmpresas) await CRM.loadEmpresas(Auth.client);
           if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
@@ -2334,6 +2377,7 @@ function App(){
             (async()=>{
               if(!(await Auth.isAllowed(session.user))){ await Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
               if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
+              if(CRM.loadEmpresas) await CRM.loadEmpresas(Auth.client);
               if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
               if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
               if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
