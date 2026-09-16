@@ -292,6 +292,7 @@ function Home({user, nav}){
 // esa relación, para que haya un único sitio donde cambiarla.
 function Empresas({nav, toast}){
   const [q,setQ]=uState("");
+  const [showNew,setShowNew]=uState(false);
   const isMobile = useIsMobile();
   const list = CRM.EMPRESAS.filter(e=>q===""||(e.razon_social+" "+e.cif).toLowerCase().includes(q.toLowerCase()));
   return (
@@ -299,6 +300,7 @@ function Empresas({nav, toast}){
       <div className="toolbar">
         <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar por razón social o CIF…" value={q} onChange={e=>setQ(e.target.value)}/></div>
         <div className="toolbar__spacer"></div>
+        <button className="btn btn--primary" onClick={()=>setShowNew(true)}><Icon name="plus" size={16}/>Nueva empresa</button>
       </div>
       {isMobile ? (
         <div className="wrap-gap">
@@ -333,8 +335,117 @@ function Empresas({nav, toast}){
           {list.length===0 && <Empty icon="building" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
         </div>
       )}
+      {showNew && <NewEmpresa nav={nav} onClose={()=>setShowNew(false)} onSave={async(payload)=>{
+        try{
+          const r = await CRM.createEmpresaConContacto(Auth.client, payload);
+          setShowNew(false);
+          toast(r.dealError ? "Empresa y contacto creados — el deal no se pudo crear: "+r.dealError : "Empresa creada");
+          if(r.empresa) nav("empresa", r.empresa.id);
+        }catch(e){
+          toast("No se pudo crear: "+e.message);
+          throw e;
+        }
+      }}/>}
     </div>
   );
+}
+// Modal guiado: empresa (nueva o reutilizada vía EmpresaPicker) + contacto
+// (obligatorio, nuevo o existente) + deal (opcional). La orquestación real
+// (orden, fallos parciales) vive en CRM.createEmpresaConContacto — este
+// componente solo recoge las elecciones y se las pasa.
+function NewEmpresa({nav, onClose, onSave}){
+  const [empresaChoice,setEmpresaChoice]=uState(null);
+  const [cifConflict,setCifConflict]=uState(null);
+  const [extra,setExtra]=uState({address:"",city:"",province:""});
+  const [contactMode,setContactMode]=uState("new");
+  const [newContact,setNewContact]=uState({full_name:"",email:"",phone:""});
+  const [contactQuery,setContactQuery]=uState("");
+  const [existingContactId,setExistingContactId]=uState("");
+  const [addDealToggle,setAddDealToggle]=uState(false);
+  const [deal,setDeal]=uState({title:"",service:"",amount:"",frequency:""});
+  const [saving,setSaving]=uState(false);
+
+  const setExtraField=(k)=>(e)=>setExtra({...extra,[k]:e.target.value});
+  const setNewContactField=(k)=>(e)=>setNewContact({...newContact,[k]:e.target.value});
+  const setDealField=(k)=>(e)=>setDeal({...deal,[k]:e.target.value});
+  const contactMatches = (contactMode==="existing" && contactQuery.trim())
+    ? CRM.CONTACTS.filter(c=>(c.full_name+" "+c.company+" "+c.email).toLowerCase().includes(contactQuery.trim().toLowerCase())).slice(0,8)
+    : [];
+
+  const canSave = !!empresaChoice && !cifConflict
+    && (contactMode==="new" ? newContact.full_name.trim() : !!existingContactId)
+    && !saving;
+
+  const save=async()=>{
+    if(!canSave) return;
+    setSaving(true);
+    try{
+      const empresaChoicePayload = empresaChoice.mode==="new"
+        ? {mode:"new", razon_social:empresaChoice.razon_social, cif:empresaChoice.cif, address:extra.address||null, city:extra.city||null, province:extra.province||null}
+        : {mode:"existing", empresaId:empresaChoice.empresa.id};
+      const contactChoicePayload = contactMode==="new"
+        ? {mode:"new", fields:{...newContact}}
+        : {mode:"existing", contactId:existingContactId};
+      await onSave({empresaChoice:empresaChoicePayload, contactChoice:contactChoicePayload, dealFields: addDealToggle ? deal : null});
+    }
+    finally{ setSaving(false); }
+  };
+
+  return <Modal title="Nueva empresa" wide onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={!canSave}>{saving?"Creando…":"Crear empresa"}</button></>}>
+    <div className="fld__l" style={{marginBottom:8}}>Empresa</div>
+    {empresaChoice ? <EmpresaChoiceSummary choice={empresaChoice} onChange={c=>{setEmpresaChoice(c); setCifConflict(null);}}/> : <EmpresaPicker onPick={setEmpresaChoice} onCifConflict={setCifConflict}/>}
+    {cifConflict && <div className="row" style={{gap:8,background:"var(--warn-soft)",color:"var(--warn)",padding:"10px 14px",borderRadius:9,marginBottom:14,fontSize:13}}>
+      <Icon name="bell" size={15}/>
+      <span style={{flex:1}}>Ya existe una empresa con ese CIF: <strong>{cifConflict.razon_social}</strong>.</span>
+      <button className="btn btn--sm btn--ghost" onClick={()=>{ nav("empresa", cifConflict.id); onClose(); }}>Abrir su ficha</button>
+    </div>}
+    {empresaChoice && empresaChoice.mode==="new" && <>
+      <Field label="Dirección (opcional)"><input className="inp" value={extra.address} onChange={setExtraField("address")}/></Field>
+      <div className="fld-row">
+        <Field label="Ciudad (opcional)"><input className="inp" value={extra.city} onChange={setExtraField("city")}/></Field>
+        <Field label="Provincia (opcional)"><input className="inp" value={extra.province} onChange={setExtraField("province")}/></Field>
+      </div>
+    </>}
+
+    <div className="fld__l" style={{marginTop:18,marginBottom:8}}>Contacto</div>
+    <div className="row" style={{gap:8,marginBottom:12}}>
+      <button className={"chip"+(contactMode==="new"?" active":"")} onClick={()=>setContactMode("new")}>Contacto nuevo</button>
+      <button className={"chip"+(contactMode==="existing"?" active":"")} onClick={()=>setContactMode("existing")}>Contacto existente</button>
+    </div>
+    {contactMode==="new" ? (
+      <div className="fld-row">
+        <Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={newContact.full_name} onChange={setNewContactField("full_name")}/></Field>
+        <Field label="Email"><input className="inp" placeholder="email@empresa.es" value={newContact.email} onChange={setNewContactField("email")}/></Field>
+      </div>
+    ) : existingContactId ? (
+      <div className="muted" style={{fontSize:12.5,margin:"0 0 12px",display:"flex",alignItems:"center",gap:8}}>
+        <span>Contacto: <strong>{CRM.contactById[existingContactId]?.full_name || CRM.contactById[existingContactId]?.company}</strong></span>
+        <button className="btn btn--sm btn--ghost" onClick={()=>setExistingContactId("")}>Cambiar</button>
+      </div>
+    ) : <>
+      <Field label="Buscar contacto"><input className="inp" placeholder="Nombre, empresa o email…" value={contactQuery} onChange={e=>setContactQuery(e.target.value)}/></Field>
+      {contactMatches.length>0 && <div style={{margin:"-8px 0 12px",display:"flex",flexDirection:"column",gap:4}}>
+        {contactMatches.map(c=>(
+          <button key={c.id} className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>{setExistingContactId(c.id); setContactQuery("");}}>{c.full_name||"—"} · {c.company}</button>
+        ))}
+      </div>}
+    </>}
+
+    <div className="fld__l" style={{marginTop:18,marginBottom:8}}>Deal (opcional)</div>
+    {!addDealToggle ? (
+      <button className="btn btn--sm btn--ghost" onClick={()=>setAddDealToggle(true)}><Icon name="plus" size={14}/>Añadir un deal</button>
+    ) : <>
+      <div className="fld-row">
+        <Field label="Título"><input className="inp" value={deal.title} onChange={setDealField("title")}/></Field>
+        <Field label="Servicio"><select className="inp" value={deal.service} onChange={setDealField("service")}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+      </div>
+      <div className="fld-row">
+        <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={deal.amount} onChange={setDealField("amount")}/></Field>
+        <Field label="Frecuencia"><select className="inp" value={deal.frequency} onChange={setDealField("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
+      </div>
+      <button className="btn btn--sm btn--ghost" onClick={()=>setAddDealToggle(false)}>Quitar deal</button>
+    </>}
+  </Modal>;
 }
 function EmpresaDocRow({doc, contact, toast}){
   const [busy,setBusy]=uState(false);
@@ -603,20 +714,30 @@ function Contacts({nav, toast}){
 // onPick(choice) se llama una vez, con {mode:"existing",empresa} o
 // {mode:"new",razon_social,cif} — el padre decide qué hacer con la elección
 // (este componente no sabe si es un alta o un enlace adicional).
-function EmpresaPicker({onPick}){
+// onCifConflict (opcional): si se da, una coincidencia por CIF NO se
+// auto-elige (comportamiento normal, usado por NewContact/EditContact) —
+// en vez de eso se lo pasa al padre para que decida cómo avisar. Lo usa
+// NewEmpresa: crear una empresa nueva con el CIF de una que ya existe casi
+// siempre es un error de escritura, así que ahí conviene un aviso
+// explícito con enlace a la ficha en vez de asociarla en silencio.
+function EmpresaPicker({onPick, onCifConflict}){
   const [cif,setCif]=uState("");
   const [company,setCompany]=uState("");
   const cifMatch = cif.trim() ? CRM.findEmpresaByCif(cif) : null;
   const nameMatches = (!cifMatch && company.trim()) ? CRM.searchEmpresasByName(company) : [];
   uEffect(()=>{
-    if(cifMatch) onPick({mode:"existing", empresa:cifMatch});
+    if(cifMatch){
+      if(onCifConflict) onCifConflict(cifMatch); else onPick({mode:"existing", empresa:cifMatch});
+    }else if(onCifConflict){
+      onCifConflict(null);
+    }
   },[cifMatch && cifMatch.id]);
   return <>
     <div className="fld-row">
       <Field label="CIF / NIF de la empresa (opcional)"><input className="inp" placeholder="B00000000" value={cif} onChange={e=>setCif(e.target.value)}/></Field>
       <Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={company} onChange={e=>setCompany(e.target.value)}/></Field>
     </div>
-    {company.trim() && (
+    {!cifMatch && company.trim() && (
       <div style={{margin:"-8px 0 12px",display:"flex",flexDirection:"column",gap:4}}>
         {nameMatches.length>0 && <div className="muted" style={{fontSize:12}}>¿Es alguna de estas?</div>}
         {nameMatches.map(e=>(

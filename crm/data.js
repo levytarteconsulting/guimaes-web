@@ -692,22 +692,33 @@
     var res = await client.from("contactos").insert(payload).select();
     if(res.error) throw res.error;
     var c = rowToContact(res.data[0]);
-
-    var empresa = null;
-    if(data.empresaId){
-      empresa = EMPRESAS.filter(function(e){return e.id===data.empresaId;})[0] || null;
-      if(!empresa) throw new Error("La empresa seleccionada ya no existe.");
-      await linkContactoEmpresa(client, c.id, empresa.id, true);
-    }else if(data.newEmpresa){
-      empresa = await addEmpresa(client, data.newEmpresa);
-      await linkContactoEmpresa(client, c.id, empresa.id, true);
-    }else{
-      throw new Error("Falta la empresa del contacto.");
-    }
-    c.company = empresa.razon_social;
-
+    // Se registra en CONTACTS ANTES de intentar la empresa: el contacto ya
+    // existe de verdad en la BD en este punto, así que si el paso de abajo
+    // falla, que también exista aquí evita que quede invisible en la UI
+    // hasta un recargado completo (ver loadContactos) — el mismo tipo de
+    // estado a medias silencioso que se arregló en convertLeadToContact.
     CONTACTS.unshift(c);
     contactById[c.id] = c;
+
+    try{
+      var empresa = null;
+      if(data.empresaId){
+        empresa = EMPRESAS.filter(function(e){return e.id===data.empresaId;})[0] || null;
+        if(!empresa) throw new Error("La empresa seleccionada ya no existe.");
+        await linkContactoEmpresa(client, c.id, empresa.id, true);
+      }else if(data.newEmpresa){
+        empresa = await addEmpresa(client, data.newEmpresa);
+        await linkContactoEmpresa(client, c.id, empresa.id, true);
+      }else{
+        throw new Error("Falta la empresa del contacto.");
+      }
+      c.company = empresa.razon_social;
+    }catch(empresaErr){
+      var wrapped = new Error("El contacto se creó, pero no se pudo asociar la empresa (" + empresaErr.message + "). Añádela desde la ficha del contacto.");
+      wrapped.contact = c;
+      throw wrapped;
+    }
+
     return c;
   }
 
@@ -901,6 +912,61 @@
       var c = contactById[row.id];
       if(c) c.company = row.company || "";
     });
+  }
+  // Alta de empresa desde la vista de Empresas (NewEmpresa en app.jsx). El
+  // contacto es obligatorio — nunca se crea una empresa sin uno — y el deal
+  // es opcional. Orden: 1) contacto 2) empresa 3) enlace 4) deal opcional.
+  // El contacto va PRIMERO por el mismo motivo que en convertLeadToContact:
+  // es la entidad "real" que un asesor puede recuperar a mano desde su
+  // ficha (con "Añadir empresa", ver EditContact) si algo falla más abajo
+  // — dejar la empresa colgada de un contacto que sí existe y es visible
+  // es un estado recuperable, nunca invisible.
+  // opts.contactChoice: {mode:"new", fields:{full_name,email,phone}} | {mode:"existing", contactId}
+  // opts.empresaChoice: {mode:"new", razon_social,cif,address,city,province} | {mode:"existing", empresaId}
+  // opts.dealFields: campos de addDeal (sin contact_id) o null/undefined si no se pide deal.
+  async function createEmpresaConContacto(client, opts){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var contactChoice = opts.contactChoice;
+    var empresaChoice = opts.empresaChoice;
+    var contact, empresa;
+
+    if(contactChoice.mode==="existing"){
+      contact = contactById[contactChoice.contactId];
+      if(!contact) throw new Error("El contacto elegido ya no existe.");
+      if(empresaChoice.mode==="existing"){
+        empresa = empresaById[empresaChoice.empresaId];
+        if(!empresa) throw new Error("La empresa elegida ya no existe.");
+      }else{
+        empresa = await addEmpresa(client, empresaChoice);
+      }
+      try{
+        // principal=false: un contacto ya existente siempre tiene ya una
+        // empresa (es la condición para existir en el CRM) — "añadir" una
+        // nueva aquí es el caso de "varias sociedades del mismo cliente"
+        // (ver Fase 4), no un reemplazo de su empresa actual. Cambiarla a
+        // principal, si hace falta, se sigue haciendo desde EditContact.
+        await addContactoEmpresaLink(client, contact.id, empresa.id, false);
+      }catch(linkErr){
+        throw new Error("La empresa \"" + empresa.razon_social + "\" se creó, pero no se pudo enlazar a " + (contact.full_name||contact.company||"el contacto") + " (" + linkErr.message + "). Añádela desde la ficha del contacto.");
+      }
+    }else{
+      var payload = Object.assign({}, contactChoice.fields);
+      if(empresaChoice.mode==="existing") payload.empresaId = empresaChoice.empresaId;
+      else payload.newEmpresa = empresaChoice;
+      contact = await addContact(client, payload); // ya crea/enlaza la empresa con su propio manejo de fallos parciales
+      var rel = empresasForContact(contact.id)[0];
+      empresa = rel ? rel.empresa : null;
+    }
+
+    // Deal opcional: si falla, NO se deshace nada de lo de arriba — mismo
+    // criterio que loadWebLeads con dealFailures. Se avisa y se deja crear
+    // a mano desde la ficha del contacto.
+    var deal = null, dealError = null;
+    if(opts.dealFields){
+      try{ deal = await addDeal(client, Object.assign({}, opts.dealFields, {contact_id: contact.id})); }
+      catch(e){ dealError = e.message; }
+    }
+    return {contact:contact, empresa:empresa, deal:deal, dealError:dealError};
   }
   // ---- Documentos por empresa (agrega los de todos sus contactos) ----
   // No se cachea globalmente como CONTACTS/EMPRESAS: se consulta al vuelo
@@ -1398,7 +1464,7 @@
     empresasForContact:empresasForContact, contactsForEmpresa:contactsForEmpresa,
     linkContactoEmpresa:linkContactoEmpresa, addContactoEmpresaLink:addContactoEmpresaLink,
     setPrincipalEmpresa:setPrincipalEmpresa, removeContactoEmpresaLink:removeContactoEmpresaLink,
-    loadDocumentosForContacts:loadDocumentosForContacts,
+    loadDocumentosForContacts:loadDocumentosForContacts, createEmpresaConContacto:createEmpresaConContacto,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
