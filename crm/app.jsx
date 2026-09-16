@@ -150,6 +150,7 @@ function PasswordRecovery({onDone}){
 /* ============ SHELL ============ */
 const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
+  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.EMPRESAS.length},
   {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.CONTACTS.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
   {id:"tareas", label:"Tareas", icon:"task"},
@@ -283,6 +284,167 @@ function Home({user, nav}){
       </div>
     </div>
   );
+}
+
+/* ============ EMPRESAS ============ */
+// La relación contacto↔empresa se edita SOLO desde el contacto (ver
+// EditContact) — esta vista y la ficha de abajo son de solo lectura sobre
+// esa relación, para que haya un único sitio donde cambiarla.
+function Empresas({nav, toast}){
+  const [q,setQ]=uState("");
+  const isMobile = useIsMobile();
+  const list = CRM.EMPRESAS.filter(e=>q===""||(e.razon_social+" "+e.cif).toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="content">
+      <div className="toolbar">
+        <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar por razón social o CIF…" value={q} onChange={e=>setQ(e.target.value)}/></div>
+        <div className="toolbar__spacer"></div>
+      </div>
+      {isMobile ? (
+        <div className="wrap-gap">
+          {list.map(e=>(
+            <div key={e.id} className="card" style={{cursor:"pointer"}} onClick={()=>nav("empresa",e.id)}>
+              <div className="card__body" style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                <Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:14}}>{e.razon_social}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{e.cif || "Sin CIF"}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:4}}>{CRM.contactsForEmpresa(e.id).length} contacto(s)</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {list.length===0 && <Empty icon="building" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
+        </div>
+      ) : (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead><tr><th>Razón social</th><th>CIF</th><th>Contactos</th></tr></thead>
+            <tbody>
+              {list.map(e=>(
+                <tr key={e.id} onClick={()=>nav("empresa",e.id)}>
+                  <td><div className="row"><Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/><div className="tbl__name">{e.razon_social}</div></div></td>
+                  <td className="tbl__sub">{e.cif || "—"}</td>
+                  <td>{CRM.contactsForEmpresa(e.id).length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {list.length===0 && <Empty icon="building" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
+        </div>
+      )}
+    </div>
+  );
+}
+function EmpresaDocRow({doc, contact, toast}){
+  const [busy,setBusy]=uState(false);
+  // Mismo patrón que WaDocumentAttachment: la pestaña se abre en blanco
+  // SÍNCRONO dentro del click, antes de cualquier await — si se abriera
+  // después, Safari/iOS la bloquean por haber perdido el gesto de usuario.
+  const download=async()=>{
+    const win = window.open("", "_blank");
+    setBusy(true);
+    try{
+      const url = await CRM.getAttachmentSignedUrl(Auth.client, doc.id, {download: doc.original_filename||true});
+      if(!url){ toast("No se pudo generar el enlace de descarga."); if(win) win.close(); return; }
+      if(win) win.location.href = url; else window.open(url, "_blank");
+    }finally{ setBusy(false); }
+  };
+  return <tr>
+    <td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{doc.original_filename || "Documento"}</span></td>
+    <td className="tbl__sub">{contact ? (contact.full_name||contact.company||"—") : "—"}</td>
+    <td className="tbl__sub">{CRM.fmtBytes(doc.size_bytes)}</td>
+    <td className="tbl__sub">{doc.created}</td>
+    <td><button className="btn btn--sm btn--ghost" onClick={download} disabled={busy} title="Descargar"><Icon name="download" size={14}/></button></td>
+  </tr>;
+}
+function EmpresaDetail({id, nav, toast}){
+  const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
+  const e = CRM.empresaById[id];
+  const [tab,setTab]=uState("contactos");
+  const [showEdit,setShowEdit]=uState(false);
+  const [docs,setDocs]=uState(null); // null = todavía no se ha cargado
+  const [loadingDocs,setLoadingDocs]=uState(false);
+  const contactos = e ? CRM.contactsForEmpresa(id) : [];
+  const contactIds = contactos.map(c=>c.id);
+  // Los documentos se consultan al vuelo al entrar en la pestaña (no viven
+  // en una caché global como CONTACTS/EMPRESAS) — ver loadDocumentosForContacts.
+  uEffect(()=>{
+    if(!e || tab!=="docs" || docs!==null) return;
+    let alive=true;
+    setLoadingDocs(true);
+    CRM.loadDocumentosForContacts(Auth.client, contactIds).then(rows=>{
+      if(!alive) return;
+      setDocs(rows); setLoadingDocs(false);
+    });
+    return ()=>{alive=false;};
+  },[tab, e && e.id]);
+  if(!e) return <div className="content"><Empty icon="building" title="Empresa no encontrada" sub="Puede que haya sido eliminada." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("empresas")}>Volver a empresas</button>}/></div>;
+  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"docs",label:"Documentos",n:docs?docs.length:null}];
+  return (
+    <div className="content">
+      <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("empresas")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Empresas</button></div>
+      <div className="detail">
+        <div className="detail__aside">
+          <div className="profile">
+            <div className="profile__top">
+              <Avatar name={e.razon_social} size="lg" color={CRM.colorFor(e.razon_social)}/>
+              <div><div className="profile__name">{e.razon_social}</div><div className="profile__sub">{e.cif || "Sin CIF"}</div></div>
+            </div>
+            <div style={{marginTop:16}}>
+              <KV k="CIF/NIF">{e.cif || "—"}</KV>
+              <KV k="Dirección">{e.address || "—"}</KV>
+              <KV k="Ciudad">{e.city ? (e.city+(e.province?" ("+e.province+")":"")) : "—"}</KV>
+              <KV k="Contactos">{contactos.length}</KV>
+            </div>
+            <button className="btn btn--sm btn--ghost" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar empresa</button>
+          </div>
+        </div>
+        <div>
+          <Tabs tabs={tabs} active={tab} onChange={setTab}/>
+          {tab==="contactos" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Contacto</th><th>Vínculo</th><th>Email</th><th>Teléfono</th></tr></thead><tbody>
+            {contactos.map(c=>{
+              const rel = CRM.empresasForContact(c.id).find(x=>x.empresa.id===id);
+              return <tr key={c.id} style={{cursor:"pointer"}} onClick={()=>nav("contact",c.id)}>
+                <td><div className="row"><Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/><span className="tbl__name">{c.full_name||c.company||"—"}</span></div></td>
+                <td>{rel && rel.link.principal ? <Badge label="Principal" color="#1F6FEB"/> : <span className="muted" style={{fontSize:12.5}}>Secundaria</span>}</td>
+                <td className="tbl__sub">{c.email}</td>
+                <td className="tbl__sub">{c.phone}</td>
+              </tr>;
+            })}
+          </tbody></table>{contactos.length===0 && <Empty icon="contacts" title="Sin contactos"/>}</div>}
+          {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Tamaño</th><th>Fecha</th><th></th></tr></thead><tbody>
+            {(docs||[]).map(d=><EmpresaDocRow key={d.id} doc={d} contact={CRM.contactById[d.contact_id]} toast={toast}/>)}
+          </tbody></table>
+          {loadingDocs && <div className="muted" style={{padding:16}}>Cargando documentos…</div>}
+          {!loadingDocs && docs && docs.length===0 && <Empty icon="documents" title="Sin documentos" sub="Ninguno de los contactos de esta empresa tiene documentos todavía."/>}
+          </div>}
+        </div>
+      </div>
+      {showEdit && <EditEmpresa empresa={e} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
+        try{
+          await CRM.updateEmpresa(Auth.client, id, patch);
+          setShowEdit(false);
+          toast("Empresa actualizada");
+          bump();
+        }catch(err){
+          toast("No se pudo actualizar: "+err.message);
+        }
+      }}/>}
+    </div>
+  );
+}
+function EditEmpresa({empresa, onClose, onSave}){
+  const [f,setF]=uState({razon_social:empresa.razon_social||"", cif:empresa.cif||"", address:empresa.address||"", city:empresa.city||"", province:empresa.province||""});
+  const [saving,setSaving]=uState(false);
+  const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  const save=async()=>{ setSaving(true); try{ await onSave(f); } finally{ setSaving(false); } };
+  return <Modal title="Editar empresa" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving||!f.razon_social.trim()}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
+    <Field label="Razón social"><input className="inp" value={f.razon_social} onChange={set("razon_social")}/></Field>
+    <Field label="CIF / NIF"><input className="inp" value={f.cif} onChange={set("cif")}/></Field>
+    <Field label="Dirección"><input className="inp" value={f.address} onChange={set("address")}/></Field>
+    <div className="fld-row"><Field label="Ciudad"><input className="inp" value={f.city} onChange={set("city")}/></Field><Field label="Provincia"><input className="inp" value={f.province} onChange={set("province")}/></Field></div>
+  </Modal>;
 }
 
 /* ============ CONTACTS ============ */
@@ -433,27 +595,58 @@ function Contacts({nav, toast}){
     </div>
   );
 }
+// Selector de empresa por CIF o nombre, reutilizado por NewContact (alta) y
+// EditContact (cambiar/añadir empresa) — un solo sitio con la lógica de "no
+// crear una empresa duplicada en silencio": CIF con coincidencia se asocia
+// sola; si no, nombre normalizado muestra coincidencias para elegir "es
+// esta" o "crear nueva"; sin ninguna coincidencia, solo queda crear nueva.
+// onPick(choice) se llama una vez, con {mode:"existing",empresa} o
+// {mode:"new",razon_social,cif} — el padre decide qué hacer con la elección
+// (este componente no sabe si es un alta o un enlace adicional).
+function EmpresaPicker({onPick}){
+  const [cif,setCif]=uState("");
+  const [company,setCompany]=uState("");
+  const cifMatch = cif.trim() ? CRM.findEmpresaByCif(cif) : null;
+  const nameMatches = (!cifMatch && company.trim()) ? CRM.searchEmpresasByName(company) : [];
+  uEffect(()=>{
+    if(cifMatch) onPick({mode:"existing", empresa:cifMatch});
+  },[cifMatch && cifMatch.id]);
+  return <>
+    <div className="fld-row">
+      <Field label="CIF / NIF de la empresa (opcional)"><input className="inp" placeholder="B00000000" value={cif} onChange={e=>setCif(e.target.value)}/></Field>
+      <Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={company} onChange={e=>setCompany(e.target.value)}/></Field>
+    </div>
+    {company.trim() && (
+      <div style={{margin:"-8px 0 12px",display:"flex",flexDirection:"column",gap:4}}>
+        {nameMatches.length>0 && <div className="muted" style={{fontSize:12}}>¿Es alguna de estas?</div>}
+        {nameMatches.map(e=>(
+          <button key={e.id} className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>onPick({mode:"existing",empresa:e})}>Es esta: {e.razon_social}</button>
+        ))}
+        <button className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>onPick({mode:"new",razon_social:company.trim(),cif:cif.trim()||null})}>+ Crear empresa nueva: "{company.trim()}"</button>
+      </div>
+    )}
+  </>;
+}
+// Resumen de la empresa ya elegida (o a crear), con botón para deshacer y
+// volver a mostrar el EmpresaPicker — el mismo bloque lo usan NewContact y
+// EditContact.
+function EmpresaChoiceSummary({choice, onChange}){
+  return <div className="muted" style={{fontSize:12.5,margin:"-8px 0 12px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+    {choice.mode==="existing"
+      ? <span>Empresa: <strong>{choice.empresa.razon_social}</strong></span>
+      : <span>Se creará la empresa <strong>{choice.razon_social}</strong></span>}
+    <button className="btn btn--sm btn--ghost" onClick={()=>onChange(null)}>Cambiar</button>
+  </div>;
+}
 function NewContact({onClose,onSave}){
-  const [f,setF]=uState({company:"",cif:"",full_name:"",email:"",phone:"",lifecycle:CRM.LIFECYCLE[0].id,owner:CRM.USERS[0]?.id||""});
+  const [f,setF]=uState({full_name:"",email:"",phone:"",lifecycle:CRM.LIFECYCLE[0].id,owner:CRM.USERS[0]?.id||""});
   // Empresa a la que se enlazará el contacto: null mientras no se haya
   // elegido una existente o decidido crear una nueva — "nunca crear una
   // empresa duplicada en silencio" se traduce aquí en no dejar guardar
   // hasta que el usuario elija explícitamente una opción.
   const [empresaChoice,setEmpresaChoice]=uState(null); // {mode:"existing",empresa} | {mode:"new",razon_social,cif}
   const [saving,setSaving]=uState(false);
-  const set=(k)=>(e)=>{
-    const v=e.target.value;
-    setF(f=>({...f,[k]:v}));
-    if(k==="company"||k==="cif") setEmpresaChoice(null);
-  };
-
-  const cifMatch = f.cif.trim() ? CRM.findEmpresaByCif(f.cif) : null;
-  const nameMatches = (!cifMatch && f.company.trim()) ? CRM.searchEmpresasByName(f.company) : [];
-
-  uEffect(()=>{
-    if(cifMatch) setEmpresaChoice({mode:"existing", empresa:cifMatch});
-  },[cifMatch && cifMatch.id]);
-
+  const set=(k)=>(e)=>setF(f=>({...f,[k]:e.target.value}));
   const canSave = f.full_name.trim() && empresaChoice && !saving;
   const save=async()=>{
     if(!empresaChoice) return;
@@ -467,25 +660,8 @@ function NewContact({onClose,onSave}){
     finally{ setSaving(false); }
   };
   return <Modal title="Nuevo contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={!canSave}>{saving?"Creando…":"Crear contacto"}</button></>}>
-    <div className="fld-row"><Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={f.full_name} onChange={set("full_name")}/></Field><Field label="CIF / NIF de la empresa (opcional)"><input className="inp" placeholder="B00000000" value={f.cif} onChange={set("cif")}/></Field></div>
-    <Field label="Empresa"><input className="inp" placeholder="Nombre de la empresa" value={f.company} onChange={set("company")}/></Field>
-    {empresaChoice && (
-      <div className="muted" style={{fontSize:12.5,margin:"-8px 0 12px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-        {empresaChoice.mode==="existing"
-          ? <span>Empresa: <strong>{empresaChoice.empresa.razon_social}</strong></span>
-          : <span>Se creará la empresa <strong>{empresaChoice.razon_social}</strong></span>}
-        <button className="btn btn--sm btn--ghost" onClick={()=>setEmpresaChoice(null)}>Cambiar</button>
-      </div>
-    )}
-    {!empresaChoice && f.company.trim() && (
-      <div style={{margin:"-8px 0 12px",display:"flex",flexDirection:"column",gap:4}}>
-        {nameMatches.length>0 && <div className="muted" style={{fontSize:12}}>¿Es alguna de estas?</div>}
-        {nameMatches.map(e=>(
-          <button key={e.id} className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>setEmpresaChoice({mode:"existing",empresa:e})}>Es esta: {e.razon_social}</button>
-        ))}
-        <button className="btn btn--sm btn--ghost" style={{justifyContent:"flex-start"}} onClick={()=>setEmpresaChoice({mode:"new",razon_social:f.company.trim(),cif:f.cif.trim()})}>+ Crear empresa nueva: "{f.company.trim()}"</button>
-      </div>
-    )}
+    <Field label="Persona de contacto"><input className="inp" placeholder="Nombre y apellidos" value={f.full_name} onChange={set("full_name")}/></Field>
+    {empresaChoice ? <EmpresaChoiceSummary choice={empresaChoice} onChange={setEmpresaChoice}/> : <EmpresaPicker onPick={setEmpresaChoice}/>}
     <div className="fld-row"><Field label="Email"><input className="inp" placeholder="email@empresa.es" value={f.email} onChange={set("email")}/></Field><Field label="Teléfono"><input className="inp" placeholder="+34 …" value={f.phone} onChange={set("phone")}/></Field></div>
     <div className="fld-row"><Field label="Ciclo de vida"><select className="inp" value={f.lifecycle} onChange={set("lifecycle")}>{CRM.LIFECYCLE.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></Field><Field label="Owner"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field></div>
   </Modal>;
@@ -528,6 +704,7 @@ function ContactDetail({id, nav, toast, user}){
     catch(e){ toast("No se pudo eliminar: "+e.message); }
   };
   const isLead = id.indexOf("lead-")===0;
+  const empresas = CRM.empresasForContact(id); // principal primero — ver crm/supabase-empresas.sql
   const doConvert=async()=>{
     setConverting(true);
     try{
@@ -580,6 +757,17 @@ function ContactDetail({id, nav, toast, user}){
               <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div></div>
               <div className="row" style={{gap:6,flexWrap:"wrap",justifyContent:"center"}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label="Lead del formulario web — sin convertir" color="#D9822B"/>}</div>
             </div>
+            {empresas.length>0 && <div style={{marginTop:14}}>
+              <div className="fld__l" style={{marginBottom:6}}>Empresas</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {empresas.map(({link,empresa})=>(
+                  <div key={empresa.id} className="row" style={{justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>nav("empresa",empresa.id)}>
+                    <span style={{fontSize:13}}>{empresa.razon_social}</span>
+                    {link.principal && <Badge label="Principal" color="#1F6FEB"/>}
+                  </div>
+                ))}
+              </div>
+            </div>}
             <div style={{marginTop:16}}>
               <KV k="Email">{c.email}</KV><KV k="Teléfono">{c.phone}</KV><KV k="CIF/NIF">{c.dni}</KV>
               <KV k="Ciudad">{c.city} ({c.province})</KV><KV k="Empleados">{c.employees}</KV>
@@ -634,7 +822,7 @@ function ContactDetail({id, nav, toast, user}){
           {tab==="actividad" && <div className="card"><div className="card__body"><div className="tl">{acts.map((a,i)=><div key={i} className="tl-item"><div className="tl-item__ico"><Icon name={a.type==="call"?"phone":a.type==="note"?"note":a.type==="email"?"mail":a.type==="doc"?"documents":a.type==="stage"?"pipeline":"contacts"} size={11}/></div><div className="tl-item__head">{a.text}</div><div className="tl-item__meta">{a.who?CRM.userById(a.who)?.name+" · ":""}{a.at}</div></div>)}</div></div></div>}
         </div>
       </div>
-      {showEdit && <EditContact contact={c} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
+      {showEdit && <EditContact contact={c} toast={toast} onEmpresaChange={bump} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
         try{
           await CRM.updateContact(Auth.client, id, patch);
           setShowEdit(false);
@@ -686,9 +874,67 @@ function ContactDetail({id, nav, toast, user}){
     </div>
   );
 }
-function EditContact({contact, onClose, onSave}){
+// La empresa YA NO se edita como texto libre aquí (contactos.company lo
+// mantiene al día un trigger a partir de la relación, ver
+// crm/supabase-empresas.sql) — en su lugar, cambiar de empresa/añadir una
+// segunda usa el mismo EmpresaPicker que el alta. A diferencia del resto
+// del formulario (que se guarda todo junto al pulsar "Guardar cambios"),
+// las acciones de empresa son instantáneas: cada clic llama a Supabase
+// directamente, porque el usuario necesita ver el resultado (la lista de
+// empresas actualizada, o el error) antes de decidir el siguiente paso.
+function EditContactEmpresas({contact, toast, onChange}){
+  const [,setTick]=uState(0); const bump=()=>{ setTick(t=>t+1); onChange && onChange(); };
+  const [adding,setAdding]=uState(false);
+  const [busy,setBusy]=uState(false);
+  const links = CRM.empresasForContact(contact.id);
+  const pick=async(choice)=>{
+    setBusy(true);
+    try{
+      var empresaId;
+      if(choice.mode==="existing") empresaId = choice.empresa.id;
+      else{
+        var created = await CRM.addEmpresa(Auth.client, {razon_social:choice.razon_social, cif:choice.cif});
+        empresaId = created.id;
+      }
+      await CRM.addContactoEmpresaLink(Auth.client, contact.id, empresaId, links.length===0);
+      setAdding(false);
+      bump();
+    }catch(e){ toast("No se pudo enlazar la empresa: "+e.message); }
+    finally{ setBusy(false); }
+  };
+  const makePrincipal=async(empresaId)=>{
+    setBusy(true);
+    try{ await CRM.setPrincipalEmpresa(Auth.client, contact.id, empresaId); bump(); }
+    catch(e){ toast("No se pudo actualizar: "+e.message); }
+    finally{ setBusy(false); }
+  };
+  const remove=async(empresaId, razonSocial)=>{
+    if(links.length<=1){ toast("Un contacto debe tener al menos una empresa."); return; }
+    if(!window.confirm("¿Quitar \""+razonSocial+"\" de este contacto?")) return;
+    setBusy(true);
+    try{ await CRM.removeContactoEmpresaLink(Auth.client, contact.id, empresaId); bump(); }
+    catch(e){ toast("No se pudo quitar: "+e.message); }
+    finally{ setBusy(false); }
+  };
+  return <Field label="Empresas">
+    <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:8}}>
+      {links.map(({link,empresa})=>(
+        <div key={empresa.id} className="row" style={{justifyContent:"space-between",gap:8,padding:"6px 0"}}>
+          <span className="row" style={{gap:8,fontSize:13.5}}>{empresa.razon_social}{link.principal && <Badge label="Principal" color="#1F6FEB"/>}</span>
+          <div className="row" style={{gap:4}}>
+            {!link.principal && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={()=>makePrincipal(empresa.id)}>Marcar principal</button>}
+            {links.length>1 && <button className="btn btn--sm btn--ghost" disabled={busy} title="Quitar" onClick={()=>remove(empresa.id, empresa.razon_social)}><Icon name="trash" size={14}/></button>}
+          </div>
+        </div>
+      ))}
+    </div>
+    {adding ? <EmpresaPicker onPick={pick}/> : <button className="btn btn--sm btn--ghost" disabled={busy} onClick={()=>setAdding(true)}><Icon name="plus" size={14}/>Añadir empresa</button>}
+  </Field>;
+}
+function EditContact({contact, toast, onEmpresaChange, onClose, onSave}){
   const [f,setF]=uState(()=>{
     var init={...contact};
+    delete init.company; // se gestiona aparte, ver EditContactEmpresas arriba
     Object.keys(init).forEach(function(k){ if(init[k]===null||init[k]===undefined) init[k]=""; });
     return init;
   });
@@ -700,7 +946,8 @@ function EditContact({contact, onClose, onSave}){
     finally{ setSaving(false); }
   };
   return <Modal title="Editar ficha de contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Guardando…":"Guardar cambios"}</button></>}>
-    <div className="fld-row"><Field label="Empresa"><input className="inp" value={f.company} onChange={set("company")}/></Field><Field label="Persona de contacto"><input className="inp" value={f.full_name} onChange={set("full_name")}/></Field></div>
+    <Field label="Persona de contacto"><input className="inp" value={f.full_name} onChange={set("full_name")}/></Field>
+    <EditContactEmpresas contact={contact} toast={toast} onChange={onEmpresaChange}/>
     <div className="fld-row"><Field label="Email"><input className="inp" value={f.email} onChange={set("email")}/></Field><Field label="Teléfono"><input className="inp" value={f.phone} onChange={set("phone")}/></Field></div>
     <div className="fld-row"><Field label="Ciudad"><input className="inp" value={f.city} onChange={set("city")}/></Field><Field label="Provincia"><input className="inp" value={f.province} onChange={set("province")}/></Field></div>
     <div className="fld-row"><Field label="Empleados"><input className="inp" type="number" value={f.employees} onChange={e=>setF({...f,employees:+e.target.value})}/></Field><Field label="Origen"><input className="inp" value={f.source} onChange={set("source")}/></Field></div>
@@ -2363,6 +2610,7 @@ function App(){
           if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
           if(CRM.loadEmpresas) await CRM.loadEmpresas(Auth.client);
           if(CRM.loadContactos) await CRM.loadContactos(Auth.client);
+          if(CRM.loadContactoEmpresa) await CRM.loadContactoEmpresa(Auth.client);
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
           if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
@@ -2378,7 +2626,7 @@ function App(){
               if(!(await Auth.isAllowed(session.user))){ await Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
               if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
               if(CRM.loadEmpresas) await CRM.loadEmpresas(Auth.client);
-              if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
+              if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadContactoEmpresa) await CRM.loadContactoEmpresa(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
               if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
               if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
             })();
@@ -2437,10 +2685,12 @@ function App(){
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user && !portal) return <><Login onLogin={u=>setUser(u)} onPortal={()=>nav("portal")}/><Toast msg={toast}/></>;
   if(portal) return <><Portal onExit={exitPortal} toast={fireToast}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
+  else if(view.name==="empresas") screen=<Empresas nav={nav} toast={fireToast}/>;
+  else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
@@ -2452,7 +2702,7 @@ function App(){
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
   else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp";
-  const activeNav = {contact:"contacts", deal:"pipeline"}[view.name] || view.name;
+  const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
   return <>
     <Shell user={user} view={activeNav} nav={nav} onLogout={logout} title={title} crumb={crumb}>
       <InstallPrompt/>

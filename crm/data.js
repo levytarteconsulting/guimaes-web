@@ -142,6 +142,9 @@
 
   // ---- Empresas (datos reales desde Supabase, ver loadEmpresas) ----
   var EMPRESAS = [];
+  var empresaById = {};
+  // ---- Relación contacto↔empresa (datos reales, ver loadContactoEmpresa) ----
+  var CONTACTO_EMPRESA = [];
 
   // ---- Deals (datos reales desde Supabase, ver loadDeals) ----
   var DEALS = [];
@@ -729,7 +732,11 @@
       var res = await client.from("empresas").select("*").order("razon_social",{ascending:true});
       if(res.error || !res.data) return 0;
       EMPRESAS.length = 0;
-      res.data.forEach(function(row){ EMPRESAS.push(rowToEmpresa(row)); });
+      res.data.forEach(function(row){
+        var e = rowToEmpresa(row);
+        EMPRESAS.push(e);
+        empresaById[e.id] = e;
+      });
       return EMPRESAS.length;
     }catch(e){ if(window.console) console.error("loadEmpresas:", e); return 0; }
   }
@@ -759,17 +766,169 @@
     if(res.error) throw res.error;
     var e = rowToEmpresa(res.data[0]);
     EMPRESAS.push(e);
+    empresaById[e.id] = e;
     return e;
   }
-  // Enlaza un contacto a una empresa. 23505 (ya enlazados) se ignora: es
-  // el mismo criterio de idempotencia que el resto de este archivo (ver
-  // convertLeadToContact) — un reintento no debe fallar por algo que ya
-  // quedó hecho en un intento anterior.
+  // Edita una empresa existente. Si cambia razon_social, el trigger de
+  // empresas.sql ya actualizó contactos.company en la BD para todos sus
+  // contactos enlazados — aquí solo se refresca la caché local (CONTACTS)
+  // para que se vea sin recargar la página.
+  async function updateEmpresa(client, id, patch){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var payload = {};
+    if(patch.razon_social!==undefined && patch.razon_social.trim()) payload.razon_social = patch.razon_social.trim();
+    ["cif","address","city","province"].forEach(function(k){
+      if(patch[k]!==undefined) payload[k] = patch[k]===""? null : patch[k];
+    });
+    var res = await client.from("empresas").update(payload).eq("id", id).select();
+    if(res.error) throw res.error;
+    var updated = rowToEmpresa(res.data[0]);
+    var e = empresaById[id];
+    if(e) Object.assign(e, updated); else e = updated;
+    var linkedIds = contactsForEmpresa(id).map(function(c){return c.id;});
+    await refreshContactsCompany(client, linkedIds);
+    return e;
+  }
+  function rowToContactoEmpresa(row){
+    return { id: row.id, contact_id: row.contact_id, empresa_id: row.empresa_id, principal: !!row.principal };
+  }
+  // Carga la relación contacto↔empresa completa (una sola vez, al arrancar)
+  async function loadContactoEmpresa(client){
+    if(!client) return 0;
+    try{
+      var res = await client.from("contacto_empresa").select("*");
+      if(res.error || !res.data) return 0;
+      CONTACTO_EMPRESA.length = 0;
+      res.data.forEach(function(row){ CONTACTO_EMPRESA.push(rowToContactoEmpresa(row)); });
+      return CONTACTO_EMPRESA.length;
+    }catch(e){ if(window.console) console.error("loadContactoEmpresa:", e); return 0; }
+  }
+  // Empresas de un contacto, principal primero (fallback si ninguna está
+  // marcada: la más antigua — mismo criterio que resolve_contacto_company
+  // en crm/supabase-empresas.sql).
+  function empresasForContact(contactId){
+    return CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId; })
+      .map(function(l){ return {link:l, empresa: empresaById[l.empresa_id]}; })
+      .filter(function(x){ return !!x.empresa; })
+      .sort(function(a,b){ return (b.link.principal?1:0)-(a.link.principal?1:0); });
+  }
+  function contactsForEmpresa(empresaId){
+    return CONTACTO_EMPRESA.filter(function(l){ return l.empresa_id===empresaId; })
+      .map(function(l){ return contactById[l.contact_id]; })
+      .filter(Boolean);
+  }
+  // Enlaza un contacto a una empresa (inserción de bajo nivel, sin gestionar
+  // la bandera "principal" de otros enlaces — la usan altas nuevas donde el
+  // contacto no puede tener ya una empresa marcada como principal, ver
+  // addContact/convertLeadToContact). 23505 (ya enlazados) se ignora: mismo
+  // criterio de idempotencia que el resto de este archivo — un reintento no
+  // debe fallar por algo que ya quedó hecho en un intento anterior.
   async function linkContactoEmpresa(client, contactId, empresaId, principal){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     var payload = { contact_id: contactId, empresa_id: empresaId, principal: !!principal };
     var res = await client.from("contacto_empresa").insert(payload).select();
-    if(res.error && res.error.code !== "23505") throw res.error;
+    if(res.error){
+      if(res.error.code !== "23505") throw res.error;
+      return null;
+    }
+    var link = rowToContactoEmpresa(res.data[0]);
+    CONTACTO_EMPRESA.push(link);
+    return link;
+  }
+  // Quita la marca de principal del enlace actual de un contacto, si tiene
+  // uno — paso previo obligatorio antes de insertar/promover otro como
+  // principal, porque contacto_empresa_principal_key (índice único parcial)
+  // no permite dos principal=true a la vez para el mismo contacto.
+  async function demoteCurrentPrincipal(client, contactId){
+    var current = CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId && l.principal; })[0];
+    if(!current) return;
+    var res = await client.from("contacto_empresa").update({principal:false}).eq("id", current.id);
+    if(res.error) throw res.error;
+    current.principal = false;
+  }
+  // Enlaza una empresa (nueva o ya existente en CONTACTO_EMPRESA) a un
+  // contacto que YA tiene al menos una empresa — a diferencia de
+  // linkContactoEmpresa, esta gestiona el "como mucho una principal" y
+  // refresca contactos.company en caché. La usa EditContact para "añadir
+  // una segunda empresa" o cambiar cuál es la principal.
+  async function addContactoEmpresaLink(client, contactId, empresaId, principal){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var existing = CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId && l.empresa_id===empresaId; })[0];
+    if(existing){
+      if(principal && !existing.principal) await setPrincipalEmpresa(client, contactId, empresaId);
+      return existing;
+    }
+    if(principal) await demoteCurrentPrincipal(client, contactId);
+    var link = await linkContactoEmpresa(client, contactId, empresaId, principal);
+    await refreshContactsCompany(client, [contactId]);
+    return link;
+  }
+  async function setPrincipalEmpresa(client, contactId, empresaId){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var target = CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId && l.empresa_id===empresaId; })[0];
+    if(!target) throw new Error("Ese enlace no existe.");
+    if(target.principal) return target;
+    await demoteCurrentPrincipal(client, contactId);
+    var res = await client.from("contacto_empresa").update({principal:true}).eq("id", target.id);
+    if(res.error) throw res.error;
+    target.principal = true;
+    await refreshContactsCompany(client, [contactId]);
+    return target;
+  }
+  // Quita una empresa de un contacto. Rechaza dejarlo sin ninguna (todo
+  // contacto debe pertenecer a una empresa, ver crm/supabase-empresas.sql).
+  async function removeContactoEmpresaLink(client, contactId, empresaId){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var links = CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId; });
+    if(links.length<=1) throw new Error("Un contacto debe tener al menos una empresa.");
+    var target = links.filter(function(l){ return l.empresa_id===empresaId; })[0];
+    if(!target) return;
+    var res = await client.from("contacto_empresa").delete().eq("id", target.id);
+    if(res.error) throw res.error;
+    var idx = CONTACTO_EMPRESA.indexOf(target);
+    if(idx>-1) CONTACTO_EMPRESA.splice(idx,1);
+    await refreshContactsCompany(client, [contactId]);
+  }
+  // Relee contactos.company desde la BD (lo mantiene al día el trigger de
+  // empresas.sql) y actualiza la caché local (CONTACTS/contactById) in
+  // place, para que cualquier vista que ya tenga esa referencia lo vea sin
+  // recargar.
+  async function refreshContactsCompany(client, contactIds){
+    if(!client || !contactIds || !contactIds.length) return;
+    var res = await client.from("contactos").select("id, company").in("id", contactIds);
+    if(res.error || !res.data) return;
+    res.data.forEach(function(row){
+      var c = contactById[row.id];
+      if(c) c.company = row.company || "";
+    });
+  }
+  // ---- Documentos por empresa (agrega los de todos sus contactos) ----
+  // No se cachea globalmente como CONTACTS/EMPRESAS: se consulta al vuelo
+  // al abrir la pestaña de documentos de una ficha de empresa. La tabla,
+  // sus índices y su RLS ya existen desde la fase de adjuntos de WhatsApp
+  // (crm/supabase-documentos.sql); aquí solo se añade la consulta por
+  // contact_id que faltaba.
+  function rowToDocumento(row){
+    return {
+      id: row.id,
+      storage_path: row.storage_path,
+      mime_type: row.mime_type || "",
+      size_bytes: row.size_bytes,
+      original_filename: row.original_filename || "",
+      status: row.status,
+      contact_id: row.contact_id,
+      folder: row.folder || "General",
+      source: row.source,
+      created: (row.created_at||"").toString().slice(0,10)
+    };
+  }
+  async function loadDocumentosForContacts(client, contactIds){
+    if(!client || !contactIds || !contactIds.length) return [];
+    try{
+      var res = await client.from("documentos").select("*").in("contact_id", contactIds).order("created_at",{ascending:false});
+      if(res.error || !res.data) return [];
+      return res.data.map(rowToDocumento);
+    }catch(e){ if(window.console) console.error("loadDocumentosForContacts:", e); return []; }
   }
 
   // ---- Deals reales (tabla "deals" de Supabase) ----
@@ -1232,9 +1391,14 @@
     LOSS_REASONS:LOSS_REASONS, PRIORITIES:PRIORITIES,
     priorityById:function(id){var m={};PRIORITIES.forEach(function(p){m[p.id]=p;});return m[id];},
     CONTACTS:CONTACTS, contactById:contactById,
-    EMPRESAS:EMPRESAS, loadEmpresas:loadEmpresas, addEmpresa:addEmpresa, linkContactoEmpresa:linkContactoEmpresa,
+    EMPRESAS:EMPRESAS, empresaById:empresaById, loadEmpresas:loadEmpresas, addEmpresa:addEmpresa, updateEmpresa:updateEmpresa,
     findEmpresaByCif:findEmpresaByCif, searchEmpresasByName:searchEmpresasByName,
     normalizeCompanyName:normalizeCompanyName, normalizeCif:normalizeCif,
+    CONTACTO_EMPRESA:CONTACTO_EMPRESA, loadContactoEmpresa:loadContactoEmpresa,
+    empresasForContact:empresasForContact, contactsForEmpresa:contactsForEmpresa,
+    linkContactoEmpresa:linkContactoEmpresa, addContactoEmpresaLink:addContactoEmpresaLink,
+    setPrincipalEmpresa:setPrincipalEmpresa, removeContactoEmpresaLink:removeContactoEmpresaLink,
+    loadDocumentosForContacts:loadDocumentosForContacts,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
