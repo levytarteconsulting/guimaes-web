@@ -296,6 +296,7 @@ button.wa-attach[disabled]{opacity:.6;cursor:not-allowed;}
 .wa-attach__thumb--sticker{width:120px;max-height:120px;background:none;}
 .wa-attach__video{max-width:100%;width:260px;border-radius:10px;display:block;}
 .wa-attach__audio{max-width:100%;width:260px;}
+.wa-caption{margin-top:6px;}
 .wa__compose{background:var(--paper);border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;}
 .wa__compose input{flex:1;border:1px solid var(--line-strong);border-radius:22px;padding:10px 16px;outline:none;}
 .wa__compose--notice{justify-content:space-between;}

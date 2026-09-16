@@ -1251,25 +1251,56 @@ function WaContactCard({contacts}){
 // texto normal si no hay nada especial, o si es un tipo con fichero pero
 // sin meta.attachment (mensaje de antes de tener adjuntos: ver comentario
 // dentro).
+// extractBody (webhook) rellena body con un valor sintético cuando el
+// mensaje no trae un caption real escrito por el cliente — nunca hay que
+// pintar eso como si lo hubiera escrito. Por tipo:
+//   image/document/video: "[imagen]"/"[documento]"/"[vídeo]" cuando no hay
+//     caption — y document, además, usa el nombre del fichero como body
+//     cuando tampoco hay caption (ya se repite en la propia tarjeta).
+//   audio/sticker: SIEMPRE sintético ("[audio]"/"[sticker]") — la API de
+//     Meta no tiene concepto de caption para estos dos tipos.
+//   location/contacts: body ya es el nombre del sitio/contacto o un
+//     "[ubicación]"/"[contacto]" de relleno — en ambos casos es lo mismo
+//     que ya se ve en su tarjeta, nunca hay un caption aparte.
+const WA_SYNTHETIC_BODY = { image:"[imagen]", document:"[documento]", video:"[vídeo]", audio:"[audio]", sticker:"[sticker]" };
+function waRealCaption(m){
+  if(!m.body) return null;
+  if(m.type==="audio" || m.type==="sticker" || m.type==="location" || m.type==="contacts") return null;
+  if(m.body === WA_SYNTHETIC_BODY[m.type]) return null;
+  if(m.type==="document" && m.body === m.meta?.attachment?.filename) return null;
+  return m.body;
+}
+
 function WaMessageContent({m, toast}){
   if(m.type==="location") return <WaLocationCard loc={m.meta?.location}/>;
   if(m.type==="contacts") return <WaContactCard contacts={m.meta?.contacts}/>;
 
   if(WA_MEDIA_TYPES.includes(m.type)){
     const att = m.meta?.attachment;
+    const caption = waRealCaption(m);
+    let attachmentEl;
     if(!att){
       // type ya venía como 'document'/'image'/... en BD, pero no hay fila en
       // documentos: es un mensaje recibido antes de activar la descarga de
       // adjuntos. El media de Meta ya ha caducado — no hay nada que
       // recuperar (ver el informe de reconocimiento de esta misma
       // conversación), así que no se intenta, solo se avisa con honestidad.
-      return <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>Archivo no disponible (recibido antes de activar los adjuntos)</div>;
+      attachmentEl = <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>Archivo no disponible (recibido antes de activar los adjuntos)</div>;
+    } else if(att.status==="pending"){
+      attachmentEl = <div className="wa-attach wa-attach--loading"><Icon name="clock" size={14}/>Descargando…</div>;
+    } else if(att.status==="failed"){
+      attachmentEl = <div className="wa-attach wa-attach--unavailable"><Icon name="x" size={14}/>No se pudo descargar</div>;
+    } else if(att.status==="too_large"){
+      attachmentEl = <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>{(att.filename||"Archivo")+" ("+CRM.fmtBytes(att.size_bytes)+") — demasiado grande, pídelo directamente por WhatsApp"}</div>;
+    } else if(m.type==="document"){
+      attachmentEl = <WaDocumentAttachment att={att} toast={toast}/>;
+    } else {
+      attachmentEl = <WaAttachmentMedia att={att} kind={m.type}/>;
     }
-    if(att.status==="pending") return <div className="wa-attach wa-attach--loading"><Icon name="clock" size={14}/>Descargando…</div>;
-    if(att.status==="failed") return <div className="wa-attach wa-attach--unavailable"><Icon name="x" size={14}/>No se pudo descargar</div>;
-    if(att.status==="too_large") return <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>{(att.filename||"Archivo")+" ("+CRM.fmtBytes(att.size_bytes)+") — demasiado grande, pídelo directamente por WhatsApp"}</div>;
-    if(m.type==="document") return <WaDocumentAttachment att={att} toast={toast}/>;
-    return <WaAttachmentMedia att={att} kind={m.type}/>;
+    // El caption (si es real) se pinta SIEMPRE debajo del adjunto, sea cual
+    // sea su estado — que la descarga fallara no debe hacer desaparecer
+    // algo que el cliente sí escribió.
+    return <>{attachmentEl}{caption && <div className="wa-caption">{caption}</div>}</>;
   }
 
   return m.body;
