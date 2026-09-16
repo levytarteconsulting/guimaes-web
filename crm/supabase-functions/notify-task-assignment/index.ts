@@ -1,13 +1,25 @@
 // Supabase Edge Function: notify-task-assignment
-// Avisa por push y por email a quien se le asigna una tarea (al crearla
-// con asignado, o al cambiarle el asignado a una ya existente). La llama
-// un trigger de Postgres sobre public.tareas vía net.http_post — ver
-// crm/supabase-tareas-notify-trigger.sql. Nunca la llama el navegador.
+// Avisa por push y por email de dos cosas distintas sobre una tarea,
+// según el "type" del body:
+//   - "assignment" (default, para compatibilidad con llamantes que no
+//     mandan type — ver más abajo): al crearla con asignado o cambiarle
+//     el asignado. La llama el trigger de crm/supabase-tareas-notify-trigger.sql.
+//   - "due_reminder": recordatorio de que vence en 10 minutos. La llama
+//     pg_cron cada minuto vía crm/supabase-tareas-due-reminder-cron.sql.
+// En ambos casos, quien llama es siempre Postgres (net.http_post), nunca
+// el navegador.
 //
-// No avisa si quien asigna es la misma persona a la que se asigna
-// (autoasignación) — esa comprobación vive AQUÍ, no en el trigger: hace
-// falta cruzar admins.auth_user_id, y aquí ya tenemos permisos de
-// servicio para hacerlo sin líos de RLS.
+// Se reutiliza la misma función para los dos avisos en vez de duplicarla:
+// comparten por completo la parte que de verdad tiene chicha (resolver el
+// asignado, mandar el push, mandar el email, que ninguno de los dos falle
+// aunque el otro sí) — lo único que cambia es el texto y, para
+// "assignment", la comprobación de autoasignación (que no aplica a un
+// recordatorio: un recordatorio siempre avisa al asignado, no hay "quién
+// lo hizo").
+//
+// El body del trigger de asignación (ya en producción) nunca ha mandado
+// "type" — por eso el default es "assignment" y no hace falta tocar ese
+// trigger para que esto siga funcionando exactamente igual que antes.
 //
 // Es también el único sitio donde se cruzan los dos "espacios de ids" del
 // proyecto: tareas.assigned_to guarda admins.id, pero
@@ -53,11 +65,11 @@ function fmtDue(iso: string | null): string {
 // patrón que notify-new-lead/whatsapp-webhook. Dirigido a un solo usuario
 // (user_ids: [authUserId]), nunca all:true — esto es un aviso personal, no
 // un anuncio al equipo entero.
-async function sendPush(supabaseUrl: string, serviceKey: string, authUserId: string, title: string, body: string, taskId: string): Promise<void> {
+async function sendPush(supabaseUrl: string, serviceKey: string, authUserId: string, title: string, body: string, taskId: string, tag: string): Promise<void> {
   const res = await fetch(`${supabaseUrl}/functions/v1/push-send`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ user_ids: [authUserId], title, body, url: "/crm?view=tareas&id=" + taskId, tag: "task-" + taskId }),
+    body: JSON.stringify({ user_ids: [authUserId], title, body, url: "/crm?view=tareas&id=" + taskId, tag }),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -89,11 +101,14 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "No autorizado." }), { status: 401 });
     }
 
-    // { record: to_jsonb(NEW), assigned_by_auth_uid: auth.uid() } — mismo
-    // shape "record" que ya usa notify-new-lead; assigned_by_auth_uid lo
-    // añade el trigger porque auth.uid() solo se puede leer ahí (dentro de
-    // la petición original del CRM), no aquí dentro de esta función.
-    const { record, assigned_by_auth_uid: assignedByAuthUid } = await req.json();
+    // { record: to_jsonb(NEW), assigned_by_auth_uid: auth.uid(), type } —
+    // mismo shape "record" que ya usa notify-new-lead; assigned_by_auth_uid
+    // lo añade el trigger de asignación porque auth.uid() solo se puede
+    // leer ahí (dentro de la petición original del CRM), no aquí. type
+    // ausente = "assignment" (compatibilidad con el trigger ya desplegado,
+    // que nunca lo manda).
+    const { record, assigned_by_auth_uid: assignedByAuthUid, type } = await req.json();
+    const noticeType: "assignment" | "due_reminder" = type === "due_reminder" ? "due_reminder" : "assignment";
     const taskId: string | undefined = record?.id;
     const assignedTo: string | undefined = record?.assigned_to; // admins.id
     const title: string = record?.title || "Tarea sin título";
@@ -117,18 +132,28 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, skipped: "asignado no encontrado o inactivo" }), { status: 200 });
     }
 
-    if (assignedByAuthUid && assignee.auth_user_id === assignedByAuthUid) {
+    // La autoasignación solo tiene sentido para "assignment" — un
+    // recordatorio de vencimiento siempre avisa al asignado, no hay
+    // "quién lo hizo" que pueda coincidir con él.
+    if (noticeType === "assignment" && assignedByAuthUid && assignee.auth_user_id === assignedByAuthUid) {
       return new Response(JSON.stringify({ ok: true, skipped: "autoasignación" }), { status: 200 });
     }
 
     let assignerName = "Alguien";
-    if (assignedByAuthUid) {
+    if (noticeType === "assignment" && assignedByAuthUid) {
       const { data: assigner } = await supabase.from("admins").select("nombre").eq("auth_user_id", assignedByAuthUid).maybeSingle();
       if (assigner?.nombre) assignerName = assigner.nombre;
     }
 
     const dueText = fmtDue(dueAt);
-    const pushBody = assignerName + " te ha asignado: " + title + (dueText ? " (vence " + dueText + ")" : "");
+    const pushTitle = noticeType === "due_reminder" ? "Tarea a punto de vencer" : "Nueva tarea asignada";
+    const pushBody = noticeType === "due_reminder"
+      ? title + (dueText ? " — vence " + dueText : " — vence en 10 minutos")
+      : assignerName + " te ha asignado: " + title + (dueText ? " (vence " + dueText + ")" : "");
+    const subject = noticeType === "due_reminder"
+      ? "Vence en 10 minutos: " + title
+      : assignerName + " te ha asignado una tarea: " + title;
+    const pushTag = "task-" + noticeType + "-" + taskId;
     const results: Record<string, string> = {};
 
     // Push y email van cada uno en su propio try/catch: son best-effort e
@@ -139,7 +164,7 @@ Deno.serve(async (req) => {
     // de tareas ya quedó guardada — esto solo se registra.
     if (assignee.auth_user_id) {
       try {
-        await sendPush(supabaseUrl, serviceKey, assignee.auth_user_id, "Nueva tarea asignada", pushBody, taskId);
+        await sendPush(supabaseUrl, serviceKey, assignee.auth_user_id, pushTitle, pushBody, taskId, pushTag);
         results.push = "enviado";
       } catch (e) {
         results.push = "error";
@@ -151,11 +176,10 @@ Deno.serve(async (req) => {
 
     if (assignee.email) {
       try {
-        const subject = assignerName + " te ha asignado una tarea: " + title;
         const html = `
           <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:14px">
             <tr><td><b>Tarea</b></td><td>${escapeHtml(title)}</td></tr>
-            <tr><td><b>Asignada por</b></td><td>${escapeHtml(assignerName)}</td></tr>
+            ${noticeType === "assignment" ? `<tr><td><b>Asignada por</b></td><td>${escapeHtml(assignerName)}</td></tr>` : ""}
             ${dueText ? `<tr><td><b>Vence</b></td><td>${escapeHtml(dueText)}</td></tr>` : ""}
           </table>
           <p><a href="${CRM_URL}?view=tareas&id=${taskId}">Abrir en el CRM</a></p>

@@ -279,6 +279,23 @@ textarea.inp{resize:vertical;min-height:80px;}
 .bubble__t{font-size:10.5px;color:var(--muted);margin-top:4px;text-align:right;}
 .bubble.in{align-self:flex-start;background:#fff;border-bottom-left-radius:4px;}
 .bubble.out{align-self:flex-end;background:#D7F3E4;border-bottom-right-radius:4px;}
+/* Adjuntos dentro de la burbuja — max-width:100% en todo (nunca un ancho
+   fijo aislado) porque la propia burbuja ya está acotada por .bubble
+   arriba (64% en escritorio, 82% en móvil, ver la media query de más
+   abajo); así una miniatura/reproductor nunca puede desbordar a lo ancho
+   ni romper el layout, sea cual sea la pantalla. */
+.wa-attach{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:rgba(11,34,56,.05);max-width:100%;}
+button.wa-attach{border:none;cursor:pointer;width:100%;text-align:left;font:inherit;color:inherit;}
+button.wa-attach[disabled]{opacity:.6;cursor:not-allowed;}
+.bubble.out .wa-attach{background:rgba(255,255,255,.45);}
+.wa-attach__meta{flex:1;min-width:0;}
+.wa-attach__name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wa-attach__size{font-size:11.5px;color:var(--muted);margin-top:1px;}
+.wa-attach--loading,.wa-attach--unavailable{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;font-style:italic;background:none;padding:2px 0;}
+.wa-attach__thumb{max-width:100%;width:220px;max-height:220px;border-radius:10px;display:block;cursor:pointer;object-fit:cover;}
+.wa-attach__thumb--sticker{width:120px;max-height:120px;background:none;}
+.wa-attach__video{max-width:100%;width:260px;border-radius:10px;display:block;}
+.wa-attach__audio{max-width:100%;width:260px;}
 .wa__compose{background:var(--paper);border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:center;}
 .wa__compose input{flex:1;border:1px solid var(--line-strong);border-radius:22px;padding:10px 16px;outline:none;}
 .wa__compose--notice{justify-content:space-between;}

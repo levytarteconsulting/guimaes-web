@@ -3,6 +3,12 @@
   "use strict";
 
   var fmtEUR = function(n){ return (n==null?"—":new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n)); };
+  var fmtBytes = function(n){
+    if(n==null) return "";
+    if(n<1024) return n+" B";
+    if(n<1024*1024) return (n/1024).toFixed(0)+" KB";
+    return (n/1024/1024).toFixed(1)+" MB";
+  };
   var initials = function(name){ return (name||"?").split(" ").filter(Boolean).slice(0,2).map(function(s){return s[0];}).join("").toUpperCase(); };
   var AV_COLORS = ["#1F6FEB","#16B8A6","#C8A24B","#7C5CFC","#E0518A","#2E8B57","#D9822B","#4B637B"];
   var colorFor = function(str){ var h=0; str=str||""; for(var i=0;i<str.length;i++)h=(h*31+str.charCodeAt(i))>>>0; return AV_COLORS[h%AV_COLORS.length]; };
@@ -161,6 +167,8 @@
       dir: row.direction==="out" ? "out" : "in",
       t: fmtWaTime(row.created_at),
       body: row.body || "",
+      type: row.type || "text",
+      meta: row.meta || null,
       wa_message_id: row.wa_message_id || null,
       status: row.delivery_status || null
     };
@@ -223,15 +231,24 @@
       return conv;
     }catch(e){ if(window.console) console.error("loadWhatsappConversationById:", e); return null; }
   }
-  // Suscripción Realtime a mensajes nuevos de WhatsApp (requiere que la tabla
-  // whatsapp_messages esté añadida a la publicación "supabase_realtime" en Supabase —
-  // Database → Replication — si no, el canal se conecta pero no llegan eventos).
-  function subscribeWhatsapp(client, onInsert){
+  // Suscripción Realtime a whatsapp_messages (requiere que la tabla esté
+  // añadida a la publicación "supabase_realtime" en Supabase — Database →
+  // Replication — si no, el canal se conecta pero no llegan eventos).
+  // Escucha INSERT (mensaje nuevo) y UPDATE (p. ej. un adjunto que pasa de
+  // pending a stored, o un delivery_status) — onChange(row, eventType) para
+  // que cada caller decida qué hacer con cada uno; un UPDATE nunca debe
+  // tratarse como si fuera un mensaje nuevo (no hay que añadirlo al final
+  // de la lista ni sumar al contador de no leídos, solo refrescar el que
+  // ya estaba).
+  function subscribeWhatsapp(client, onChange){
     if(!client) return null;
     return client
       .channel("whatsapp_messages_changes")
       .on("postgres_changes", {event:"INSERT", schema:"public", table:"whatsapp_messages"}, function(payload){
-        onInsert(payload.new);
+        onChange(payload.new, "INSERT");
+      })
+      .on("postgres_changes", {event:"UPDATE", schema:"public", table:"whatsapp_messages"}, function(payload){
+        onChange(payload.new, "UPDATE");
       })
       .subscribe();
   }
@@ -354,9 +371,38 @@
       var res = await client.from("whatsapp_conversations").update({contact_id: contactId}).eq("id", id).select();
       if(res.error) throw res.error;
       if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
+      // Los adjuntos de esta conversación no se mueven de sitio en Storage
+      // al vincular/desvincular (ver crm/supabase-documentos.sql) — solo
+      // esta columna cambia, para que "aparecer en la carpeta WhatsApp del
+      // contacto" sea una consulta por contact_id, nunca un movimiento de
+      // ficheros. Sin este segundo update, los documentos ya guardados
+      // antes de vincular se quedarían huérfanos de contact_id para
+      // siempre, aunque la conversación sí quedara vinculada.
+      var docsRes = await client.from("documentos").update({contact_id: contactId}).eq("whatsapp_conversation_id", id);
+      if(docsRes.error) throw docsRes.error;
     }
     if(w) w.contact = contactId;
     return w;
+  }
+  // Genera una URL firmada al vuelo para un adjunto de WhatsApp — nunca se
+  // guarda en ninguna tabla, caduca sola a los 10 minutos. documentoId es
+  // el id de public.documentos (viene en whatsapp_messages.meta.attachment,
+  // ver crm/supabase-functions/whatsapp-webhook/index.ts). El propio
+  // storage_path no viaja en meta, así que hace falta esta consulta previa
+  // — un viaje más a BD, pero evita tener que tocar el webhook solo para
+  // exponer una ruta que RLS ya deja leer igualmente desde aquí.
+  // opts: {download: nombre} fuerza descarga con ese nombre (Content-
+  // Disposition: attachment) en vez de la vista inline que necesitan
+  // imagen/vídeo/audio.
+  async function getAttachmentSignedUrl(client, documentoId, opts){
+    if(!client || !documentoId) return null;
+    try{
+      var docRes = await client.from("documentos").select("storage_path").eq("id", documentoId).maybeSingle();
+      if(docRes.error || !docRes.data) return null;
+      var signed = await client.storage.from("documentos").createSignedUrl(docRes.data.storage_path, 600, opts||{});
+      if(signed.error) return null;
+      return signed.data.signedUrl;
+    }catch(e){ if(window.console) console.error("getAttachmentSignedUrl:", e); return null; }
   }
   // ---- Admins (public.admins) ----
   function rowToAdmin(row){
@@ -1007,8 +1053,8 @@
     CONTACTS:CONTACTS, contactById:contactById,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
-    linkWhatsappConversation:linkWhatsappConversation,
-    fmtEUR:fmtEUR, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
+    linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
+    fmtEUR:fmtEUR, fmtBytes:fmtBytes, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     isoToMadridDatetimeLocal:isoToMadridDatetimeLocal,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,

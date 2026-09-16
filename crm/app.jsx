@@ -586,7 +586,8 @@ function ContactDetail({id, nav, toast, user}){
         }
       }}/>}
       {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
-        <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s), notas, tareas y documentos asociados. Esta acción no se puede deshacer.</p>
+        <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s) y notas asociadas. Esta acción no se puede deshacer.</p>
+        <p className="muted" style={{fontSize:12.5,marginTop:8}}>Los documentos y conversaciones de WhatsApp no se borran — quedan sin vincular a ningún contacto, pero siguen accesibles.</p>
       </Modal>}
       {showNewDeal && <NewDeal contactId={id} onClose={()=>setShowNewDeal(false)} onSave={async(f)=>{
         try{
@@ -1171,6 +1172,108 @@ function isWaWindowOpen(conv){
   if(isNaN(t)) return false;
   return (Date.now()-t) < WA_WINDOW_MS;
 }
+// Tipos de whatsapp_messages.type que traen un fichero real (Storage) —
+// location/contacts no están: esos ya vienen completos en meta, sin
+// adjunto que descargar (ver crm/supabase-functions/whatsapp-webhook).
+const WA_MEDIA_TYPES = ["document","image","video","audio","sticker"];
+
+// image/sticker/video/audio comparten el mismo patrón: pedir la URL
+// firmada en cuanto se monta la burbuja (hace falta ya para el propio
+// src, no se puede esperar a un clic) y mostrar un estado de carga hasta
+// tenerla. document es distinto (se pide solo al pulsar, ver
+// WaDocumentAttachment) así que no comparte este componente.
+function WaAttachmentMedia({att, kind}){
+  const [url,setUrl]=uState(null);
+  const [showFull,setShowFull]=uState(false);
+  uEffect(()=>{
+    let alive=true;
+    CRM.getAttachmentSignedUrl(Auth.client, att.documento_id).then(u=>{ if(alive) setUrl(u); });
+    return ()=>{alive=false;};
+  },[att.documento_id]);
+  if(!url) return <div className="wa-attach wa-attach--loading"><Icon name="clock" size={14}/>Cargando…</div>;
+  if(kind==="video") return <video src={url} controls className="wa-attach__video"/>;
+  if(kind==="audio") return <audio src={url} controls className="wa-attach__audio"/>;
+  return <>
+    <img src={url} className={"wa-attach__thumb"+(kind==="sticker"?" wa-attach__thumb--sticker":"")} onClick={()=>setShowFull(true)} alt={att.filename||"Imagen"}/>
+    {showFull && <Modal title={att.filename||"Imagen"} onClose={()=>setShowFull(false)} wide><img src={url} style={{width:"100%",borderRadius:8,display:"block"}}/></Modal>}
+  </>;
+}
+function WaDocumentAttachment({att, toast}){
+  const [busy,setBusy]=uState(false);
+  const download=async()=>{
+    // La pestaña se abre en blanco AQUÍ, síncrono dentro del propio click —
+    // si se abriera después del await de abajo, Safari/iOS (y Chrome, algo
+    // menos estricto) la bloquean por haber perdido el "gesto de usuario"
+    // que autoriza abrir una ventana nueva. Se redirige en cuanto llega la
+    // URL firmada.
+    const win = window.open("", "_blank");
+    setBusy(true);
+    try{
+      const url = await CRM.getAttachmentSignedUrl(Auth.client, att.documento_id, {download: att.filename||true});
+      if(!url){ toast("No se pudo generar el enlace de descarga."); if(win) win.close(); return; }
+      if(win) win.location.href = url; else window.open(url, "_blank");
+    }finally{ setBusy(false); }
+  };
+  return <button className="wa-attach wa-attach--doc" onClick={download} disabled={busy}>
+    <Icon name="documents" size={20}/>
+    <div className="wa-attach__meta">
+      <div className="wa-attach__name">{att.filename || "Documento"}</div>
+      <div className="wa-attach__size">{busy?"Generando enlace…":CRM.fmtBytes(att.size_bytes)}</div>
+    </div>
+    <Icon name="download" size={16}/>
+  </button>;
+}
+function WaLocationCard({loc}){
+  if(!loc) return null;
+  const mapsUrl = "https://www.google.com/maps?q="+loc.lat+","+loc.lng;
+  return <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="wa-attach wa-attach--location">
+    <Icon name="globe" size={20}/>
+    <div className="wa-attach__meta">
+      <div className="wa-attach__name">{loc.name || loc.address || "Ubicación compartida"}</div>
+      {loc.address && loc.name && <div className="wa-attach__size">{loc.address}</div>}
+    </div>
+  </a>;
+}
+function WaContactCard({contacts}){
+  const c = contacts && contacts[0];
+  if(!c) return null;
+  const name = c.name?.formatted_name || "Contacto compartido";
+  const phone = c.phones?.[0]?.phone || c.phones?.[0]?.wa_id || "";
+  return <div className="wa-attach wa-attach--contact">
+    <Icon name="user" size={20}/>
+    <div className="wa-attach__meta">
+      <div className="wa-attach__name">{name}</div>
+      {phone && <div className="wa-attach__size">{phone}</div>}
+    </div>
+  </div>;
+}
+// Único punto que decide qué pintar dentro de una burbuja según m.type —
+// texto normal si no hay nada especial, o si es un tipo con fichero pero
+// sin meta.attachment (mensaje de antes de tener adjuntos: ver comentario
+// dentro).
+function WaMessageContent({m, toast}){
+  if(m.type==="location") return <WaLocationCard loc={m.meta?.location}/>;
+  if(m.type==="contacts") return <WaContactCard contacts={m.meta?.contacts}/>;
+
+  if(WA_MEDIA_TYPES.includes(m.type)){
+    const att = m.meta?.attachment;
+    if(!att){
+      // type ya venía como 'document'/'image'/... en BD, pero no hay fila en
+      // documentos: es un mensaje recibido antes de activar la descarga de
+      // adjuntos. El media de Meta ya ha caducado — no hay nada que
+      // recuperar (ver el informe de reconocimiento de esta misma
+      // conversación), así que no se intenta, solo se avisa con honestidad.
+      return <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>Archivo no disponible (recibido antes de activar los adjuntos)</div>;
+    }
+    if(att.status==="pending") return <div className="wa-attach wa-attach--loading"><Icon name="clock" size={14}/>Descargando…</div>;
+    if(att.status==="failed") return <div className="wa-attach wa-attach--unavailable"><Icon name="x" size={14}/>No se pudo descargar</div>;
+    if(att.status==="too_large") return <div className="wa-attach wa-attach--unavailable"><Icon name="documents" size={16}/>{(att.filename||"Archivo")+" ("+CRM.fmtBytes(att.size_bytes)+") — demasiado grande, pídelo directamente por WhatsApp"}</div>;
+    if(m.type==="document") return <WaDocumentAttachment att={att} toast={toast}/>;
+    return <WaAttachmentMedia att={att} kind={m.type}/>;
+  }
+
+  return m.body;
+}
 // Hilo de WhatsApp reutilizable (mensajes + composer + ventana de 24h +
 // plantillas). Lo usan tanto la vista general de WhatsApp, con la conversación
 // activa de la lista, como la pestaña "WhatsApp" de la ficha de contacto, de
@@ -1227,12 +1330,21 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
 
   // Realtime: mensajes entrantes nuevos de ESTA conversación se añaden al hilo
   // en caliente y reabren la ventana de 24h (last_customer_message_at).
+  // UPDATE (p. ej. un adjunto que pasa de pending a stored) refresca el
+  // mensaje que ya estaba en el hilo en vez de añadirlo de nuevo — sin
+  // esto, ver un PDF pasar a disponible exigía recargar la página entera.
   uEffect(()=>{
     if(!live || !Auth.client || !CRM.subscribeWhatsapp) return;
-    const channel = CRM.subscribeWhatsapp(Auth.client, (row)=>{
-      if(row.direction!=="in" || row.conversation_id!==convRef.current.id) return;
-      const msg = CRM.rowToWhatsappMessage(row);
+    const channel = CRM.subscribeWhatsapp(Auth.client, (row, eventType)=>{
+      if(row.conversation_id!==convRef.current.id) return;
       const prev = convRef.current;
+      if(eventType==="UPDATE"){
+        const msg = CRM.rowToWhatsappMessage(row);
+        onConvChangeRef.current({...prev, messages: prev.messages.map(m=>m.id===msg.id?msg:m)});
+        return;
+      }
+      if(row.direction!=="in") return;
+      const msg = CRM.rowToWhatsappMessage(row);
       onConvChangeRef.current({...prev, messages:[...prev.messages,msg], updated:msg.t, last_customer_message_at: row.created_at});
     });
     return ()=>{ if(channel) Auth.client.removeChannel(channel); };
@@ -1254,7 +1366,7 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
             : <button className="btn btn--sm btn--ghost" onClick={()=>setShowLink(true)}><Icon name="tag" size={13}/>Vincular a contacto</button>}
         </div>
       </div>
-      <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}>{m.body}<div className="bubble__t">{m.t}</div></div>)}</div>
+      <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}><WaMessageContent m={m} toast={toast}/><div className="bubble__t">{m.t}</div></div>)}</div>
       {windowOpen ? (
         <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
       ) : (
@@ -1331,14 +1443,19 @@ function WhatsApp({nav, toast, focusId}){
   // abierta, <WaThread> ya se encarga de sí mismo (ver prop live=false más
   // abajo), pero igualmente actualizamos aquí su vista previa/hora en la
   // lista; solo el contador de no leídos distingue abierta vs. no abierta.
+  // UPDATE (adjunto pending→stored, delivery_status...) solo refresca el
+  // mensaje ya presente — nunca cuenta como no leído ni toca "updated".
   uEffect(()=>{
     if(!Auth.client || !CRM.subscribeWhatsapp) return;
-    const channel = CRM.subscribeWhatsapp(Auth.client, (row)=>{
-      if(row.direction!=="in") return; // los salientes ya se añaden al enviar
+    const channel = CRM.subscribeWhatsapp(Auth.client, (row, eventType)=>{
       const msg = CRM.rowToWhatsappMessage(row);
       setConvs(cs=>{
         const idx = cs.findIndex(w=>w.id===row.conversation_id);
         if(idx===-1) return cs; // conversación nueva no cargada aún: aparecerá al recargar
+        if(eventType==="UPDATE"){
+          return cs.map((w,i)=> i!==idx ? w : {...w, messages: w.messages.map(m=>m.id===msg.id?msg:m)});
+        }
+        if(row.direction!=="in") return cs; // los salientes ya se añaden al enviar
         const isOpen = activeRef.current===row.conversation_id;
         return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], updated:msg.t, last_customer_message_at: row.created_at, unread: isOpen ? w.unread : w.unread+1});
       });
