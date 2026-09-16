@@ -924,19 +924,32 @@
     var found = SERVICES.find(function(s){ return s.name.toLowerCase()===String(label).trim().toLowerCase(); });
     return found ? found.id : label;
   }
-  // Carga los leads de Supabase. Cada lead con status 'new' se convierte
-  // automáticamente en contacto real + deal (reutiliza convertLeadToContact
-  // y addDeal). Los que ya están 'converted' se ignoran — es el blindaje
-  // anti-duplicados: si status no es 'new', el lead ni se toca.
+  // Recuento de leads con un fallo pendiente (error_message no nulo) — se
+  // recalcula en cada loadWebLeads, lo lee CRM.LEAD_ERROR_COUNT desde
+  // app.jsx (aviso de sesión) y el banner de la vista de Contactos.
+  var LEAD_ERROR_COUNT = 0;
+
+  // Carga los leads de Supabase. Cada lead con status 'new' se intenta
+  // convertir en contacto real + deal (reutiliza convertLeadToContact y
+  // addDeal). Los que ya están 'converted' se ignoran.
+  //
+  // contactFailures/dealFailures (en el objeto devuelto) son best-effort,
+  // solo para el aviso en pantalla — el registro que de verdad importa es
+  // leads.error_message, que persiste aunque nadie tenga la sesión
+  // abierta para ver el toast (ver crm/supabase-leads-dedupe.sql y el
+  // punto 4/5 de esta conversación).
   async function loadWebLeads(client){
-    if(!client) return 0;
+    var empty = {converted:0, contactFailures:[], dealFailures:[]};
+    if(!client) return empty;
     try{
       var res = await client.from("leads").select("*").order("created_at",{ascending:false});
-      if(res.error || !res.data) return 0;
-      var n = 0;
+      if(res.error || !res.data) return empty;
+      var n = 0, contactFailures = [], dealFailures = [];
       for(var i=0;i<res.data.length;i++){
         var row = res.data[i];
         if(row.status!=="new") continue; // solo leads sin convertir
+        var label = row.empresa || row.nombre || row.email || row.id;
+        var newContact;
         try{
           // 1) objeto temporal en memoria (igual que antes) para que convertLeadToContact lo encuentre
           var c = leadToContact(row);
@@ -950,34 +963,75 @@
 
           // 2) convierte a contacto real en public.contactos y marca el lead como 'converted'
           //    (convertLeadToContact ya relinca NOTES/ACTIVITY al nuevo id real)
-          var newContact = await convertLeadToContact(client, c.id);
-
-          // 3) crea el deal asociado, con el servicio pedido como título
+          newContact = await convertLeadToContact(client, c.id);
+          n++;
+        }catch(e){
+          // Aquí es donde se perdía el lead del 15/09: antes esto solo hacía
+          // console.error y no quedaba nada más. Ahora, además de avisar en
+          // pantalla (ver contactFailures, usado por app.jsx), se deja
+          // constancia en el propio lead — sobrevive a que nadie estuviera
+          // mirando la consola en ese momento. Sin quitarle status='new':
+          // así el próximo loadWebLeads lo reintenta solo, y gracias al
+          // índice único de contactos.lead_id (ver convertLeadToContact)
+          // reintentar es seguro aunque el contacto ya se hubiera llegado a
+          // crear a medias.
+          if(window.console) console.error("loadWebLeads: fallo al convertir lead "+row.id, e);
+          contactFailures.push(label);
+          try{
+            await client.from("leads").update({error_message: String((e && e.message) || e)}).eq("id", row.id);
+          }catch(e2){ if(window.console) console.error("loadWebLeads: no se pudo registrar el error del lead "+row.id, e2); }
+          continue; // sin contacto no tiene sentido intentar crear el deal
+        }
+        // 3) crea el deal asociado — aparte, para que un fallo aquí nunca
+        // deshaga ni esconda que el contacto sí se creó bien.
+        try{
           await addDeal(client, {
             title: row.servicio || "Solicitud web",
             contact_id: newContact.id,
             service: matchServiceId(row.servicio),
             stage: "nueva_solicitud"
           });
-          n++;
-        }catch(e){ if(window.console) console.error("loadWebLeads: fallo al convertir lead "+row.id, e); }
+        }catch(e){
+          if(window.console) console.error("loadWebLeads: contacto creado pero el deal falló para "+row.id, e);
+          dealFailures.push(newContact.company || label);
+        }
       }
-      return n;
-    }catch(e){ if(window.console) console.error("loadWebLeads:", e); return 0; }
+      // Recuento fresco al final, no una suma sobre el "antes" leído arriba:
+      // así un lead que justo se arregló en esta misma pasada (o que otra
+      // sesión arregló mientras tanto) no se sigue contando de más.
+      try{
+        var errRes = await client.from("leads").select("id",{count:"exact", head:true}).not("error_message","is",null);
+        LEAD_ERROR_COUNT = errRes.error ? 0 : (errRes.count||0);
+      }catch(e3){ LEAD_ERROR_COUNT = 0; }
+      return {converted:n, contactFailures:contactFailures, dealFailures:dealFailures};
+    }catch(e){ if(window.console) console.error("loadWebLeads:", e); return empty; }
   }
-  // Convierte un lead (id sintético "lead-<uuid>") en un contacto real de public.contactos
+  // Convierte un lead (id sintético "lead-<uuid>") en un contacto real de
+  // public.contactos.
+  //
+  // Orden invertido respecto a antes: el contacto se crea PRIMERO, y el
+  // lead solo se marca 'converted' si ese insert tuvo éxito. Antes era al
+  // revés (para evitar duplicados si el insert fallaba) — pero eso dejaba
+  // el fallo contrario, peor: cualquier error entre medias marcaba el lead
+  // como convertido sin haber creado nada, y ese lead quedaba invisible
+  // para siempre (así se perdió el del 15/09). Un contacto duplicado
+  // visible en la lista es mucho más fácil de detectar y arreglar que un
+  // lead que desaparece sin dejar rastro.
+  //
+  // La protección contra duplicados ya no depende del orden de las
+  // operaciones ni de status='new' (que dos sesiones pueden leer a la vez
+  // sin que ninguna sepa de la otra) — depende de contactos_lead_id_key,
+  // el índice único sobre contactos.lead_id (ver
+  // crm/supabase-leads-dedupe.sql). Si dos sesiones intentan convertir el
+  // mismo lead a la vez, o alguien recarga a mitad de una conversión
+  // anterior que sí tuvo éxito, el segundo INSERT choca con ese índice
+  // (código de error 23505) — se captura abajo como caso normal, no como
+  // fallo: se recupera el contacto que ya existe y se sigue igual.
   async function convertLeadToContact(client, leadId){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     var leadUuid = leadId.indexOf("lead-")===0 ? leadId.slice(5) : leadId;
     var lead = contactById[leadId];
     if(!lead) throw new Error("No se encontró el lead a convertir");
-
-    // Se marca el lead como convertido ANTES de crear el contacto: así, si el
-    // insert de abajo fallara, nunca queda un contacto huérfano con su lead
-    // todavía en 'new' (que es lo que provoca duplicados en cada recarga).
-    var statusRes = await client.from("leads").update({status:"converted"}).eq("id", leadUuid).select();
-    if(statusRes.error) throw statusRes.error;
-    if(!statusRes.data || statusRes.data.length===0) throw new Error("No se pudo marcar el lead como convertido (id: "+leadUuid+")");
 
     var payload = {
       company: lead.company || "",
@@ -989,13 +1043,32 @@
       lead_id: leadUuid
     };
     var res = await client.from("contactos").insert(payload).select();
-    if(res.error) throw res.error;
+    var contactRow;
+    if(res.error){
+      if(res.error.code !== "23505") throw res.error;
+      var existing = await client.from("contactos").select("*").eq("lead_id", leadUuid).maybeSingle();
+      if(existing.error || !existing.data) throw res.error; // no debería pasar; si pasa, el error original dice más
+      contactRow = existing.data;
+    }else{
+      contactRow = res.data[0];
+    }
+
+    // El contacto ya existe de verdad (recién creado, o ya existía y lo
+    // acabamos de recuperar arriba) — ahora sí se marca 'converted'. Si
+    // esto fallara, el lead se queda en 'new' con su contacto ya creado:
+    // el próximo loadWebLeads lo reintentará, chocará con el índice único
+    // de arriba (el contacto ya existe) y lo resolverá solo, sin duplicar
+    // nada — nunca se pierde.
+    var statusRes = await client.from("leads")
+      .update({status:"converted", error_message:null})
+      .eq("id", leadUuid).select();
+    if(statusRes.error) throw statusRes.error;
 
     var idx = CONTACTS.findIndex(function(c){return c.id===leadId;});
     if(idx>-1) CONTACTS.splice(idx,1);
     delete contactById[leadId];
 
-    var c = rowToContact(res.data[0]);
+    var c = rowToContact(contactRow);
     CONTACTS.unshift(c);
     contactById[c.id] = c;
 
@@ -1055,6 +1128,11 @@
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
     fmtEUR:fmtEUR, fmtBytes:fmtBytes, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
+    // Función, no valor estático — LEAD_ERROR_COUNT es un número que
+    // loadWebLeads reasigna en cada login; exponerlo como valor lo habría
+    // congelado en 0 (el que tenía al construirse este objeto CRM, al
+    // cargar el script, antes de que nadie hubiera iniciado sesión nunca).
+    leadErrorCount:function(){ return LEAD_ERROR_COUNT; },
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     isoToMadridDatetimeLocal:isoToMadridDatetimeLocal,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,

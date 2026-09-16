@@ -29,6 +29,19 @@ function userFromSession(session){
   const u = CRM.USERS.find(x=>x.email.toLowerCase()===session.user.email.toLowerCase());
   return u || {id:"u0", name:session.user.email, email:session.user.email, title:"Administrador", color:"#1F6FEB"};
 }
+// Aviso de sesión tras CRM.loadWebLeads: un toast se lo pierde cualquiera
+// que no esté mirando la pantalla en ese instante — por eso no es el único
+// registro (ver leads.error_message, persistente, en
+// crm/supabase-leads-dedupe.sql), pero sigue mereciendo la pena para quien
+// sí está delante en ese momento. Un solo toast combinado, no dos: fireToast
+// solo guarda un mensaje a la vez, uno nuevo pisaría al anterior.
+function reportLeadIssues(fireToast, result){
+  if(!result) return;
+  const msgs = [];
+  if(result.contactFailures && result.contactFailures.length) msgs.push(result.contactFailures.length+" lead(s) no se pudieron convertir: "+result.contactFailures.join(", "));
+  if(result.dealFailures && result.dealFailures.length) msgs.push(result.dealFailures.length+" contacto(s) creado(s) sin deal: "+result.dealFailures.join(", "));
+  if(msgs.length) fireToast(msgs.join(" · "));
+}
 function GoogleG({size=18}){
   return <svg width={size} height={size} viewBox="0 0 18 18">
     <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9C16.66 14.2 17.64 11.9 17.64 9.2Z"/>
@@ -298,8 +311,13 @@ function Contacts({nav, toast}){
       toast("No se pudieron eliminar: "+e.message);
     }
   };
+  const leadErrors = CRM.leadErrorCount ? CRM.leadErrorCount() : 0;
   return (
     <div className={mode==="pipeline"?"content--flush":"content"} style={mode==="pipeline"?{flex:1,display:"flex",flexDirection:"column",minHeight:0}:undefined}>
+      {mode==="list" && leadErrors>0 && <div className="row" style={{gap:8,background:"var(--warn-soft)",color:"var(--warn)",padding:"10px 14px",borderRadius:9,marginBottom:14,fontSize:13,fontWeight:500}}>
+        <Icon name="bell" size={15}/>
+        <span>{leadErrors} lead{leadErrors>1?"s":""} de la web no se {leadErrors>1?"pudieron":"pudo"} convertir automáticamente — quedan en la tabla "leads" con status 'new' y error_message puesto; se reintentan solos en el próximo inicio de sesión.</span>
+      </div>}
       <div className="toolbar" style={mode==="pipeline"?{padding:"16px 26px 0",marginBottom:0}:undefined}>
         <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar por empresa, persona o email…" value={q} onChange={e=>setQ(e.target.value)}/></div>
         {mode==="list" && (isMobile ? (
@@ -2305,7 +2323,7 @@ function App(){
           if(CRM.loadDeals) await CRM.loadDeals(Auth.client);
           if(CRM.loadTasks) await CRM.loadTasks(Auth.client);
           if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
-          if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client);
+          if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
           if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client);
           if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client);
           if(mounted) setUser(userFromSession(session));
@@ -2316,7 +2334,9 @@ function App(){
             (async()=>{
               if(!(await Auth.isAllowed(session.user))){ await Auth.signOut(); fireToast("Esta cuenta no tiene acceso al CRM."); return; }
               if(CRM.loadAdmins) await CRM.loadAdmins(Auth.client);
-              if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client); if(CRM.loadWebLeads) await CRM.loadWebLeads(Auth.client); if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
+              if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
+              if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
+              if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
             })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
