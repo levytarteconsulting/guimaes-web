@@ -464,14 +464,16 @@ function useDocDownload(toast){
     const win = window.open("", "_blank");
     setBusyId(doc.id);
     try{
-      const url = await CRM.getAttachmentSignedUrl(Auth.client, doc.id, {download: doc.original_filename||true});
+      const url = await CRM.getAttachmentSignedUrl(Auth.client, doc.id, {download: CRM.docDownloadName(doc)});
       if(!url){ toast("No se pudo generar el enlace de descarga."); if(win) win.close(); return; }
       if(win) win.location.href = url; else window.open(url, "_blank");
     }finally{ setBusyId(null); }
   };
   return [download, busyId];
 }
-const docName = (doc)=>doc.original_filename || "Documento";
+// Nombre a mostrar: original_filename o, si no hay (adjuntos de WhatsApp
+// sin nombre), uno descriptivo compuesto al vuelo — ver CRM.docDisplayName.
+const docName = (doc)=>CRM.docDisplayName(doc);
 const docContactLabel = (contactId)=>{ const c=contactId && CRM.contactById[contactId]; return c ? (c.full_name||c.company||"—") : null; };
 // Estado del fichero cuando no está listo para descargar. Un manual siempre
 // es 'stored' (lo impone la BD); los demás estados son de adjuntos de WhatsApp.
@@ -484,27 +486,104 @@ function DocStatusBadge({doc}){
 function DocSourceBadge({doc}){
   return doc.source==="whatsapp" ? <Badge label="WhatsApp" color="#1F9D6B"/> : null;
 }
-// Botones de una fila de documento. onMove/onDelete opcionales: quien no
-// los pase no los muestra. Borrar no se ofrece mientras el adjunto se está
-// descargando ('pending'): la descarga en segundo plano subiría el fichero
-// después y quedaría huérfano.
-function DocActions({doc, onDownload, downloading, onMove, onDelete}){
+// Botones de una fila de documento. onPreview/onRename/onMove/onDelete
+// opcionales: quien no los pase no los muestra. "Ver" solo aparece si el
+// navegador puede pintarlo (CRM.docPreviewKind: imagen o PDF); para el
+// resto (docx, xlsx, zip…) queda solo la descarga. Borrar no se ofrece
+// mientras el adjunto se está descargando ('pending'): la descarga en
+// segundo plano subiría el fichero después y quedaría huérfano.
+function DocActions({doc, onDownload, downloading, onPreview, onRename, onMove, onDelete}){
   return <div className="row doc-actions" style={{gap:4}}>
+    {onPreview && CRM.docPreviewKind(doc) && <button className="btn btn--sm btn--ghost" title="Ver" onClick={()=>onPreview(doc)}><Icon name="eye" size={14}/></button>}
     <button className="btn btn--sm btn--ghost" title={doc.status==="stored"?"Descargar":"No disponible"} onClick={()=>onDownload(doc)} disabled={doc.status!=="stored" || downloading}><Icon name="download" size={14}/></button>
+    {onRename && doc.status!=="pending" && <button className="btn btn--sm btn--ghost" title="Renombrar" onClick={()=>onRename(doc)}><Icon name="edit" size={14}/></button>}
     {onMove && <button className="btn btn--sm btn--ghost" title="Mover a otra carpeta" onClick={()=>onMove(doc)}><Icon name="folder" size={14}/></button>}
     {onDelete && doc.status!=="pending" && <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>onDelete(doc)}><Icon name="trash" size={14}/></button>}
   </div>;
 }
 function EmpresaDocRow({doc, contact, toast}){
   const [download,busyId]=useDocDownload(toast);
+  const [preview,setPreview]=uState(false);
   return <tr>
     <td><div className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{docName(doc)}</span><DocStatusBadge doc={doc}/></div></td>
     <td className="tbl__sub">{contact ? (contact.full_name||contact.company||"—") : "—"}</td>
     <td className="tbl__sub">{doc.folder_name || "—"}</td>
     <td className="tbl__sub">{CRM.fmtBytes(doc.size_bytes)}</td>
     <td className="tbl__sub">{doc.created}</td>
-    <td><DocActions doc={doc} onDownload={download} downloading={busyId===doc.id}/></td>
+    <td><DocActions doc={doc} onDownload={download} downloading={busyId===doc.id} onPreview={()=>setPreview(true)}/>
+      {preview && <DocPreviewModal doc={doc} onClose={()=>setPreview(false)} onDownload={download} downloading={busyId===doc.id}/>}</td>
   </tr>;
+}
+
+// Visor dentro del CRM con la URL firmada (sin "download", para que Storage
+// lo sirva inline). Imagen: <img>. PDF: <iframe> en escritorio; en móvil
+// no — Chrome de Android no pinta PDF dentro de un iframe y Safari de iOS
+// lo hace a medias, así que se ofrece abrirlo en el visor nativo del móvil
+// (enlace normal, sin bloqueo de ventanas emergentes). Solo se abre para
+// los tipos que devuelve CRM.docPreviewKind; el resto no llega aquí.
+function DocPreviewModal({doc, onClose, onDownload, downloading}){
+  const kind = CRM.docPreviewKind(doc);
+  const isMobile = useIsMobile();
+  const [url,setUrl]=uState(null); const [failed,setFailed]=uState(false);
+  uEffect(()=>{
+    let alive=true;
+    setUrl(null); setFailed(false);
+    CRM.getAttachmentSignedUrl(Auth.client, doc.id).then(u=>{ if(!alive) return; if(u) setUrl(u); else setFailed(true); });
+    return ()=>{alive=false;};
+  },[doc.id]);
+  const name = docName(doc);
+  const pdfInline = kind==="pdf" && !isMobile;
+  let body;
+  if(failed) body = <Empty icon="documents" title="No se pudo cargar la vista previa" sub="Prueba a descargarlo."/>;
+  else if(!url) body = <div className="doc-preview__loading muted"><Icon name="clock" size={16}/>Cargando vista previa…</div>;
+  else if(kind==="image") body = <div className="doc-preview__stage"><img className="doc-preview__img" src={url} alt={name} onError={()=>setFailed(true)}/></div>;
+  else if(pdfInline) body = <iframe className="doc-preview__pdf" src={url} title={name}></iframe>;
+  else body = <div className="doc-preview__mobile">
+    <div className="lrow__ico"><Icon name="documents" size={20}/></div>
+    <p className="muted">En el móvil, los PDF se abren con el visor del propio teléfono.</p>
+    <a className="btn btn--primary" href={url} target="_blank" rel="noopener noreferrer"><Icon name="external" size={15}/>Abrir PDF</a>
+  </div>;
+  return <Modal title={name} wide onClose={onClose} footer={<>
+    {pdfInline && url && !failed && <a className="btn btn--ghost" href={url} target="_blank" rel="noopener noreferrer" style={{marginRight:"auto"}}><Icon name="external" size={15}/>Abrir en pestaña nueva</a>}
+    <button className="btn btn--ghost" onClick={onClose}>Cerrar</button>
+    <button className="btn btn--primary" onClick={()=>onDownload(doc)} disabled={downloading}><Icon name="download" size={15}/>Descargar</button>
+  </>}>
+    <div className="doc-preview">{body}</div>
+  </Modal>;
+}
+
+// Renombrar un documento: solo cambia original_filename (CRM.renombrarDocumento).
+// La extensión es la del fichero real y no se edita: se muestra fija junto
+// al campo. Un adjunto de WhatsApp sin nombre parte del nombre descriptivo
+// que ya se ve en pantalla.
+function RenameDocModal({doc, onClose, onRenamed, toast}){
+  const ext = CRM.docExtension(doc);
+  const initial = CRM.documentoNombreFinal(doc, doc.original_filename || docName(doc)).base;
+  const [base,setBase]=uState(initial);
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const issue = CRM.documentoNombreIssue(doc, base);
+  const final = CRM.documentoNombreFinal(doc, base).full;
+  // Sin cambios también si es el nombre descriptivo tal cual: guardarlo
+  // escribiría en la BD un nombre que nadie eligió.
+  const unchanged = final===CRM.docDownloadName(doc);
+  const go=async()=>{
+    if(issue || unchanged) return;
+    setBusy(true); setErr(null);
+    try{
+      const updated = await CRM.renombrarDocumento(Auth.client, doc, base);
+      toast("Documento renombrado");
+      onRenamed(updated);
+    }catch(e){ setErr(CRM.docErrorMessage(e)); setBusy(false); }
+  };
+  return <Modal title="Renombrar documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!!issue||unchanged}>{busy?"Guardando…":"Guardar"}</button></>}>
+    <Field label="Nombre"><div className="inp-suffix">
+      <input className="inp" autoFocus value={base} onChange={e=>{setBase(e.target.value); setErr(null);}} onKeyDown={e=>{ if(e.key==="Enter") go(); }}/>
+      {ext && <span className="inp-suffix__ext">.{ext}</span>}
+    </div></Field>
+    {base.trim() && issue && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>{issue}</p>}
+    {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>{err}</p>}
+    {ext && <p className="muted" style={{fontSize:12.5}}>La extensión no se puede cambiar: el fichero sigue siendo .{ext}.</p>}
+  </Modal>;
 }
 
 // Confirmación de borrado de un documento (fila primero, fichero después —
@@ -653,7 +732,7 @@ function ContactDocs({contactId, user, toast, onCount}){
   const [data,setData]=uState(null); // {carpetas, docs}; null = cargando
   const [loadErr,setLoadErr]=uState(null);
   const [sel,setSel]=uState(null);
-  const [modal,setModal]=uState(null); // {kind:"upload"|"new"|"rename"|"delFolder"|"move"|"delDoc", doc?}
+  const [modal,setModal]=uState(null); // {kind:"upload"|"new"|"rename"|"delFolder"|"move"|"delDoc"|"preview"|"renameDoc", doc?}
   const [download,busyId]=useDocDownload(toast);
   const isMobile = useIsMobile();
 
@@ -713,6 +792,8 @@ function ContactDocs({contactId, user, toast, onCount}){
             </div>
           </div>
           <DocActions doc={d} onDownload={download} downloading={busyId===d.id}
+            onPreview={(doc)=>setModal({kind:"preview", doc})}
+            onRename={(doc)=>setModal({kind:"renameDoc", doc})}
             onMove={carpetas.length>1 ? (doc)=>setModal({kind:"move", doc}) : null}
             onDelete={(doc)=>setModal({kind:"delDoc", doc})}/>
         </div>)}
@@ -730,6 +811,8 @@ function ContactDocs({contactId, user, toast, onCount}){
     {modal && modal.kind==="delFolder" && folder && <DeleteFolderModal folder={folder} count={folderCount} carpetas={carpetas} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
     {modal && modal.kind==="move" && <MoveDocModal doc={modal.doc} carpetas={carpetas} toast={toast} onClose={close} onMoved={closeAndReload}/>}
     {modal && modal.kind==="delDoc" && <DeleteDocModal doc={modal.doc} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
+    {modal && modal.kind==="preview" && <DocPreviewModal doc={modal.doc} onClose={close} onDownload={download} downloading={busyId===modal.doc.id}/>}
+    {modal && modal.kind==="renameDoc" && <RenameDocModal doc={modal.doc} toast={toast} onClose={close} onRenamed={closeAndReload}/>}
   </div>;
 }
 function EmpresaDetail({id, nav, toast}){
@@ -2488,6 +2571,8 @@ function Documents({nav, toast}){
   const [contactF,setContactF]=uState("");
   const [folderF,setFolderF]=uState("");
   const [delDoc,setDelDoc]=uState(null);
+  const [previewDoc,setPreviewDoc]=uState(null);
+  const [renameDoc,setRenameDoc]=uState(null);
   const [download,busyId]=useDocDownload(toast);
   const isMobile = useIsMobile();
 
@@ -2558,7 +2643,7 @@ function Documents({nav, toast}){
               </div>
               <div className="row" style={{marginTop:10,justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
                 <div className="row" style={{gap:6,flexWrap:"wrap"}}><DocSourceBadge doc={d}/><DocStatusBadge doc={d}/></div>
-                <DocActions doc={d} onDownload={download} downloading={busyId===d.id} onDelete={setDelDoc}/>
+                <DocActions doc={d} onDownload={download} downloading={busyId===d.id} onPreview={setPreviewDoc} onRename={setRenameDoc} onDelete={setDelDoc}/>
               </div>
             </div>
           </div>
@@ -2574,10 +2659,12 @@ function Documents({nav, toast}){
         <td className="tbl__sub">{CRM.fmtBytes(d.size_bytes)}</td>
         <td>{origin(d)}</td>
         <td className="tbl__sub">{d.created}</td>
-        <td onClick={e=>e.stopPropagation()}><DocActions doc={d} onDownload={download} downloading={busyId===d.id} onDelete={setDelDoc}/></td>
+        <td onClick={e=>e.stopPropagation()}><DocActions doc={d} onDownload={download} downloading={busyId===d.id} onPreview={setPreviewDoc} onRename={setRenameDoc} onDelete={setDelDoc}/></td>
       </tr>)}
     </tbody></table>{shown.length===0 && <Empty icon="documents" title={filtering?"Ningún documento coincide":"Sin documentos"}/>}</div>
     )}
+    {previewDoc && <DocPreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} onDownload={download} downloading={busyId===previewDoc.id}/>}
+    {renameDoc && <RenameDocModal doc={renameDoc} toast={toast} onClose={()=>setRenameDoc(null)} onRenamed={(upd)=>{ setRenameDoc(null); setDocs(ds=>(ds||[]).map(x=>x.id===upd.id?upd:x)); }}/>}
     {delDoc && <DeleteDocModal doc={delDoc} toast={toast} onClose={()=>setDelDoc(null)} onDeleted={(doc)=>{ setDelDoc(null); setDocs(ds=>(ds||[]).filter(x=>x.id!==doc.id)); }}/>}
   </div>;
 }

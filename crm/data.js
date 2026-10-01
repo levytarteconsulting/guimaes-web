@@ -1000,6 +1000,93 @@
     return list.sort(function(a,b){ return (a.orden-b.orden) || a.nombre.localeCompare(b.nombre, "es"); });
   }
 
+  // ---- Nombre, extensión y vista previa ----
+  // Extensión de un nombre de fichero, sin el punto y tal cual está escrita
+  // (al renombrar "Informe.PDF" se conserva ".PDF"). Un punto inicial
+  // (".env") no es extensión.
+  function extOf(name){
+    var n = name || "";
+    var dot = n.lastIndexOf(".");
+    return dot>0 && dot<n.length-1 ? n.slice(dot+1) : "";
+  }
+  // Último segmento de storage_path. Para un adjunto de WhatsApp sin nombre
+  // el webhook lo construye como "{tipo}-{id_mensaje}.{ext}" (ver
+  // buildAttachmentFilename en crm/supabase-functions/whatsapp-webhook).
+  function storageFilename(doc){
+    var p = doc.storage_path || "";
+    return p.slice(p.lastIndexOf("/")+1);
+  }
+  // Extensión real del fichero: la del nombre original si la tiene; si no
+  // (adjunto de WhatsApp sin nombre), la de la ruta en Storage, que el
+  // webhook deriva del mime.
+  function docExtension(doc){
+    return extOf(doc.original_filename) || extOf(storageFilename(doc));
+  }
+  var WA_KIND_LABELS = {image:"Imagen", video:"Vídeo", audio:"Audio", sticker:"Sticker", document:"Documento"};
+  // Nombre a mostrar. original_filename es lo que mandó el cliente o lo que
+  // escribió un admin; si no hay (imágenes, audios, vídeos y stickers de
+  // WhatsApp, que Meta manda sin nombre) se compone uno descriptivo solo
+  // para pintar — no se guarda en la BD, para no inventar un dato que el
+  // cliente no envió. Tipo: el prefijo que el webhook pone en la ruta; si no
+  // encaja, el mime. Fecha: la de recepción, en hora de Madrid.
+  function docDisplayName(doc){
+    if(doc.original_filename) return doc.original_filename;
+    var kind = (storageFilename(doc).match(/^(image|video|audio|sticker|document)-/)||[])[1];
+    if(!kind){
+      var m = doc.mime_type || "";
+      kind = m.indexOf("image/")===0 ? "image" : m.indexOf("video/")===0 ? "video" : m.indexOf("audio/")===0 ? "audio" : "document";
+    }
+    var fecha = isoToMadridDatetimeLocal(doc.created_at).slice(0,10);
+    return WA_KIND_LABELS[kind] + (doc.source==="whatsapp" ? " de WhatsApp" : "") + (fecha ? " "+fecha : "");
+  }
+  // Nombre con el que se descarga: el mismo que se ve, con su extensión.
+  function docDownloadName(doc){
+    if(doc.original_filename) return doc.original_filename;
+    var ext = docExtension(doc);
+    return docDisplayName(doc) + (ext ? "."+ext : "");
+  }
+  // Qué visor puede mostrar el documento dentro del CRM: "image", "pdf" o
+  // null (solo descarga). Se decide por el mime con el que se guardó, no
+  // por la extensión: es el Content-Type con el que Storage sirve el
+  // fichero, y un PDF guardado como application/octet-stream se descargaría
+  // en vez de pintarse — un visor roto. HEIC/TIFF y similares se quedan
+  // fuera: la mayoría de navegadores no los pintan.
+  var PREVIEW_IMAGE_MIMES = ["image/jpeg","image/png","image/gif","image/webp","image/avif","image/bmp","image/svg+xml"];
+  function docPreviewKind(doc){
+    if(doc.status!=="stored") return null;
+    var m = (doc.mime_type||"").split(";")[0].trim().toLowerCase();
+    if(PREVIEW_IMAGE_MIMES.indexOf(m)>-1) return "image";
+    if(m==="application/pdf") return "pdf";
+    return null;
+  }
+  // Renombra solo original_filename: el fichero y su ruta en Storage no se
+  // tocan (la ruta es la identidad del objeto). La extensión no se puede
+  // cambiar: se conserva la del fichero real (docExtension) y el usuario
+  // solo edita el nombre base. Si la vuelve a escribir al final, no se
+  // duplica ("contrato.pdf" → "contrato.pdf", no "contrato.pdf.pdf").
+  function documentoNombreFinal(doc, base){
+    var ext = docExtension(doc);
+    var b = (base||"").trim();
+    if(ext && b.toLowerCase().endsWith("."+ext.toLowerCase())) b = b.slice(0, -(ext.length+1)).trim();
+    return {base:b, full: ext ? b+"."+ext : b};
+  }
+  function documentoNombreIssue(doc, base){
+    var r = documentoNombreFinal(doc, base);
+    if(!r.base) return "Escribe un nombre.";
+    if(/[\/\\\u0000-\u001f]/.test(r.base)) return "El nombre no puede contener / ni \\.";
+    if(r.full.length>200) return "Máximo 200 caracteres.";
+    return null;
+  }
+  async function renombrarDocumento(client, doc, base){
+    var issue = documentoNombreIssue(doc, base);
+    if(issue) throw new Error(issue);
+    var full = documentoNombreFinal(doc, base).full;
+    var res = await client.from("documentos").update({original_filename: full}).eq("id", doc.id).select(DOCUMENTO_SELECT);
+    if(res.error) throw res.error;
+    if(!res.data || res.data.length===0) throw new Error("El documento ya no existe.");
+    return rowToDocumento(res.data[0]);
+  }
+
   // Ficha de empresa: los de todos sus contactos.
   async function loadDocumentosForContacts(client, contactIds){
     if(!client || !contactIds || !contactIds.length) return [];
@@ -1626,6 +1713,8 @@
     docErrorMessage:docErrorMessage, carpetaNombreIssue:carpetaNombreIssue,
     crearCarpeta:crearCarpeta, renombrarCarpeta:renombrarCarpeta, borrarCarpeta:borrarCarpeta, moverDocumentos:moverDocumentos,
     subirDocumentoManual:subirDocumentoManual, borrarDocumento:borrarDocumento,
+    docExtension:docExtension, docDisplayName:docDisplayName, docDownloadName:docDownloadName, docPreviewKind:docPreviewKind,
+    documentoNombreFinal:documentoNombreFinal, documentoNombreIssue:documentoNombreIssue, renombrarDocumento:renombrarDocumento,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
