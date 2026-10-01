@@ -1920,11 +1920,73 @@ function EditDeal({deal, onClose, onSave}){
 }
 
 /* ============ WHATSAPP ============ */
-// Contacto de reserva cuando la conversación aún no está enlazada a una ficha
-// de CRM.CONTACTS (p. ej. un número que escribió por primera vez y nadie ha
-// vinculado todavía) — evita que la UI intente leer .company de undefined.
-function waFallbackContact(w){
-  return { company: w.phone || w.wa_id || "Desconocido", full_name: "", phone: w.phone || "" };
+// Nombre de persona de un contacto como dato principal y su empresa como
+// secundario (dos contactos pueden compartir empresa). Las fichas antiguas
+// sin full_name — de cuando company era el título — caen a company, y
+// entonces la empresa no se repite como secundario.
+function contactPersonLabel(c){
+  return { name: c.full_name || c.company || "Contacto sin nombre", company: c.full_name ? (c.company||"") : "" };
+}
+// Teléfono legible de una conversación: phone ya viene con "+"; si faltara,
+// se compone desde wa_id (dígitos puros de Meta).
+function waPhoneOf(w){ return w.phone || (w.wa_id ? "+"+w.wa_id : ""); }
+// Qué pintar como identidad de una conversación (lista, cabecera del hilo y
+// pestaña WhatsApp de la ficha). Sin contacto vinculado no hay nombre que
+// mostrar — WhatsApp manda un nombre de perfil, pero no se guarda — así que
+// el título es el número, sin hacerlo pasar por empresa ni por persona.
+//   {linked, name, company, phone}
+function waIdentity(w){
+  const c = w.contact ? CRM.contactById[w.contact] : null;
+  if(c){
+    const l = contactPersonLabel(c);
+    return { linked:true, name:l.name, company:l.company, phone: c.phone || waPhoneOf(w) };
+  }
+  return { linked:false, name: waPhoneOf(w) || "Número desconocido", company:"", phone:"" };
+}
+// Avatar de la conversación: iniciales del contacto si está vinculada; si
+// no, el icono de WhatsApp en gris — unas "iniciales" de un teléfono serían
+// "+3" y no dicen nada.
+function WaAvatar({ident, size="md"}){
+  if(ident.linked) return <Avatar name={ident.name} size={size} color={CRM.colorFor(ident.name)}/>;
+  return <div className={"av av--"+size} style={{background:"#8299B0"}} title="Sin vincular a un contacto"><Icon name="whatsapp" size={size==="sm"?14:18}/></div>;
+}
+// Últimos 9 dígitos, mismo criterio que public.phone_last9 en la BD
+// (crm/supabase-whatsapp-match.sql). Solo para sugerir, nunca para vincular
+// solo.
+const phoneLast9 = (raw)=>{ const d=(raw||"").replace(/\D/g,""); return d.length>=9 ? d.slice(-9) : null; };
+// Lista de contactos con buscador (nombre, empresa, email, teléfono),
+// ordenada por nombre de persona. La usan "Vincular a contacto" y "Nueva
+// conversación". suggestPhone: los contactos con ese teléfono (últimos 9
+// dígitos) van primero, marcados. disabledReason(c): texto si no se puede
+// elegir ese contacto (p. ej. sin teléfono), o null.
+function ContactSearchList({onPick, suggestPhone, disabledReason, placeholder}){
+  const [q,setQ]=uState("");
+  const query = q.trim().toLowerCase();
+  const target = phoneLast9(suggestPhone);
+  const list = CRM.CONTACTS
+    .filter(c=>!query || [c.full_name, c.company, c.email, c.phone].some(v=>(v||"").toLowerCase().includes(query)))
+    .map(c=>({c, l:contactPersonLabel(c), match: !!target && phoneLast9(c.phone)===target}))
+    .sort((a,b)=>(b.match-a.match) || a.l.name.localeCompare(b.l.name,"es"));
+  return <>
+    <div className="searchbox" style={{marginBottom:14,minWidth:0}}><Icon name="search" size={16}/><input placeholder={placeholder||"Buscar por nombre, empresa, email o teléfono…"} value={q} onChange={e=>setQ(e.target.value)} autoFocus/></div>
+    <div className="wrap-gap" style={{gap:8,maxHeight:360,overflowY:"auto"}}>
+      {list.map(({c,l,match})=>{
+        const reason = disabledReason ? disabledReason(c) : null;
+        return <div key={c.id} className="card" style={reason?{opacity:0.5}:{cursor:"pointer"}} onClick={()=>{ if(!reason) onPick(c); }}>
+          <div className="card__body" style={{padding:12,display:"flex",alignItems:"center",gap:10}}>
+            <Avatar name={l.name} size="sm" color={CRM.colorFor(l.name)}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:600,fontSize:13.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.name}</div>
+              <div className="muted" style={{fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[l.company, c.phone].filter(Boolean).join(" · ") || "—"}</div>
+            </div>
+            {reason ? <span style={{fontSize:12,color:"var(--danger)",flex:"none"}}>{reason}</span>
+              : match ? <Badge label="Mismo teléfono" color="#1F9D6B"/> : null}
+          </div>
+        </div>;
+      })}
+      {list.length===0 && <div className="muted" style={{padding:"20px 0",textAlign:"center",fontSize:13}}>Sin resultados.</div>}
+    </div>
+  </>;
 }
 // Ventana de servicio de 24h de Meta: solo se puede escribir texto libre si el
 // cliente escribió en las últimas 24h. Misma regla que valida whatsapp-send en
@@ -2082,7 +2144,7 @@ function WaMessageContent({m, toast}){
 // `onBack`: opcional — si se pasa, muestra un botón de volver en la cabecera
 // (solo lo usa la vista general en móvil, para volver a la lista).
 function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true}){
-  const c = CRM.contactById[conv.contact] || waFallbackContact(conv);
+  const ident = waIdentity(conv);
   const windowOpen = isWaWindowOpen(conv);
   const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
   const [showLink,setShowLink]=uState(false);
@@ -2150,8 +2212,8 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
       <div className="wa__thread__head">
         {onBack && <button className="wa__back" onClick={onBack} aria-label="Volver a la lista"><Icon name="chevronR" size={20} style={{transform:"rotate(180deg)"}}/></button>}
         <div className="wa__thread__id">
-          <Avatar name={c.company} size="md" color={CRM.colorFor(c.company)}/>
-          <div className="wa__thread__idtext"><div style={{fontWeight:600}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name} · {c.phone}</div></div>
+          <WaAvatar ident={ident}/>
+          <div className="wa__thread__idtext"><div style={{fontWeight:600}}>{ident.name}</div><div className="muted" style={{fontSize:12}}>{ident.linked ? [ident.company, ident.phone].filter(Boolean).join(" · ") : "Sin vincular a un contacto"}</div></div>
         </div>
         <div className="wa__thread__actions">
           <button className="wa__tpl-btn" onClick={()=>setShowTpl(true)} title="Plantillas de WhatsApp"><Icon name="documents" size={15}/>Plantillas</button>
@@ -2175,13 +2237,25 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
     </div>
   );
 }
-// Mismo patrón que LinkEmail (Inbox): un select sobre CRM.CONTACTS dentro
-// de un Modal. Aquí no hay campo de "deal" porque solo se pide vincular a
-// un contacto.
+// Buscador de contactos (ContactSearchList) en vez de un select: con muchos
+// contactos un select es inmanejable, y por persona + empresa se distingue
+// a dos contactos de la misma empresa. Los que tienen el mismo teléfono que
+// la conversación salen primero como sugerencia; vincular sigue siendo
+// decisión de quien pulsa Guardar.
 function LinkWhatsapp({conv, onClose, onSave}){
-  const [contact,setContact]=uState(conv.contact||"");
-  return <Modal title="Vincular a contacto" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={()=>contact&&onSave(contact)} disabled={!contact}>Guardar</button></>}>
-    <Field label="Contacto"><select className="inp" value={contact} onChange={e=>setContact(e.target.value)}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>
+  const [contact,setContact]=uState(conv.contact ? CRM.contactById[conv.contact] || null : null);
+  const [saving,setSaving]=uState(false);
+  const save=async()=>{ if(!contact) return; setSaving(true); try{ await onSave(contact.id); }finally{ setSaving(false); } };
+  const l = contact ? contactPersonLabel(contact) : null;
+  return <Modal title="Vincular a contacto" onClose={()=>{ if(!saving) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={!contact||saving}>{saving?"Guardando…":"Guardar"}</button></>}>
+    <p className="muted" style={{fontSize:12.5,marginBottom:12}}>Conversación con <b>{waPhoneOf(conv) || "número desconocido"}</b>. Sus adjuntos pasarán a la carpeta WhatsApp del contacto.</p>
+    {contact ? <div className="row" style={{gap:10,justifyContent:"space-between"}}>
+      <div className="row" style={{gap:10,minWidth:0}}>
+        <Avatar name={l.name} size="sm" color={CRM.colorFor(l.name)}/>
+        <div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13.5}}>{l.name}</div><div className="muted" style={{fontSize:12}}>{[l.company, contact.phone].filter(Boolean).join(" · ") || "—"}</div></div>
+      </div>
+      <button className="btn btn--sm btn--ghost" onClick={()=>setContact(null)} disabled={saving}>Cambiar</button>
+    </div> : <ContactSearchList onPick={setContact} suggestPhone={waPhoneOf(conv)}/>}
   </Modal>;
 }
 function WhatsApp({nav, toast, focusId}){
@@ -2267,10 +2341,10 @@ function WhatsApp({nav, toast, focusId}){
           <button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>Activas</button>
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
         </div>
-        {visible.map(w=>{ const cc=CRM.contactById[w.contact] || waFallbackContact(w); const last=w.messages[w.messages.length-1];
+        {visible.map(w=>{ const ident=waIdentity(w); const last=w.messages[w.messages.length-1];
           return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);nav("whatsapp",w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
-            <Avatar name={cc.company} size="md" color={CRM.colorFor(cc.company)}/>
-            <div className="wa__conv__main"><div className="wa__conv__name"><span>{cc.company}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
+            <WaAvatar ident={ident}/>
+            <div className="wa__conv__main"><div className="wa__conv__name"><span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ident.name}{ident.company && <span className="muted" style={{fontWeight:400,fontSize:12}}> · {ident.company}</span>}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
             {w.unread>0 && <span className="wa__unread">{w.unread}</span>}
             <button className="wa__archive" title={w.archived?"Restaurar":"Archivar"} onClick={e=>toggleArchive(w.id,e)}><Icon name={w.archived?"refresh":"archive"} size={15}/></button>
           </div>;
@@ -2387,29 +2461,10 @@ function TemplatesModal({onClose, conversationId, contactId, onSent, toast}){
 // TemplatesModal en vez de duplicar el paso de elegir plantilla/variables).
 function StartWhatsappModal({onClose, initialContact, nav, toast}){
   const [contact,setContact]=uState(initialContact||null);
-  const [q,setQ]=uState("");
 
   if(!contact){
-    const query = q.trim().toLowerCase();
-    const list = CRM.CONTACTS.filter(c=>{
-      if(!query) return true;
-      return (c.company||"").toLowerCase().includes(query) || (c.full_name||"").toLowerCase().includes(query) || (c.phone||"").includes(query);
-    });
     return <Modal title="Nueva conversación de WhatsApp" onClose={onClose} footer={<button className="btn btn--ghost" onClick={onClose}>Cancelar</button>}>
-      <div className="searchbox" style={{marginBottom:14}}><Icon name="search" size={16}/><input placeholder="Buscar contacto por empresa, persona o teléfono…" value={q} onChange={e=>setQ(e.target.value)} autoFocus/></div>
-      <div className="wrap-gap" style={{gap:8,maxHeight:360,overflowY:"auto"}}>
-        {list.map(c=>{
-          const hasPhone = !!c.phone;
-          return <div key={c.id} className="card" style={hasPhone?{cursor:"pointer"}:{opacity:0.5}} onClick={()=>{ if(hasPhone) setContact(c); }}>
-            <div className="card__body" style={{padding:12,display:"flex",alignItems:"center",gap:10}}>
-              <Avatar name={c.company} size="sm" color={CRM.colorFor(c.company)}/>
-              <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13.5}}>{c.company}</div><div className="muted" style={{fontSize:12}}>{c.full_name}</div></div>
-              {hasPhone ? <span className="muted" style={{fontSize:12.5}}>{c.phone}</span> : <span style={{fontSize:12,color:"var(--danger)"}}>Sin teléfono</span>}
-            </div>
-          </div>;
-        })}
-        {list.length===0 && <div className="muted" style={{padding:"20px 0",textAlign:"center",fontSize:13}}>Sin resultados.</div>}
-      </div>
+      <ContactSearchList onPick={setContact} disabledReason={c=>c.phone ? null : "Sin teléfono"}/>
     </Modal>;
   }
 
