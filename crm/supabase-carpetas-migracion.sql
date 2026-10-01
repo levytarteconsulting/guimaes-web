@@ -31,9 +31,10 @@
 -- BLOQUE A — Revisión (no escribe nada)
 -- ============================================================
 
--- Qué hay hoy. Esperado: solo source='whatsapp' (folder='WhatsApp'). Si
--- sale algún source='manual', parar y revisar antes de seguir.
-select source, folder, status, (contact_id is not null) as con_contacto, count(*)
+-- Qué hay hoy. Antes de la primera ejecución lo esperado era solo
+-- source='whatsapp'. (No lee documentos.folder: la columna ya no existe
+-- tras el Paso B, crm/supabase-carpetas-paso-b.sql.)
+select source, status, (contact_id is not null) as con_contacto, (folder_id is not null) as con_carpeta, count(*)
 from public.documentos
 group by 1, 2, 3, 4
 order by 1, 2, 3, 4;

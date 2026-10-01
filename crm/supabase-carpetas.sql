@@ -13,9 +13,10 @@
 -- Después de este fichero: crm/supabase-carpetas-migracion.sql (asigna
 -- carpeta a los documentos que ya existen).
 --
--- documentos.folder (texto) NO se borra aquí: el webhook desplegado aún
--- lo escribe. Se elimina en el Paso B, cuando el webhook y el frontend
--- nuevos ya estén desplegados. Mientras tanto nadie lo lee.
+-- documentos.folder (texto) NO se borra aquí: cuando se escribió esto el
+-- webhook desplegado aún lo escribía. Se elimina en el Paso B
+-- (crm/supabase-carpetas-paso-b.sql), con el webhook y el frontend nuevos
+-- ya desplegados.
 --
 -- Ejecutar UNA vez en Supabase → SQL Editor → New query → Run. Idempotente.
 -- ============================================================

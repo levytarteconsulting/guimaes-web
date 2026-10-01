@@ -54,10 +54,24 @@ create policy "admins borran documentos (storage)"
 
 -- ============================================================
 -- 3) Tabla de metadatos. storage_path es la identidad permanente del
--- objeto en Storage (ver crm/supabase-documentos.sql — la ruta de un
--- adjunto de WhatsApp se indexa por whatsapp_conversation_id y NUNCA
--- cambia; vincular/desvincular la conversación a un contacto solo
--- reescribe contact_id aquí, nunca mueve el fichero).
+-- objeto en Storage y NUNCA cambia: la ruta de un adjunto de WhatsApp se
+-- indexa por whatsapp_conversation_id y la de una subida manual por
+-- contacto y documento (manual/{contact_id}/{documento_id}/{nombre}).
+-- Vincular/desvincular una conversación, mover un documento de carpeta o
+-- renombrarlo solo reescribe columnas de esta tabla (contact_id,
+-- folder_id, original_filename), nunca mueve el fichero.
+--
+-- Carpetas: viven en public.carpetas y se enlazan con documentos.folder_id
+-- — ambas las crea crm/supabase-carpetas.sql, que va después de este
+-- fichero. La antigua columna de texto documentos.folder se eliminó en
+-- el Paso B (crm/supabase-carpetas-paso-b.sql) y ya no se crea aquí.
+--
+-- whatsapp_conversation_id / whatsapp_message_id: "on delete set null"
+-- (no cascade) — borrar una conversación o un mensaje no borra la fila de
+-- documentos, que sobrevive con su fichero localizable, igual que al
+-- borrar un contacto. En una base ya existente, ese cambio de FK lo aplica
+-- crm/supabase-carpetas.sql (este "create table if not exists" no toca
+-- una tabla que ya existe).
 -- ============================================================
 create table if not exists public.documentos (
   id                        uuid primary key default gen_random_uuid(),
@@ -71,14 +85,13 @@ create table if not exists public.documentos (
   original_filename         text,
   status                    text not null default 'pending', -- 'pending' / 'stored' / 'failed' / 'too_large'
 
-  -- Organización / visibilidad
+  -- Organización / visibilidad (folder_id lo añade crm/supabase-carpetas.sql)
   contact_id                uuid references public.contactos(id) on delete set null,
-  folder                    text not null default 'General',  -- 'WhatsApp' reservada para adjuntos entrantes
 
   -- Origen
   source                    text not null default 'manual',   -- 'manual' / 'whatsapp'
-  whatsapp_conversation_id  uuid references public.whatsapp_conversations(id) on delete cascade,
-  whatsapp_message_id       uuid references public.whatsapp_messages(id) on delete cascade,
+  whatsapp_conversation_id  uuid references public.whatsapp_conversations(id) on delete set null,
+  whatsapp_message_id       uuid references public.whatsapp_messages(id) on delete set null,
   uploaded_by               uuid references public.admins(id) on delete set null,
 
   visible                   boolean not null default false
@@ -96,13 +109,12 @@ create unique index if not exists documentos_storage_path_key on public.document
 create unique index if not exists documentos_whatsapp_message_id_key
   on public.documentos (whatsapp_message_id) where whatsapp_message_id is not null;
 
--- Las dos consultas más frecuentes: adjuntos de un hilo de WhatsApp
--- (independiente de si está vinculado a un contacto), y documentos de un
--- contacto por carpeta (incluida su carpeta "WhatsApp" una vez vinculado).
+-- Adjuntos de un hilo de WhatsApp (independiente de si está vinculado a
+-- un contacto). El índice de "documentos de un contacto por carpeta"
+-- (contact_id, folder_id) lo crea crm/supabase-carpetas.sql junto con la
+-- columna.
 create index if not exists documentos_whatsapp_conversation_idx
   on public.documentos (whatsapp_conversation_id);
-create index if not exists documentos_contact_folder_idx
-  on public.documentos (contact_id, folder);
 
 drop trigger if exists documentos_set_updated_at on public.documentos;
 create trigger documentos_set_updated_at
