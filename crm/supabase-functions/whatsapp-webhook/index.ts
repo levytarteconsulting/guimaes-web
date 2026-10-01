@@ -277,8 +277,10 @@ async function handleMediaAttachment(
     mime_type: mimeType,
     size_bytes: info.fileSize || null,
     original_filename: mediaRef.filename || null,
+    // Sin folder: el trigger documentos_resolver_carpeta (crm/supabase-
+    // carpetas.sql) pone la carpeta WhatsApp del contacto dentro de este
+    // mismo insert, o ninguna si la conversación no está vinculada.
     contact_id: conversation.contact_id,
-    folder: "WhatsApp",
     source: "whatsapp",
     whatsapp_conversation_id: conversation.id,
     whatsapp_message_id: messageDbId,
@@ -298,16 +300,40 @@ async function handleMediaAttachment(
   const downloadAndStore = (async () => {
     try {
       const bytes = await downloadMediaBytes(info.url, token);
+
+      // Un admin puede haber borrado la fila mientras se descargaba: sin
+      // fila, el fichero sería un huérfano en Storage. El trigger de
+      // borrado ya dejó meta.attachment en 'deleted', así que tampoco se
+      // toca el mensaje.
+      const { data: stillThere, error: chkErr } = await supabase
+        .from("documentos").select("id").eq("id", doc.id).maybeSingle();
+      if (chkErr) throw chkErr;
+      if (!stillThere) return;
+
       const { error: upErr } = await supabase.storage
         .from("documentos")
         .upload(storagePath, bytes, { contentType: mimeType || "application/octet-stream", upsert: false });
       if (upErr) throw upErr;
-      await supabase.from("documentos").update({ status: "stored" }).eq("id", doc.id);
+
+      // Queda una ventana entre la comprobación y la subida: si la fila
+      // desaparece justo ahí, el update no afecta a nada y el fichero
+      // recién subido se retira.
+      const { data: storedRows, error: storedErr } = await supabase
+        .from("documentos").update({ status: "stored" }).eq("id", doc.id).select("id");
+      if (storedErr) throw storedErr;
+      if (!storedRows || storedRows.length === 0) {
+        const { error: rmErr } = await supabase.storage.from("documentos").remove([storagePath]);
+        if (rmErr) console.error("whatsapp-webhook: no se pudo retirar el fichero de un documento ya borrado", storagePath, rmErr);
+        return;
+      }
       await updateMessageAttachmentMeta(supabase, messageDbId, { ...doc, status: "stored" });
     } catch (e) {
       console.error("whatsapp-webhook: fallo descargando/subiendo el adjunto", e);
-      await supabase.from("documentos").update({ status: "failed" }).eq("id", doc.id);
-      await updateMessageAttachmentMeta(supabase, messageDbId, { ...doc, status: "failed" });
+      const { data: failedRows } = await supabase
+        .from("documentos").update({ status: "failed" }).eq("id", doc.id).select("id");
+      if (failedRows && failedRows.length > 0) {
+        await updateMessageAttachmentMeta(supabase, messageDbId, { ...doc, status: "failed" });
+      }
     }
   })();
 

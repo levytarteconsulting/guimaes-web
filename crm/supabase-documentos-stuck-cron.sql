@@ -36,7 +36,11 @@ begin
   for r in
     update public.documentos
     set status = 'failed'
+    -- Solo adjuntos de WhatsApp: una subida manual nace ya 'stored'
+    -- (documentos_manual_stored_check, crm/supabase-carpetas.sql), pero el
+    -- filtro deja clara la intención si esa regla cambiara.
     where status = 'pending'
+      and source = 'whatsapp'
       and created_at < now() - interval '5 minutes'
     returning id, whatsapp_message_id
   loop
