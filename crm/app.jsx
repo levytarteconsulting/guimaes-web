@@ -447,27 +447,290 @@ function NewEmpresa({nav, onClose, onSave}){
     </>}
   </Modal>;
 }
-function EmpresaDocRow({doc, contact, toast}){
-  const [busy,setBusy]=uState(false);
-  // Mismo patrón que WaDocumentAttachment: la pestaña se abre en blanco
-  // SÍNCRONO dentro del click, antes de cualquier await — si se abriera
-  // después, Safari/iOS la bloquean por haber perdido el gesto de usuario.
-  const download=async()=>{
+/* ============ DOCUMENTOS — piezas compartidas ============ */
+// Vista Documentos, pestaña de la ficha de contacto y pestaña de la ficha de
+// empresa. Los datos se piden al vuelo (ver "Documentos y carpetas" en
+// crm/data.js); las reglas de carpetas viven en la BD
+// (crm/supabase-carpetas.sql) y aquí solo se reflejan.
+
+// Descarga con URL firmada. Mismo patrón que WaDocumentAttachment: la
+// pestaña se abre en blanco SÍNCRONO dentro del click, antes de cualquier
+// await — si se abriera después, Safari/iOS la bloquean por haber perdido
+// el gesto de usuario. Devuelve [download, idDescargando].
+function useDocDownload(toast){
+  const [busyId,setBusyId]=uState(null);
+  const download=async(doc)=>{
+    if(doc.status!=="stored") return;
     const win = window.open("", "_blank");
-    setBusy(true);
+    setBusyId(doc.id);
     try{
       const url = await CRM.getAttachmentSignedUrl(Auth.client, doc.id, {download: doc.original_filename||true});
       if(!url){ toast("No se pudo generar el enlace de descarga."); if(win) win.close(); return; }
       if(win) win.location.href = url; else window.open(url, "_blank");
-    }finally{ setBusy(false); }
+    }finally{ setBusyId(null); }
   };
+  return [download, busyId];
+}
+const docName = (doc)=>doc.original_filename || "Documento";
+const docContactLabel = (contactId)=>{ const c=contactId && CRM.contactById[contactId]; return c ? (c.full_name||c.company||"—") : null; };
+// Estado del fichero cuando no está listo para descargar. Un manual siempre
+// es 'stored' (lo impone la BD); los demás estados son de adjuntos de WhatsApp.
+function DocStatusBadge({doc}){
+  if(doc.status==="pending") return <Badge label="Descargando de WhatsApp…" color="#D9822B"/>;
+  if(doc.status==="failed") return <Badge label="No se pudo descargar" color="#D64545"/>;
+  if(doc.status==="too_large") return <Badge label="Demasiado grande" color="#6E8298"/>;
+  return null;
+}
+function DocSourceBadge({doc}){
+  return doc.source==="whatsapp" ? <Badge label="WhatsApp" color="#1F9D6B"/> : null;
+}
+// Botones de una fila de documento. onMove/onDelete opcionales: quien no
+// los pase no los muestra. Borrar no se ofrece mientras el adjunto se está
+// descargando ('pending'): la descarga en segundo plano subiría el fichero
+// después y quedaría huérfano.
+function DocActions({doc, onDownload, downloading, onMove, onDelete}){
+  return <div className="row doc-actions" style={{gap:4}}>
+    <button className="btn btn--sm btn--ghost" title={doc.status==="stored"?"Descargar":"No disponible"} onClick={()=>onDownload(doc)} disabled={doc.status!=="stored" || downloading}><Icon name="download" size={14}/></button>
+    {onMove && <button className="btn btn--sm btn--ghost" title="Mover a otra carpeta" onClick={()=>onMove(doc)}><Icon name="folder" size={14}/></button>}
+    {onDelete && doc.status!=="pending" && <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>onDelete(doc)}><Icon name="trash" size={14}/></button>}
+  </div>;
+}
+function EmpresaDocRow({doc, contact, toast}){
+  const [download,busyId]=useDocDownload(toast);
   return <tr>
-    <td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{doc.original_filename || "Documento"}</span></td>
+    <td><div className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{docName(doc)}</span><DocStatusBadge doc={doc}/></div></td>
     <td className="tbl__sub">{contact ? (contact.full_name||contact.company||"—") : "—"}</td>
+    <td className="tbl__sub">{doc.folder_name || "—"}</td>
     <td className="tbl__sub">{CRM.fmtBytes(doc.size_bytes)}</td>
     <td className="tbl__sub">{doc.created}</td>
-    <td><button className="btn btn--sm btn--ghost" onClick={download} disabled={busy} title="Descargar"><Icon name="download" size={14}/></button></td>
+    <td><DocActions doc={doc} onDownload={download} downloading={busyId===doc.id}/></td>
   </tr>;
+}
+
+// Confirmación de borrado de un documento (fila primero, fichero después —
+// ver CRM.borrarDocumento).
+function DeleteDocModal({doc, onClose, onDeleted, toast}){
+  const [busy,setBusy]=uState(false);
+  const go=async()=>{
+    setBusy(true);
+    try{
+      const r = await CRM.borrarDocumento(Auth.client, doc);
+      toast(r.fileRemoved ? "Documento eliminado" : "Documento eliminado (el fichero no se pudo retirar del almacenamiento)");
+      onDeleted(doc);
+    }catch(e){
+      toast("No se pudo eliminar: "+CRM.docErrorMessage(e));
+      setBusy(false);
+    }
+  };
+  return <Modal title="Eliminar documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--danger" onClick={go} disabled={busy}>{busy?"Eliminando…":"Eliminar definitivamente"}</button></>}>
+    <p className="muted">Se eliminará <b>{docName(doc)}</b> y su fichero. Esta acción no se puede deshacer.</p>
+    {doc.source==="whatsapp" && <p className="muted" style={{fontSize:12.5,marginTop:8}}>El mensaje seguirá en la conversación de WhatsApp, pero el adjunto dejará de estar disponible.</p>}
+  </Modal>;
+}
+
+// Mover un documento: el destino es obligatorio (no existe "Sin carpeta").
+function MoveDocModal({doc, carpetas, onClose, onMoved, toast}){
+  const opciones = carpetas.filter(k=>k.id!==doc.folder_id);
+  const [dest,setDest]=uState("");
+  const [busy,setBusy]=uState(false);
+  const go=async()=>{
+    if(!dest) return;
+    setBusy(true);
+    try{
+      await CRM.moverDocumentos(Auth.client, [doc.id], dest);
+      toast("Movido a "+(carpetas.find(k=>k.id===dest)||{}).nombre);
+      onMoved();
+    }catch(e){
+      toast("No se pudo mover: "+CRM.docErrorMessage(e));
+      setBusy(false);
+    }
+  };
+  return <Modal title="Mover documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!dest}>{busy?"Moviendo…":"Mover"}</button></>}>
+    <p className="muted" style={{marginBottom:14}}><b>{docName(doc)}</b> está en <b>{doc.folder_name||"—"}</b>.</p>
+    {opciones.length ? <Field label="Carpeta destino"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)}>
+      <option value="" disabled>— Elige carpeta —</option>
+      {opciones.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+    </select></Field> : <p className="muted">Este contacto no tiene otra carpeta. Crea una primero.</p>}
+  </Modal>;
+}
+
+// Crear o renombrar carpeta. Valida antes de enviar con el mismo criterio
+// que la BD (CRM.carpetaNombreIssue); si aun así la BD rechaza (p. ej. otra
+// persona creó el mismo nombre a la vez), se muestra su error traducido.
+function FolderNameModal({title, initial, carpetas, exceptId, note, onClose, onSave}){
+  const [nombre,setNombre]=uState(initial||"");
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const issue = CRM.carpetaNombreIssue(nombre, carpetas, exceptId);
+  const unchanged = initial!=null && nombre.trim()===initial.trim();
+  const go=async()=>{
+    if(issue || unchanged) return;
+    setBusy(true); setErr(null);
+    try{ await onSave(nombre.trim()); }
+    catch(e){ setErr(CRM.docErrorMessage(e)); setBusy(false); }
+  };
+  return <Modal title={title} onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!!issue||unchanged}>{busy?"Guardando…":"Guardar"}</button></>}>
+    <Field label="Nombre de la carpeta"><input className="inp" autoFocus maxLength={60} value={nombre} onChange={e=>{setNombre(e.target.value); setErr(null);}} onKeyDown={e=>{ if(e.key==="Enter") go(); }}/></Field>
+    {nombre.trim() && issue && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>{issue}</p>}
+    {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>{err}</p>}
+    {note && <p className="muted" style={{fontSize:12.5,marginTop:8}}>{note}</p>}
+  </Modal>;
+}
+
+// Borrar carpeta. Vacía: confirmación. Con documentos: destino obligatorio
+// (borrar_carpeta los mueve y borra en una transacción). La carpeta
+// WhatsApp con documentos no llega aquí: el botón no se ofrece.
+function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast}){
+  const opciones = carpetas.filter(k=>k.id!==folder.id);
+  const [dest,setDest]=uState("");
+  const [busy,setBusy]=uState(false);
+  const needsDest = count>0;
+  const go=async()=>{
+    if(needsDest && !dest) return;
+    setBusy(true);
+    try{
+      await CRM.borrarCarpeta(Auth.client, folder.id, needsDest ? dest : null);
+      toast("Carpeta eliminada");
+      onDeleted();
+    }catch(e){
+      toast("No se pudo eliminar la carpeta: "+CRM.docErrorMessage(e));
+      setBusy(false);
+    }
+  };
+  return <Modal title="Eliminar carpeta" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--danger" onClick={go} disabled={busy||(needsDest && !dest)}>{busy?"Eliminando…":(needsDest?"Mover y eliminar":"Eliminar carpeta")}</button></>}>
+    {!needsDest && <p className="muted">Se eliminará la carpeta <b>{folder.nombre}</b>. Está vacía.</p>}
+    {needsDest && <>
+      <p className="muted" style={{marginBottom:14}}>La carpeta <b>{folder.nombre}</b> tiene {count} documento{count===1?"":"s"}. Elige a qué carpeta moverlos antes de eliminarla.</p>
+      {opciones.length ? <Field label="Mover los documentos a"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)}>
+        <option value="" disabled>— Elige carpeta —</option>
+        {opciones.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+      </select></Field> : <p className="muted">No hay otra carpeta a la que moverlos. Crea una primero.</p>}
+    </>}
+  </Modal>;
+}
+
+// Subida manual (ver CRM.subirDocumentoManual: fichero primero, fila
+// después, 'stored' directo). El límite de 15 MB se avisa al elegir el
+// archivo, antes de intentar nada. supabase-js no da progreso de subida,
+// así que se muestra un estado "Subiendo…" con barra indeterminada.
+function UploadDocModal({contactId, carpetas, defaultFolderId, user, onClose, onUploaded, toast}){
+  const [file,setFile]=uState(null);
+  const [folderId,setFolderId]=uState(defaultFolderId || (carpetas[0]&&carpetas[0].id) || "");
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const tooBig = file && file.size>CRM.MAX_DOCUMENTO_BYTES;
+  const go=async()=>{
+    if(!file || tooBig || !folderId) return;
+    setBusy(true); setErr(null);
+    try{
+      const uploadedBy = user && CRM.userById(user.id) ? user.id : null;
+      const doc = await CRM.subirDocumentoManual(Auth.client, {file, contactId, folderId, uploadedBy});
+      toast("Documento subido");
+      onUploaded(doc);
+    }catch(e){
+      setErr("No se pudo subir: "+CRM.docErrorMessage(e));
+      setBusy(false);
+    }
+  };
+  return <Modal title="Subir documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!file||tooBig||!folderId}>{busy?"Subiendo…":"Subir"}</button></>}>
+    <Field label="Archivo"><div className={"upload-drop"+(busy?" upload-drop--busy":"")}>
+      <Icon name="upload" size={20}/>
+      {file ? <span className="upload-drop__file"><b>{file.name}</b> · {CRM.fmtBytes(file.size)}</span> : <span>Arrastra un archivo o haz clic para elegirlo</span>}
+      <span style={{fontSize:12}}>Máximo 15 MB</span>
+      <input type="file" disabled={busy} style={{position:"absolute",inset:0,opacity:0,cursor:busy?"default":"pointer"}} onChange={e=>{ setFile(e.target.files && e.target.files[0] || null); setErr(null); }}/>
+    </div></Field>
+    {tooBig && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>Este archivo ocupa {CRM.fmtBytes(file.size)} y el máximo es 15 MB. Comprímelo o divídelo antes de subirlo.</p>}
+    <Field label="Carpeta"><select className="inp" value={folderId} onChange={e=>setFolderId(e.target.value)} disabled={busy}>
+      {carpetas.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+    </select></Field>
+    {busy && <div className="upload-progress" role="progressbar" aria-label="Subiendo"><div className="upload-progress__bar"></div></div>}
+    {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:8}}>{err}</p>}
+  </Modal>;
+}
+
+// Pestaña "Documentos" de la ficha de contacto: carpetas (chips), documentos
+// de la carpeta elegida, subida manual y gestión de carpetas.
+// onCount: avisa a la ficha del total para el contador de la pestaña.
+function ContactDocs({contactId, user, toast, onCount}){
+  const [data,setData]=uState(null); // {carpetas, docs}; null = cargando
+  const [loadErr,setLoadErr]=uState(null);
+  const [sel,setSel]=uState(null);
+  const [modal,setModal]=uState(null); // {kind:"upload"|"new"|"rename"|"delFolder"|"move"|"delDoc", doc?}
+  const [download,busyId]=useDocDownload(toast);
+  const isMobile = useIsMobile();
+
+  const reload=async()=>{
+    try{
+      const r = await CRM.loadDocumentosContacto(Auth.client, contactId);
+      setData(r); setLoadErr(null);
+      if(onCount) onCount(r.docs.length);
+      // Si la carpeta elegida ya no existe (borrada), vuelve a la primera.
+      setSel(s=> r.carpetas.some(k=>k.id===s) ? s : (r.carpetas[0] ? r.carpetas[0].id : null));
+    }catch(e){ setLoadErr(CRM.docErrorMessage(e)); }
+  };
+  uEffect(()=>{ setData(null); reload(); },[contactId]);
+
+  if(loadErr) return <div className="card"><div className="card__body"><Empty icon="documents" title="No se pudieron cargar los documentos" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14}/>Reintentar</button>}/></div></div>;
+  if(!data) return <div className="muted" style={{padding:16}}>Cargando documentos…</div>;
+
+  const {carpetas, docs} = data;
+  const countOf = (id)=>docs.filter(d=>d.folder_id===id).length;
+  const folder = carpetas.find(k=>k.id===sel) || null;
+  const folderDocs = folder ? docs.filter(d=>d.folder_id===folder.id) : [];
+  const folderCount = folder ? folderDocs.length : 0;
+  // Carpeta WhatsApp con documentos: ni renombrar ni borrar (lo impone la
+  // BD); no se ofrece en la interfaz.
+  const locked = folder && folder.is_whatsapp && folderCount>0;
+  const close=()=>setModal(null);
+  const closeAndReload=()=>{ setModal(null); reload(); };
+
+  return <div className="wrap-gap">
+    <div className="doc-folders">
+      {carpetas.map(k=><button key={k.id} className={"chip"+(k.id===sel?" active":"")} onClick={()=>setSel(k.id)}>
+        <Icon name={k.is_whatsapp?"whatsapp":"folder"} size={14}/>{k.nombre}<span className="chip__count">{countOf(k.id)}</span>
+      </button>)}
+      <button className="chip" onClick={()=>setModal({kind:"new"})}><Icon name="plus" size={14}/>Nueva carpeta</button>
+    </div>
+
+    {!folder ? <div className="card"><div className="card__body"><Empty icon="folder" title="Sin carpetas" sub="Crea una carpeta para empezar a subir documentos." action={<button className="btn btn--sm btn--primary" onClick={()=>setModal({kind:"new"})}><Icon name="plus" size={14}/>Nueva carpeta</button>}/></div></div> :
+    <div className="card">
+      <div className="card__head doc-folder-head">
+        <Icon name={folder.is_whatsapp?"whatsapp":"folder"} size={16} style={{color:"var(--accent)"}}/>
+        <h3 className="doc-folder-head__title">{folder.nombre}</h3>
+        <div className="row doc-folder-head__actions" style={{gap:6}}>
+          {!locked && <button className="btn btn--sm btn--ghost" title="Renombrar carpeta" onClick={()=>setModal({kind:"rename"})}><Icon name="edit" size={14}/>{!isMobile && "Renombrar"}</button>}
+          {!locked && <button className="btn btn--sm btn--ghost" title="Eliminar carpeta" onClick={()=>setModal({kind:"delFolder"})}><Icon name="trash" size={14}/>{!isMobile && "Eliminar"}</button>}
+          <button className="btn btn--sm btn--primary" onClick={()=>setModal({kind:"upload"})}><Icon name="upload" size={14}/>Subir documento</button>
+        </div>
+        {locked && <div className="doc-folder-head__note muted">Carpeta del sistema: no se puede renombrar ni eliminar mientras tenga documentos. Puedes mover sus documentos a otra carpeta.</div>}
+      </div>
+      <div className="card__body" style={{paddingTop:4}}>
+        {folderDocs.map(d=><div key={d.id} className="lrow doc-row">
+          <div className="lrow__ico"><Icon name="documents" size={17}/></div>
+          <div className="lrow__main">
+            <div className="lrow__title doc-row__name" title={docName(d)}>{docName(d)}</div>
+            <div className="lrow__sub doc-row__meta">
+              <span>{[CRM.fmtBytes(d.size_bytes), d.created].filter(Boolean).join(" · ")}</span>
+              <DocSourceBadge doc={d}/><DocStatusBadge doc={d}/>
+            </div>
+          </div>
+          <DocActions doc={d} onDownload={download} downloading={busyId===d.id}
+            onMove={carpetas.length>1 ? (doc)=>setModal({kind:"move", doc}) : null}
+            onDelete={(doc)=>setModal({kind:"delDoc", doc})}/>
+        </div>)}
+        {folderDocs.length===0 && <Empty icon="documents" title="Carpeta vacía" sub={folder.is_whatsapp ? "Aquí llegan los adjuntos de las conversaciones de WhatsApp vinculadas a este contacto." : null}/>}
+      </div>
+    </div>}
+
+    {modal && modal.kind==="upload" && <UploadDocModal contactId={contactId} carpetas={carpetas} defaultFolderId={sel} user={user} toast={toast} onClose={close}
+      onUploaded={(doc)=>{ setModal(null); if(doc.folder_id) setSel(doc.folder_id); reload(); }}/>}
+    {modal && modal.kind==="new" && <FolderNameModal title="Nueva carpeta" carpetas={carpetas} onClose={close}
+      onSave={async(nombre)=>{ const k = await CRM.crearCarpeta(Auth.client, contactId, nombre); toast("Carpeta creada"); setModal(null); setSel(k.id); reload(); }}/>}
+    {modal && modal.kind==="rename" && folder && <FolderNameModal title="Renombrar carpeta" initial={folder.nombre} carpetas={carpetas} exceptId={folder.id} onClose={close}
+      note={folder.is_whatsapp ? "Al renombrarla dejará de ser la carpeta del sistema: los próximos adjuntos de WhatsApp irán a una carpeta \"WhatsApp\" nueva." : null}
+      onSave={async(nombre)=>{ await CRM.renombrarCarpeta(Auth.client, folder.id, nombre); toast("Carpeta renombrada"); closeAndReload(); }}/>}
+    {modal && modal.kind==="delFolder" && folder && <DeleteFolderModal folder={folder} count={folderCount} carpetas={carpetas} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
+    {modal && modal.kind==="move" && <MoveDocModal doc={modal.doc} carpetas={carpetas} toast={toast} onClose={close} onMoved={closeAndReload}/>}
+    {modal && modal.kind==="delDoc" && <DeleteDocModal doc={modal.doc} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
+  </div>;
 }
 function EmpresaDetail({id, nav, toast}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
@@ -524,7 +787,7 @@ function EmpresaDetail({id, nav, toast}){
               </tr>;
             })}
           </tbody></table>{contactos.length===0 && <Empty icon="contacts" title="Sin contactos"/>}</div>}
-          {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Tamaño</th><th>Fecha</th><th></th></tr></thead><tbody>
+          {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Carpeta</th><th>Tamaño</th><th>Fecha</th><th></th></tr></thead><tbody>
             {(docs||[]).map(d=><EmpresaDocRow key={d.id} doc={d} contact={CRM.contactById[d.contact_id]} toast={toast}/>)}
           </tbody></table>
           {loadingDocs && <div className="muted" style={{padding:16}}>Cargando documentos…</div>}
@@ -802,6 +1065,10 @@ function ContactDetail({id, nav, toast, user}){
   const [showStartWa,setShowStartWa]=uState(false);
   const [editingTask,setEditingTask]=uState(null);
   const [noteText,setNoteText]=uState(""); const [savingNote,setSavingNote]=uState(false);
+  // Total de documentos para el contador de la pestaña: lo informa
+  // ContactDocs al cargar (null hasta entonces, igual que en EmpresaDetail).
+  const [docCount,setDocCount]=uState(null);
+  uEffect(()=>{ setDocCount(null); },[id]);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
   const addNoteHandler=async()=>{
     if(!noteText.trim()) return;
@@ -862,11 +1129,10 @@ function ContactDetail({id, nav, toast, user}){
   const deals = CRM.DEALS.filter(d=>d.contact===id);
   const notes = CRM.NOTES.filter(n=>n.contact===id);
   const tasks = CRM.TASKS.filter(t=>t.contact===id && !t.archived);
-  const docs = CRM.DOCUMENTS.filter(d=>d.contact===id);
   const acts = CRM.ACTIVITY.filter(a=>a.contact===id);
   const wa = CRM.WHATSAPP.filter(w=>w.contact===id);
   const emails = CRM.EMAILS.filter(e=>e.contact===id);
-  const tabs=[{id:"resumen",label:"Resumen"},{id:"deals",label:"Deals",n:deals.length},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:emails.length||null},{id:"docs",label:"Documentos",n:docs.length},{id:"actividad",label:"Actividad",n:acts.length}];
+  const tabs=[{id:"resumen",label:"Resumen"},{id:"deals",label:"Deals",n:deals.length},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:emails.length||null},{id:"docs",label:"Documentos",n:docCount},{id:"actividad",label:"Actividad",n:acts.length}];
   return (
     <div className="content">
       <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("contacts")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Contactos</button></div>
@@ -939,7 +1205,9 @@ function ContactDetail({id, nav, toast, user}){
             : <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Sin conversación de WhatsApp" sub="Todavía no le has escrito a este contacto por WhatsApp." action={<button className="btn btn--sm btn--primary" onClick={()=>setShowStartWa(true)}><Icon name="whatsapp" size={15}/>Iniciar conversación</button>}/></div></div>
           )}
           {tab==="correos" && <div className="wrap-gap">{emails.length? emails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
-          {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Tamaño</th><th>Visible cliente</th><th>Fecha</th></tr></thead><tbody>{docs.map(d=><tr key={d.id}><td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{d.size}</td><td>{d.visible? <Badge label="Compartido" color="#1F9D6B"/> : <span className="muted">No</span>}</td><td className="tbl__sub">{d.at}</td></tr>)}</tbody></table>{docs.length===0&&<Empty icon="documents" title="Sin documentos"/>}</div>}
+          {tab==="docs" && (isLead
+            ? <div className="card"><div className="card__body"><Empty icon="documents" title="Convierte el lead en contacto" sub="Los documentos se guardan en las carpetas del contacto, que se crean al convertirlo."/></div></div>
+            : <ContactDocs contactId={id} user={user} toast={toast} onCount={setDocCount}/>)}
           {tab==="actividad" && <div className="card"><div className="card__body"><div className="tl">{acts.map((a,i)=><div key={i} className="tl-item"><div className="tl-item__ico"><Icon name={a.type==="call"?"phone":a.type==="note"?"note":a.type==="email"?"mail":a.type==="doc"?"documents":a.type==="stage"?"pipeline":"contacts"} size={11}/></div><div className="tl-item__head">{a.text}</div><div className="tl-item__meta">{a.who?CRM.userById(a.who)?.name+" · ":""}{a.at}</div></div>)}</div></div></div>}
         </div>
       </div>
@@ -1381,7 +1649,7 @@ function Pipeline({nav, toast}){
 /* ============ DEAL DETAIL ============ */
 function DealDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
-  const [showEdit,setShowEdit]=uState(false); const [showUpload,setShowUpload]=uState(false);
+  const [showEdit,setShowEdit]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false); const [deleting,setDeleting]=uState(false);
   const [showNewTask,setShowNewTask]=uState(false); const [editingTask,setEditingTask]=uState(null);
   const [noteText,setNoteText]=uState(""); const [savingNote,setSavingNote]=uState(false);
@@ -1432,10 +1700,10 @@ function DealDetail({id, nav, toast, user}){
     }
   };
   const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
-  const notes=CRM.NOTES.filter(n=>n.deal===id); const docs=CRM.DOCUMENTS.filter(x=>x.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
+  const notes=CRM.NOTES.filter(n=>n.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
   const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
   const dealEmails=CRM.EMAILS.filter(e=>e.deal===id);
-  const tabs=[{id:"resumen",label:"Resumen"},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:dealEmails.length||null},{id:"docs",label:"Documentos",n:docs.length}];
+  const tabs=[{id:"resumen",label:"Resumen"},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:dealEmails.length||null}];
   const stageIdx=CRM.STAGES.findIndex(x=>x.id===d.stage);
   return (
     <div className="content">
@@ -1465,10 +1733,6 @@ function DealDetail({id, nav, toast, user}){
             </div>)}{notes.length===0&&<span className="muted">Sin notas.</span>}</div>
           </div></div>}
           {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length?tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>):<Empty icon="task" title="Sin tareas"/>}</div></div>}
-          {tab==="docs" && <>
-            <div className="row" style={{justifyContent:"flex-end",marginBottom:12}}><button className="btn btn--sm btn--primary" onClick={()=>setShowUpload(true)}><Icon name="upload" size={14}/>Subir documento</button></div>
-            <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Visible cliente</th></tr></thead><tbody>{docs.map(x=><tr key={x.id}><td className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{x.name}</span></td><td><Badge label={x.type} color="#6E8298"/></td><td>{x.visible?<Badge label="Compartido" color="#1F9D6B"/>:<span className="muted">No</span>}</td></tr>)}</tbody></table>{docs.length===0&&<Empty icon="documents" title="Sin documentos"/>}</div>
-          </>}
           {tab==="whatsapp" && <div className="card"><div className="card__body">{wa.length? wa[0].messages.map((m,i)=><div key={i} className={"bubble "+(m.dir)} style={{marginBottom:8,maxWidth:"70%"}}>{m.body}<div className="bubble__t">{m.t}</div></div>) : <Empty icon="whatsapp" title="Sin conversación de WhatsApp"/>}</div></div>}
           {tab==="correos" && <div className="wrap-gap">{dealEmails.length? dealEmails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
         </div>
@@ -1484,7 +1748,6 @@ function DealDetail({id, nav, toast, user}){
           throw e;
         }
       }}/>}
-      {showUpload && <UploadDocument onClose={()=>setShowUpload(false)} onSave={(doc)=>{CRM.addDocument({...doc, deal:d.id, contact:d.contact, by:user?.id, at:new Date().toISOString().slice(0,10)});setShowUpload(false);toast("Documento subido");bump();}}/>}
       {confirmDel && <Modal title="Eliminar deal" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
         <p className="muted">Se eliminará el deal <b>{d.title}</b>. Esta acción no se puede deshacer.</p>
       </Modal>}
@@ -1570,16 +1833,6 @@ function EditDeal({deal, onClose, onSave}){
       <Field label="Owner"><select className="inp" value={f.owner} onChange={set("owner")}>{CRM.USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
       <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
     </div>
-  </Modal>;
-}
-function UploadDocument({onClose, onSave}){
-  const [name,setName]=uState(""); const [type,setType]=uState("Informe"); const [visible,setVisible]=uState(false);
-  const TYPES=["Contrato","Propuesta","Informe","Modelo","Legal","Borrador","Factura","Otro"];
-  return <Modal title="Subir documento" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose}>Cancelar</button><button className="btn btn--primary" onClick={()=>name.trim() && onSave({name:name.trim(), type, visible})}>Subir</button></>}>
-    <Field label="Título del documento"><input className="inp" placeholder="Ej. Contrato firmado 2026" value={name} onChange={e=>setName(e.target.value)}/></Field>
-    <Field label="Tipo"><select className="inp" value={type} onChange={e=>setType(e.target.value)}>{TYPES.map(t=><option key={t}>{t}</option>)}</select></Field>
-    <Field label="Archivo"><div className="upload-drop"><Icon name="upload" size={20}/><span>Arrastra un archivo o haz clic para elegirlo</span><input type="file" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={()=>{}}/></div></Field>
-    <Field label="Visible en el portal del cliente"><label className="row" style={{gap:8}}><input type="checkbox" checked={visible} onChange={e=>setVisible(e.target.checked)}/> El cliente podrá verlo y descargarlo</label></Field>
   </Modal>;
 }
 
@@ -2222,75 +2475,110 @@ function EmailThreadCard({email, toast, bump}){
 }
 
 /* ============ DOCUMENTS ============ */
-function Documents({toast}){
-  const [docs,setDocs]=uState(CRM.DOCUMENTS.map(d=>({...d})));
-  const [preview,setPreview]=uState(null);
+// Vista global sobre public.documentos: buscador, filtro por contacto y por
+// carpeta, descarga con URL firmada y borrado. Incluye los adjuntos sin
+// contacto (conversación de WhatsApp sin vincular o contacto borrado).
+// Subir, mover y gestionar carpetas se hace desde la ficha del contacto,
+// que es donde viven las carpetas.
+const DOC_FILTER_NONE = "__none__";
+function Documents({nav, toast}){
+  const [docs,setDocs]=uState(null); // null = cargando
+  const [loadErr,setLoadErr]=uState(null);
+  const [q,setQ]=uState("");
+  const [contactF,setContactF]=uState("");
+  const [folderF,setFolderF]=uState("");
+  const [delDoc,setDelDoc]=uState(null);
+  const [download,busyId]=useDocDownload(toast);
   const isMobile = useIsMobile();
-  const toggle=(id)=>{ setDocs(ds=>ds.map(d=>d.id===id?{...d,visible:!d.visible}:d)); toast("Visibilidad actualizada"); };
-  const download=(doc)=>{
-    toast("Descargando "+doc.name+"…");
-    const blob=new Blob(["GUIMAES — "+doc.name+"\n\nTipo: "+doc.type+"\nCliente: "+(CRM.contactById[doc.contact]?.company||"—")+"\nFecha: "+doc.at+"\n\n(Documento de ejemplo — prototipo)"],{type:"text/plain"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a"); a.href=url; a.download=doc.name.replace(/\.[^.]+$/,"")+".txt";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),2000);
+
+  const reload=async()=>{
+    try{ setDocs(await CRM.loadAllDocumentos(Auth.client)); setLoadErr(null); }
+    catch(e){ setLoadErr(CRM.docErrorMessage(e)); }
   };
-  const remove=(doc)=>{
-    if(!window.confirm("¿Eliminar \""+doc.name+"\"? Esta acción no se puede deshacer.")) return;
-    CRM.removeDocument(doc.id);
-    setDocs(ds=>ds.filter(d=>d.id!==doc.id));
-    toast("Documento eliminado");
+  uEffect(()=>{ reload(); },[]);
+
+  const all = docs || [];
+  // Opciones de filtro a partir de lo que hay, no del catálogo completo:
+  // solo contactos con documentos, y carpetas por nombre (agrupa "Fiscal"
+  // de todos los contactos).
+  const contactOpts = uMemo(()=>{
+    const ids = Array.from(new Set(all.map(d=>d.contact_id).filter(Boolean)));
+    return ids.map(id=>({id, label:docContactLabel(id)||"Contacto sin cargar"})).sort((a,b)=>a.label.localeCompare(b.label,"es"));
+  },[docs]);
+  const folderOpts = uMemo(()=>Array.from(new Set(all.map(d=>d.folder_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"es")),[docs]);
+  const hasOrphans = all.some(d=>!d.contact_id);
+
+  const needle = q.trim().toLowerCase();
+  const shown = all.filter(d=>{
+    if(contactF===DOC_FILTER_NONE ? !!d.contact_id : (contactF && d.contact_id!==contactF)) return false;
+    if(folderF===DOC_FILTER_NONE ? !!d.folder_id : (folderF && d.folder_name!==folderF)) return false;
+    if(!needle) return true;
+    return [docName(d), docContactLabel(d.contact_id)||"", d.folder_name].some(s=>s.toLowerCase().includes(needle));
+  });
+  const filtering = !!(needle || contactF || folderF);
+
+  const contactCell = (d)=>{
+    const label = docContactLabel(d.contact_id);
+    if(!d.contact_id) return <span className="muted">Sin contacto</span>;
+    if(!label) return <span className="muted">—</span>;
+    return <a className="doc-link" onClick={e=>{ e.stopPropagation(); nav("contact", d.contact_id); }}>{label}</a>;
   };
+  const origin = (d)=> d.source==="whatsapp" ? <Badge label="WhatsApp" color="#1F9D6B"/> : (ownerAvatar(d.uploaded_by) || <span className="muted" style={{fontSize:12.5}}>Manual</span>);
+
   return <div className="content">
-    <div className="toolbar"><div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento…"/></div><div className="toolbar__spacer"></div><button className="btn btn--primary"><Icon name="upload" size={16}/>Subir documento</button></div>
-    {isMobile ? (
+    <div className="toolbar doc-toolbar">
+      <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento, contacto o carpeta…" value={q} onChange={e=>setQ(e.target.value)}/></div>
+      <select className="inp doc-filter" value={contactF} onChange={e=>setContactF(e.target.value)} aria-label="Filtrar por contacto">
+        <option value="">Todos los contactos</option>
+        {hasOrphans && <option value={DOC_FILTER_NONE}>Sin contacto</option>}
+        {contactOpts.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <select className="inp doc-filter" value={folderF} onChange={e=>setFolderF(e.target.value)} aria-label="Filtrar por carpeta">
+        <option value="">Todas las carpetas</option>
+        {hasOrphans && <option value={DOC_FILTER_NONE}>Sin carpeta</option>}
+        {folderOpts.map(n=><option key={n} value={n}>{n}</option>)}
+      </select>
+      {filtering && <button className="btn btn--sm btn--ghost" onClick={()=>{setQ("");setContactF("");setFolderF("");}}>Limpiar</button>}
+    </div>
+
+    {loadErr ? <Empty icon="documents" title="No se pudieron cargar los documentos" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14}/>Reintentar</button>}/>
+    : !docs ? <div className="muted" style={{padding:16}}>Cargando documentos…</div>
+    : isMobile ? (
       <div className="wrap-gap">
-        {docs.map(d=>(
+        {shown.map(d=>(
           <div key={d.id} className="card">
             <div className="card__body">
-              <div className="row" style={{gap:10}}>
+              <div className="row" style={{gap:10,alignItems:"flex-start"}}>
                 <div className="lrow__ico"><Icon name="documents" size={17}/></div>
                 <div style={{flex:1,minWidth:0}}>
-                  <div className="tbl__name">{d.name}</div>
-                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{CRM.contactById[d.contact]?.company || "—"} · {d.at}</div>
+                  <div className="tbl__name doc-row__name">{docName(d)}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{contactCell(d)}{d.folder_name ? " · "+d.folder_name : ""}</div>
+                  <div className="muted" style={{fontSize:12,marginTop:2}}>{[CRM.fmtBytes(d.size_bytes), d.created].filter(Boolean).join(" · ")}</div>
                 </div>
-                <Badge label={d.type} color="#6E8298"/>
               </div>
-              <div className="row" style={{marginTop:12,justifyContent:"space-between"}}>
-                <label className="row" style={{gap:8,cursor:"pointer"}}>
-                  <div className={"tbl-check"+(d.visible?" on":"")} onClick={()=>toggle(d.id)}>{d.visible&&<Icon name="check" size={12}/>}</div>
-                  {d.visible?<span style={{color:"var(--ok)",fontSize:13,fontWeight:600}}>Compartido</span>:<span className="muted" style={{fontSize:13}}>Privado</span>}
-                </label>
-                <div className="row" style={{gap:4}}>
-                  <button className="btn btn--sm btn--ghost" title="Ver" onClick={()=>setPreview(d)}><Icon name="eye" size={14}/></button>
-                  <button className="btn btn--sm btn--ghost" title="Descargar" onClick={()=>download(d)}><Icon name="download" size={14}/></button>
-                  <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>remove(d)}><Icon name="trash" size={14}/></button>
-                </div>
+              <div className="row" style={{marginTop:10,justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                <div className="row" style={{gap:6,flexWrap:"wrap"}}><DocSourceBadge doc={d}/><DocStatusBadge doc={d}/></div>
+                <DocActions doc={d} onDownload={download} downloading={busyId===d.id} onDelete={setDelDoc}/>
               </div>
             </div>
           </div>
         ))}
-        {docs.length===0 && <Empty icon="documents" title="Sin documentos"/>}
+        {shown.length===0 && <Empty icon="documents" title={filtering?"Ningún documento coincide":"Sin documentos"}/>}
       </div>
     ) : (
-    <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Cliente</th><th>Tamaño</th><th>Subido por</th><th>Fecha</th><th>Visible en portal</th><th></th></tr></thead><tbody>
-      {docs.map(d=><tr key={d.id}><td className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{CRM.contactById[d.contact]?.company}</td><td className="tbl__sub">{d.size}</td><td>{ownerAvatar(d.by)}</td><td className="tbl__sub">{d.at}</td><td onClick={e=>e.stopPropagation()}><label className="row" style={{gap:8,cursor:"pointer"}}><div className={"tbl-check"+(d.visible?" on":"")} onClick={()=>toggle(d.id)}>{d.visible&&<Icon name="check" size={12}/>}</div>{d.visible?<span style={{color:"var(--ok)",fontSize:13,fontWeight:600}}>Compartido</span>:<span className="muted" style={{fontSize:13}}>Privado</span>}</label></td>
-        <td onClick={e=>e.stopPropagation()}><div className="row" style={{gap:4}}>
-          <button className="btn btn--sm btn--ghost" title="Ver" onClick={()=>setPreview(d)}><Icon name="eye" size={14}/></button>
-          <button className="btn btn--sm btn--ghost" title="Descargar" onClick={()=>download(d)}><Icon name="download" size={14}/></button>
-          <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>remove(d)}><Icon name="trash" size={14}/></button>
-        </div></td>
+    <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Carpeta</th><th>Tamaño</th><th>Origen</th><th>Fecha</th><th></th></tr></thead><tbody>
+      {shown.map(d=><tr key={d.id}>
+        <td><div className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{docName(d)}</span><DocStatusBadge doc={d}/></div></td>
+        <td className="tbl__sub">{contactCell(d)}</td>
+        <td className="tbl__sub">{d.folder_name || "—"}</td>
+        <td className="tbl__sub">{CRM.fmtBytes(d.size_bytes)}</td>
+        <td>{origin(d)}</td>
+        <td className="tbl__sub">{d.created}</td>
+        <td onClick={e=>e.stopPropagation()}><DocActions doc={d} onDownload={download} downloading={busyId===d.id} onDelete={setDelDoc}/></td>
       </tr>)}
-    </tbody></table>{docs.length===0 && <Empty icon="documents" title="Sin documentos"/>}</div>
+    </tbody></table>{shown.length===0 && <Empty icon="documents" title={filtering?"Ningún documento coincide":"Sin documentos"}/>}</div>
     )}
-    {preview && <Modal title={preview.name} onClose={()=>setPreview(null)} footer={<><button className="btn btn--ghost" onClick={()=>setPreview(null)}>Cerrar</button><button className="btn btn--primary" onClick={()=>{download(preview);}}><Icon name="download" size={15}/>Descargar</button></>}>
-      <KV k="Tipo"><Badge label={preview.type} color="#6E8298"/></KV>
-      <KV k="Cliente">{CRM.contactById[preview.contact]?.company || "—"}</KV>
-      <KV k="Tamaño">{preview.size}</KV>
-      <KV k="Subido por">{CRM.userById(preview.by)?.name || "—"}</KV>
-      <KV k="Fecha">{preview.at}</KV>
-      <KV k="Visible en portal">{preview.visible? "Sí" : "No"}</KV>
-    </Modal>}
+    {delDoc && <DeleteDocModal doc={delDoc} toast={toast} onClose={()=>setDelDoc(null)} onDeleted={(doc)=>{ setDelDoc(null); setDocs(ds=>(ds||[]).filter(x=>x.id!==doc.id)); }}/>}
   </div>;
 }
 
@@ -2819,7 +3107,7 @@ function App(){
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;
-  else if(view.name==="documents") screen=<Documents toast={fireToast}/>;
+  else if(view.name==="documents") screen=<Documents nav={nav} toast={fireToast}/>;
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
   else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp";

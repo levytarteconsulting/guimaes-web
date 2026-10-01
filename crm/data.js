@@ -374,18 +374,13 @@
   async function linkWhatsappConversation(client, id, contactId){
     var w = WHATSAPP.find(function(x){return x.id===id;});
     if(client){
-      var res = await client.from("whatsapp_conversations").update({contact_id: contactId}).eq("id", id).select();
+      // Un solo RPC (crm/supabase-carpetas.sql) en vez de dos updates
+      // sueltos: vincula la conversación y coloca sus adjuntos en la carpeta
+      // WhatsApp del contacto (o los deja sin contacto ni carpeta al
+      // desvincular), todo en la misma transacción. Los ficheros no se
+      // mueven en Storage, solo cambian contact_id/folder_id.
+      var res = await client.rpc("vincular_conversacion", {p_conversation_id: id, p_contact_id: contactId || null});
       if(res.error) throw res.error;
-      if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
-      // Los adjuntos de esta conversación no se mueven de sitio en Storage
-      // al vincular/desvincular (ver crm/supabase-documentos.sql) — solo
-      // esta columna cambia, para que "aparecer en la carpeta WhatsApp del
-      // contacto" sea una consulta por contact_id, nunca un movimiento de
-      // ficheros. Sin este segundo update, los documentos ya guardados
-      // antes de vincular se quedarían huérfanos de contact_id para
-      // siempre, aunque la conversación sí quedara vinculada.
-      var docsRes = await client.from("documentos").update({contact_id: contactId}).eq("whatsapp_conversation_id", id);
-      if(docsRes.error) throw docsRes.error;
     }
     if(w) w.contact = contactId;
     return w;
@@ -575,17 +570,6 @@
     Object.assign(d, patch);
     return d;
   }
-  function addDocument(doc){
-    var id = "doc"+Date.now().toString(36);
-    var full = Object.assign({id:id, size:"\u2014", visible:false}, doc);
-    DOCUMENTS.push(full);
-    return full;
-  }
-  function removeDocument(id){
-    var idx = DOCUMENTS.findIndex(function(d){return d.id===id;});
-    if(idx>-1) DOCUMENTS.splice(idx,1);
-  }
-
   // ---- Bandeja de entrada (Gmail — info@guimaes.es) ----
   var MAILBOX = "info@guimaes.es";
   var FOLDERS = [
@@ -968,13 +952,22 @@
     }
     return {contact:contact, empresa:empresa, deal:deal, dealError:dealError};
   }
-  // ---- Documentos por empresa (agrega los de todos sus contactos) ----
-  // No se cachea globalmente como CONTACTS/EMPRESAS: se consulta al vuelo
-  // al abrir la pestaña de documentos de una ficha de empresa. La tabla,
-  // sus índices y su RLS ya existen desde la fase de adjuntos de WhatsApp
-  // (crm/supabase-documentos.sql); aquí solo se añade la consulta por
-  // contact_id que faltaba.
+  // ---- Documentos y carpetas (Fase 5 — ver crm/supabase-carpetas.sql) ----
+  // No se cachean globalmente como CONTACTS/EMPRESAS: se consultan al vuelo
+  // al abrir la vista de Documentos o la pestaña de una ficha, y cada
+  // pantalla recarga tras escribir. Las reglas (carpeta WhatsApp protegida,
+  // destino obligatorio al mover, "con contacto ⇒ con carpeta") viven en
+  // la BD; la UI las refleja para no dejar intentar lo que se va a
+  // rechazar, pero el error de la BD sigue siendo la última palabra (ver
+  // docErrorMessage).
+  var MAX_DOCUMENTO_BYTES = 15 * 1024 * 1024; // mismo tope que el bucket (crm/supabase-documentos.sql)
+  // La carpeta se trae embebida por la FK compuesta (folder_id, contact_id)
+  // → carpetas(id, contact_id); el nombre de la FK desambigua frente a la
+  // de contact_id → contactos.
+  var DOCUMENTO_SELECT = "*, carpeta:carpetas!documentos_carpeta_fkey(id, nombre, system_key)";
+
   function rowToDocumento(row){
+    var carpeta = row.carpeta || null;
     return {
       id: row.id,
       storage_path: row.storage_path,
@@ -983,18 +976,182 @@
       original_filename: row.original_filename || "",
       status: row.status,
       contact_id: row.contact_id,
-      folder: row.folder || "General",
+      folder_id: row.folder_id || null,
+      folder_name: carpeta ? carpeta.nombre : "",
+      folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),
       source: row.source,
+      uploaded_by: row.uploaded_by || null,
+      whatsapp_conversation_id: row.whatsapp_conversation_id || null,
+      created_at: row.created_at || "",
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
+  function rowToCarpeta(row){
+    return {
+      id: row.id,
+      contact_id: row.contact_id,
+      nombre: row.nombre,
+      system_key: row.system_key || null,
+      is_whatsapp: row.system_key==="whatsapp",
+      orden: row.orden || 0
+    };
+  }
+  function sortCarpetas(list){
+    return list.sort(function(a,b){ return (a.orden-b.orden) || a.nombre.localeCompare(b.nombre, "es"); });
+  }
+
+  // Ficha de empresa: los de todos sus contactos.
   async function loadDocumentosForContacts(client, contactIds){
     if(!client || !contactIds || !contactIds.length) return [];
     try{
-      var res = await client.from("documentos").select("*").in("contact_id", contactIds).order("created_at",{ascending:false});
+      var res = await client.from("documentos").select(DOCUMENTO_SELECT).in("contact_id", contactIds).order("created_at",{ascending:false});
       if(res.error || !res.data) return [];
       return res.data.map(rowToDocumento);
     }catch(e){ if(window.console) console.error("loadDocumentosForContacts:", e); return []; }
+  }
+  // Vista Documentos: todos, incluidos los adjuntos sin contacto (conversación
+  // sin vincular o contacto borrado). Lanza en caso de error para que la
+  // vista distinga "vacío" de "no se pudo cargar".
+  async function loadAllDocumentos(client){
+    if(!client) return [];
+    var res = await client.from("documentos").select(DOCUMENTO_SELECT).order("created_at",{ascending:false});
+    if(res.error) throw res.error;
+    return (res.data||[]).map(rowToDocumento);
+  }
+  // Ficha de contacto: sus carpetas y sus documentos, en paralelo.
+  async function loadDocumentosContacto(client, contactId){
+    if(!client || !contactId) return {carpetas:[], docs:[]};
+    var results = await Promise.all([
+      client.from("carpetas").select("*").eq("contact_id", contactId),
+      client.from("documentos").select(DOCUMENTO_SELECT).eq("contact_id", contactId).order("created_at",{ascending:false})
+    ]);
+    if(results[0].error) throw results[0].error;
+    if(results[1].error) throw results[1].error;
+    return {
+      carpetas: sortCarpetas((results[0].data||[]).map(rowToCarpeta)),
+      docs: (results[1].data||[]).map(rowToDocumento)
+    };
+  }
+
+  // Traduce los errores de BD que la UI puede provocar a un mensaje legible.
+  // Los mensajes propios de los triggers/RPCs ya están en español y se
+  // dejan pasar tal cual.
+  function docErrorMessage(e){
+    if(!e) return "Error desconocido";
+    if(e.code==="23505") return "Ya existe una carpeta con ese nombre en este contacto.";
+    if(e.code==="23514" && /whatsapp_reservado/.test(e.message||"")) return "El nombre \"WhatsApp\" está reservado para la carpeta del sistema.";
+    if(e.code==="23514" && /nombre_check/.test(e.message||"")) return "El nombre de la carpeta debe tener entre 1 y 60 caracteres.";
+    return e.message || String(e);
+  }
+  // Validación previa de nombre de carpeta: mismo criterio que los checks
+  // de carpetas (longitud, "WhatsApp" reservado) y que el índice único
+  // (sin distinguir mayúsculas ni espacios de los extremos). Devuelve el
+  // mensaje de error o null.
+  function carpetaNombreIssue(nombre, carpetas, exceptId){
+    var n = (nombre||"").trim();
+    if(!n) return "Escribe un nombre.";
+    if(n.length>60) return "Máximo 60 caracteres.";
+    if(n.toLowerCase()==="whatsapp") return "\"WhatsApp\" está reservado para la carpeta del sistema.";
+    var dup = (carpetas||[]).some(function(k){ return k.id!==exceptId && k.nombre.trim().toLowerCase()===n.toLowerCase(); });
+    if(dup) return "Ya existe una carpeta con ese nombre.";
+    return null;
+  }
+
+  // Entre las 4 por defecto (orden 1-4) y WhatsApp (100): las creadas a mano
+  // quedan detrás de las de serie y delante de la del sistema.
+  async function crearCarpeta(client, contactId, nombre){
+    var res = await client.from("carpetas").insert({contact_id: contactId, nombre: nombre.trim(), orden: 50}).select().single();
+    if(res.error) throw res.error;
+    return rowToCarpeta(res.data);
+  }
+  async function renombrarCarpeta(client, carpetaId, nombre){
+    var res = await client.from("carpetas").update({nombre: nombre.trim()}).eq("id", carpetaId).select();
+    if(res.error) throw res.error;
+    if(!res.data || res.data.length===0) throw new Error("La carpeta ya no existe.");
+    return rowToCarpeta(res.data[0]);
+  }
+  // destinoId obligatorio si la carpeta tiene documentos (el RPC lo exige).
+  async function borrarCarpeta(client, carpetaId, destinoId){
+    var res = await client.rpc("borrar_carpeta", {p_carpeta_id: carpetaId, p_destino: destinoId || null});
+    if(res.error) throw res.error;
+  }
+  async function moverDocumentos(client, documentoIds, destinoId){
+    if(!destinoId) throw new Error("Hace falta una carpeta destino.");
+    var res = await client.rpc("mover_documentos", {p_documento_ids: documentoIds, p_carpeta_destino: destinoId});
+    if(res.error) throw res.error;
+    return res.data;
+  }
+
+  // Nombre de fichero apto para una clave de Storage: Supabase rechaza
+  // acentos, eñes y varios signos en la ruta ("Invalid key"). El nombre
+  // original, tal cual, se guarda en original_filename y es el que se ve y
+  // el que se usa al descargar.
+  function storageSafeFilename(name){
+    var dot = (name||"").lastIndexOf(".");
+    var base = dot>0 ? name.slice(0,dot) : (name||"");
+    var ext = dot>0 ? name.slice(dot+1) : "";
+    var clean = function(s){
+      return s.normalize("NFD").replace(/[̀-ͯ]/g,"")
+        .replace(/[^A-Za-z0-9._-]+/g,"_").replace(/_+/g,"_").replace(/^[_.]+|[_.]+$/g,"");
+    };
+    base = clean(base).slice(0,80) || "documento";
+    ext = clean(ext).slice(0,10);
+    return ext ? base+"."+ext : base;
+  }
+  // Subida manual: fichero primero, fila después (ver diseño de la Fase 5).
+  //   - Si falla la subida, no queda nada.
+  //   - Si falla la fila, se intenta retirar el fichero; si eso también
+  //     falla queda un huérfano invisible en Storage (lo detecta la consulta
+  //     de huérfanos), nunca una fila apuntando a un fichero que no existe.
+  // La fila nace 'stored': una subida manual nunca pasa por 'pending'.
+  // Ruta: manual/{contact_id}/{documento_id}/{nombre}. La carpeta no forma
+  // parte de la ruta: mover de carpeta solo cambia folder_id.
+  async function subirDocumentoManual(client, opts){
+    var file = opts.file;
+    if(!file) throw new Error("Elige un archivo.");
+    if(file.size>MAX_DOCUMENTO_BYTES) throw new Error("El archivo supera el máximo de 15 MB.");
+    if(!opts.contactId || !opts.folderId) throw new Error("Hace falta contacto y carpeta.");
+    var id = crypto.randomUUID();
+    var path = "manual/"+opts.contactId+"/"+id+"/"+storageSafeFilename(file.name);
+    var up = await client.storage.from("documentos").upload(path, file, {contentType: file.type || "application/octet-stream", upsert: false});
+    if(up.error) throw up.error;
+    var ins = await client.from("documentos").insert({
+      id: id,
+      storage_path: path,
+      mime_type: file.type || null,
+      size_bytes: file.size,
+      original_filename: file.name,
+      status: "stored",
+      contact_id: opts.contactId,
+      folder_id: opts.folderId,
+      source: "manual",
+      uploaded_by: opts.uploadedBy || null
+    }).select(DOCUMENTO_SELECT).single();
+    if(ins.error){
+      var rm = await client.storage.from("documentos").remove([path]);
+      if(rm.error && window.console) console.error("subirDocumentoManual: no se pudo retirar el fichero tras fallar la fila", path, rm.error);
+      throw ins.error;
+    }
+    return rowToDocumento(ins.data);
+  }
+  // Borrado: fila primero, fichero después. Si falla el fichero, el
+  // documento ya ha desaparecido para el usuario y queda un huérfano
+  // invisible en Storage — nunca al revés (una fila visible con el fichero
+  // ya borrado). Un adjunto de WhatsApp borrado queda marcado 'deleted' en
+  // el mensaje por trigger (documentos_marcar_mensaje_borrado).
+  // Devuelve {fileRemoved} para que la UI pueda avisar si el fichero no se
+  // pudo retirar.
+  async function borrarDocumento(client, doc){
+    if(doc.status==="pending") throw new Error("Este adjunto aún se está descargando de WhatsApp.");
+    var del = await client.from("documentos").delete().eq("id", doc.id).select("id");
+    if(del.error) throw del.error;
+    if(!del.data || del.data.length===0) throw new Error("El documento ya no existe.");
+    var rm = await client.storage.from("documentos").remove([doc.storage_path]);
+    if(rm.error){
+      if(window.console) console.error("borrarDocumento: fila borrada pero el fichero sigue en Storage", doc.storage_path, rm.error);
+      return {fileRemoved:false};
+    }
+    return {fileRemoved:true};
   }
 
   // ---- Deals reales (tabla "deals" de Supabase) ----
@@ -1465,6 +1622,10 @@
     linkContactoEmpresa:linkContactoEmpresa, addContactoEmpresaLink:addContactoEmpresaLink,
     setPrincipalEmpresa:setPrincipalEmpresa, removeContactoEmpresaLink:removeContactoEmpresaLink,
     loadDocumentosForContacts:loadDocumentosForContacts, createEmpresaConContacto:createEmpresaConContacto,
+    MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosContacto:loadDocumentosContacto,
+    docErrorMessage:docErrorMessage, carpetaNombreIssue:carpetaNombreIssue,
+    crearCarpeta:crearCarpeta, renombrarCarpeta:renombrarCarpeta, borrarCarpeta:borrarCarpeta, moverDocumentos:moverDocumentos,
+    subirDocumentoManual:subirDocumentoManual, borrarDocumento:borrarDocumento,
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
@@ -1478,7 +1639,7 @@
     isoToMadridDatetimeLocal:isoToMadridDatetimeLocal,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
-    updateDeal:updateDeal, addDocument:addDocument, removeDocument:removeDocument, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
+    updateDeal:updateDeal, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
