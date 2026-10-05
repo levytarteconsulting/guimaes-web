@@ -1,6 +1,7 @@
 -- ============================================================
--- GUIMAES — Carpetas de documentos por EMPRESA
--- Carpetas de UN nivel por empresa (public.carpetas). La documentación de
+-- GUIMAES — Carpetas de documentos por EMPRESA, con subcarpetas
+-- Carpetas de DOS niveles por empresa (public.carpetas): una carpeta raíz
+-- puede tener subcarpetas; una subcarpeta no. La documentación de
 -- una asesoría es de la sociedad, no de la persona que la aporta: tanto
 -- las carpetas como los documentos cuelgan de public.empresas.
 -- Juego por defecto al crear una empresa (Fiscal, Laboral, Mercantil,
@@ -21,6 +22,11 @@
 -- contacto), ejecutar ANTES el BLOQUE B de
 -- crm/supabase-documentos-empresa.sql — este fichero se niega a correr
 -- sobre el modelo antiguo (ver punto 0).
+--
+-- Subcarpetas: en una base anterior a ellas, ejecutar ANTES el BLOQUE B de
+-- crm/supabase-subcarpetas.sql (este fichero también las crea si faltan,
+-- pero aquella migración lo hace en una sola transacción y comprueba la
+-- versión de Postgres).
 --
 -- Ejecutar en Supabase → SQL Editor → New query → Run. Idempotente.
 -- ============================================================
@@ -55,9 +61,12 @@ create table if not exists public.carpetas (
   updated_at  timestamptz not null default now(),
 
   empresa_id  uuid not null references public.empresas(id) on delete cascade,
+  parent_id   uuid,             -- NULL = carpeta raíz; si no, la raíz que la contiene (ver punto 1b)
   nombre      text not null,
   system_key  text,             -- 'whatsapp' para la carpeta de sistema; NULL en el resto
-  orden       int  not null default 0
+  orden       int  not null default 0,
+  admite_subcarpetas boolean generated always as (parent_id is null and system_key is null) stored,
+  padre_admite       boolean generated always as (case when parent_id is not null then true end) stored
 );
 
 alter table public.carpetas drop constraint if exists carpetas_nombre_check;
@@ -75,10 +84,66 @@ alter table public.carpetas add constraint carpetas_whatsapp_reservado_check
 alter table public.carpetas drop constraint if exists carpetas_id_empresa_key cascade;
 alter table public.carpetas add constraint carpetas_id_empresa_key unique (id, empresa_id);
 
-create unique index if not exists carpetas_empresa_nombre_key
-  on public.carpetas (empresa_id, lower(btrim(nombre)));
 create unique index if not exists carpetas_empresa_system_key
   on public.carpetas (empresa_id, system_key) where system_key is not null;
+
+-- ============================================================
+-- 1b) Subcarpetas: exactamente dos niveles, garantizados por una FK
+--
+-- admite_subcarpetas (generada): esta carpeta puede tener hijas — solo si
+-- es raíz y no es de sistema. padre_admite (generada): constante true si
+-- tiene padre, NULL si es raíz. La FK compuesta
+--   (parent_id, empresa_id, padre_admite) → (id, empresa_id, admite_subcarpetas)
+-- exige que el padre sea de la MISMA empresa y tenga admite_subcarpetas =
+-- true. De ahí sale todo:
+--   - el padre es raíz (sin tercer nivel) y no es WhatsApp;
+--   - una raíz con hijas no puede pasar a ser hija (su admite_subcarpetas
+--     cambiaría y las hijas que la referencian lo impiden);
+--   - nadie es su propia madre ni hay ciclos.
+-- Una FK y no un trigger por la concurrencia: con un trigger, "mover A
+-- dentro de B" y "mover B dentro de C" a la vez pasarían las dos
+-- comprobaciones y dejarían tres niveles; la FK bloquea la fila del padre.
+-- NO ACTION (no RESTRICT): al borrar una empresa, madre e hijas caen en el
+-- mismo cascade y la FK se comprueba al final de la sentencia, cuando ya
+-- no queda ninguna.
+--
+-- Nombre único ENTRE HERMANAS: "Fiscal / 2026" y "Laboral / 2026" pueden
+-- coexistir. NULLS NOT DISTINCT (PG15+) trata todas las raíces de una
+-- empresa como hermanas. El nombre "WhatsApp" sigue reservado a la de
+-- sistema en cualquier nivel (check de arriba).
+-- ============================================================
+alter table public.carpetas add column if not exists parent_id uuid;
+alter table public.carpetas add column if not exists admite_subcarpetas boolean
+  generated always as (parent_id is null and system_key is null) stored;
+alter table public.carpetas add column if not exists padre_admite boolean
+  generated always as (case when parent_id is not null then true end) stored;
+
+alter table public.carpetas drop constraint if exists carpetas_sistema_es_raiz_check;
+alter table public.carpetas add constraint carpetas_sistema_es_raiz_check
+  check (system_key is null or parent_id is null);
+
+-- Solo se añaden si faltan (no drop + add): volver a ejecutar este fichero
+-- nunca deja un instante sin la FK que impide el tercer nivel.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'carpetas_id_empresa_admite_key') then
+    alter table public.carpetas add constraint carpetas_id_empresa_admite_key
+      unique (id, empresa_id, admite_subcarpetas);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'carpetas_padre_fkey') then
+    alter table public.carpetas add constraint carpetas_padre_fkey
+      foreign key (parent_id, empresa_id, padre_admite)
+      references public.carpetas (id, empresa_id, admite_subcarpetas);
+  end if;
+end;
+$$;
+
+-- El índice nuevo se crea ANTES de quitar el antiguo: nunca hay un
+-- momento sin unicidad de nombre.
+create unique index if not exists carpetas_hermanas_nombre_key
+  on public.carpetas (empresa_id, parent_id, lower(btrim(nombre))) nulls not distinct;
+drop index if exists public.carpetas_empresa_nombre_key;
+create index if not exists carpetas_parent_idx on public.carpetas (parent_id);
 
 drop trigger if exists carpetas_set_updated_at on public.carpetas;
 create trigger carpetas_set_updated_at
@@ -243,13 +308,22 @@ $$;
 -- Protección de carpetas:
 --   - empresa_id no cambia nunca.
 --   - system_key no se toca desde fuera.
+--   - parent_id solo cambia de una raíz a otra raíz (mover una subcarpeta,
+--     ver mover_carpeta). Ni una raíz pasa a subcarpeta ni una subcarpeta
+--     a raíz: las de serie no se reorganizan por descuido. Que el destino
+--     sea raíz, de la misma empresa y no WhatsApp lo garantiza la FK
+--     carpetas_padre_fkey (punto 1b).
 --   - La carpeta WhatsApp no se renombra mientras tenga documentos. Si se
 --     renombra vacía, deja de ser la de sistema (system_key → NULL).
+--   - Ninguna carpeta con subcarpetas se borra: hay que borrar o mover sus
+--     subcarpetas antes, una a una. Nada en cascada.
 --   - Ninguna carpeta con documentos se borra: hay que moverlos antes
---     (borrar_carpeta() lo hace en una transacción). Si el borrado viene
---     del cascade de borrar la empresa (la empresa ya no existe), el
---     mensaje lo dice: una empresa con documentos no se puede borrar
---     (además lo impide documentos.empresa_id, "on delete restrict").
+--     (borrar_carpeta() lo hace en una transacción).
+--   - Si el borrado viene del cascade de borrar la empresa (la empresa ya
+--     no existe): con documentos, el mensaje lo dice (una empresa con
+--     documentos no se puede borrar; además lo impide documentos.empresa_id,
+--     "on delete restrict"); con solo subcarpetas, se deja — caen todas en
+--     el mismo cascade.
 create or replace function public.carpetas_proteger()
 returns trigger
 language plpgsql
@@ -262,6 +336,10 @@ begin
     end if;
     if new.system_key is distinct from old.system_key then
       raise exception 'system_key no es editable';
+    end if;
+    if new.parent_id is distinct from old.parent_id
+       and (old.parent_id is null or new.parent_id is null) then
+      raise exception 'Solo se puede mover una subcarpeta a otra carpeta raíz';
     end if;
     if old.system_key = 'whatsapp' and new.nombre is distinct from old.nombre then
       if exists (select 1 from public.documentos where folder_id = old.id) then
@@ -278,6 +356,10 @@ begin
       raise exception 'La empresa tiene documentos: no se puede borrar sin moverlos antes a otra empresa';
     end if;
     raise exception 'La carpeta "%" tiene documentos: muévelos antes de borrarla', old.nombre;
+  end if;
+  if exists (select 1 from public.carpetas where parent_id = old.id)
+     and exists (select 1 from public.empresas where id = old.empresa_id) then
+    raise exception 'La carpeta "%" tiene subcarpetas: bórralas o muévelas antes', old.nombre;
   end if;
   return old;
 end;
@@ -488,9 +570,11 @@ begin
 end;
 $$;
 
--- Borra una carpeta. Si tiene documentos, p_destino es obligatorio y debe
--- ser otra carpeta DE LA MISMA EMPRESA (cambiar de empresa es una decisión
--- aparte, con mover_documentos). La carpeta WhatsApp con documentos no se
+-- Borra una carpeta. Con subcarpetas no se puede: hay que borrarlas o
+-- moverlas antes, una a una. Si tiene documentos, p_destino es obligatorio
+-- y debe ser otra carpeta DE LA MISMA EMPRESA, de cualquier nivel (también
+-- la madre, si es una subcarpeta); cambiar de empresa es una decisión
+-- aparte, con mover_documentos. La carpeta WhatsApp con documentos no se
 -- borra ni con destino. "for update" bloquea la carpeta mientras tanto.
 create or replace function public.borrar_carpeta(p_carpeta_id uuid, p_destino uuid default null)
 returns void
@@ -509,6 +593,11 @@ begin
   select * into v_carpeta from public.carpetas where id = p_carpeta_id for update;
   if not found then
     raise exception 'Carpeta no encontrada: %', p_carpeta_id;
+  end if;
+
+  if exists (select 1 from public.carpetas where parent_id = p_carpeta_id) then
+    raise exception 'La carpeta "%" tiene % subcarpeta(s): bórralas o muévelas antes',
+      v_carpeta.nombre, (select count(*) from public.carpetas where parent_id = p_carpeta_id);
   end if;
 
   select coalesce(array_agg(id), '{}') into v_docs from public.documentos where folder_id = p_carpeta_id;
@@ -534,10 +623,69 @@ begin
 end;
 $$;
 
+-- Mueve una SUBCARPETA a otra carpeta raíz de la misma empresa. Sus
+-- documentos van con ella sin tocarse: siguen apuntando al mismo
+-- folder_id y la empresa no cambia. Ni raíces, ni a WhatsApp, ni entre
+-- empresas. Si en el destino ya hay una subcarpeta con ese nombre no se
+-- fusionan (una fusión silenciosa no se puede deshacer): error y que se
+-- renombre una antes. Las comprobaciones de aquí dan mensajes claros; las
+-- garantías de verdad son la FK carpetas_padre_fkey, el índice único entre
+-- hermanas y carpetas_proteger.
+create or replace function public.mover_carpeta(p_carpeta_id uuid, p_nuevo_padre uuid)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_carpeta public.carpetas%rowtype;
+  v_destino public.carpetas%rowtype;
+begin
+  if not public.is_admin() then
+    raise exception 'No autorizado';
+  end if;
+
+  select * into v_carpeta from public.carpetas where id = p_carpeta_id for update;
+  if not found then
+    raise exception 'Carpeta no encontrada: %', p_carpeta_id;
+  end if;
+  if v_carpeta.parent_id is null then
+    raise exception 'Solo se pueden mover subcarpetas; "%" es una carpeta raíz', v_carpeta.nombre;
+  end if;
+  if p_nuevo_padre is null then
+    raise exception 'Hace falta una carpeta destino';
+  end if;
+  if p_nuevo_padre = v_carpeta.parent_id then
+    return;
+  end if;
+
+  select * into v_destino from public.carpetas where id = p_nuevo_padre;
+  if not found then
+    raise exception 'Carpeta destino no encontrada: %', p_nuevo_padre;
+  end if;
+  if v_destino.empresa_id is distinct from v_carpeta.empresa_id then
+    raise exception 'La carpeta destino tiene que ser de la misma empresa';
+  end if;
+  if v_destino.parent_id is not null then
+    raise exception 'El destino tiene que ser una carpeta raíz: "%" ya es una subcarpeta', v_destino.nombre;
+  end if;
+  if v_destino.system_key = 'whatsapp' then
+    raise exception 'La carpeta WhatsApp no admite subcarpetas';
+  end if;
+  if exists (select 1 from public.carpetas
+             where parent_id = p_nuevo_padre and id <> p_carpeta_id
+               and lower(btrim(nombre)) = lower(btrim(v_carpeta.nombre))) then
+    raise exception 'Ya existe "%" en "%": renombra una de las dos antes', v_carpeta.nombre, v_destino.nombre;
+  end if;
+
+  update public.carpetas set parent_id = p_nuevo_padre where id = p_carpeta_id;
+end;
+$$;
+
 -- ============================================================
 -- Comprobar tras ejecutar:
 --   select * from public.carpetas limit 10;
 --   select proname from pg_proc where proname in
 --     ('empresa_principal_de','sembrar_carpetas_por_defecto','carpeta_whatsapp',
---      'documentos_resolver_carpeta','vincular_conversacion','mover_documentos','borrar_carpeta');
+--      'documentos_resolver_carpeta','vincular_conversacion','mover_documentos','borrar_carpeta',
+--      'mover_carpeta');
 -- ============================================================
