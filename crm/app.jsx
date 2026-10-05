@@ -598,13 +598,14 @@ function DeleteDocModal({doc, onClose, onDeleted, toast}){
   </Modal>;
 }
 
-// Mover un documento: el destino es obligatorio (no existe "Sin carpeta").
-// Por defecto, a otra carpeta de la misma empresa. "Mover a otra empresa"
-// es para corregir un documento que acabó en la sociedad equivocada: la
-// carpeta elegida decide la empresa (mover_documentos). Empresas ofrecidas:
-// las del contacto que lo aportó y las del contexto (p. ej. las del
-// contacto cuya ficha se está viendo) — no todas las del CRM, para que
-// sacar un documento de una sociedad sea siempre hacia una relacionada.
+// Mover un documento: el destino es obligatorio (no existe "Sin carpeta")
+// y puede ser una raíz o una subcarpeta. Por defecto, a otra carpeta de la
+// misma empresa. "Mover a otra empresa" es para corregir un documento que
+// acabó en la sociedad equivocada: la carpeta elegida decide la empresa
+// (mover_documentos). Empresas ofrecidas: las del contacto que lo aportó y
+// las del contexto (p. ej. las del contacto cuya ficha se está viendo) — no
+// todas las del CRM, para que sacar un documento de una sociedad sea
+// siempre hacia una relacionada.
 function MoveDocModal({doc, carpetas, contextEmpresaIds, onClose, onMoved, toast}){
   const empresaIds = Array.from(new Set([doc.empresa_id,
     ...(doc.aportado_por ? CRM.empresasForContact(doc.aportado_por).map(x=>x.empresa.id) : []),
@@ -620,14 +621,15 @@ function MoveDocModal({doc, carpetas, contextEmpresaIds, onClose, onMoved, toast
     CRM.loadCarpetasEmpresa(Auth.client, empresaId).then(ks=>{ if(alive) setOtras(ks); }).catch(e=>{ if(alive){ setOtras([]); toast("No se pudieron cargar las carpetas: "+CRM.docErrorMessage(e)); } });
     return ()=>{alive=false;};
   },[empresaId]);
-  const lista = otraEmpresa ? (otras||[]) : carpetas.filter(k=>k.id!==doc.folder_id);
+  const lista = otraEmpresa ? (otras||[]) : carpetas;
+  const opciones = CRM.carpetaOpciones(lista, otraEmpresa ? null : doc.folder_id);
   const go=async()=>{
     if(!dest) return;
     setBusy(true);
     try{
       await CRM.moverDocumentos(Auth.client, [doc.id], dest);
-      const k = lista.find(x=>x.id===dest)||{};
-      toast("Movido a "+k.nombre+(otraEmpresa ? " de "+CRM.empresaById[empresaId].razon_social : ""));
+      const k = lista.find(x=>x.id===dest);
+      toast("Movido a "+CRM.carpetaRuta(lista, k)+(otraEmpresa ? " de "+CRM.empresaById[empresaId].razon_social : ""));
       onMoved();
     }catch(e){
       toast("No se pudo mover: "+CRM.docErrorMessage(e));
@@ -636,22 +638,24 @@ function MoveDocModal({doc, carpetas, contextEmpresaIds, onClose, onMoved, toast
   };
   const empresaActual = CRM.empresaById[doc.empresa_id];
   return <Modal title="Mover documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!dest}>{busy?"Moviendo…":"Mover"}</button></>}>
-    <p className="muted" style={{marginBottom:14}}><b>{docName(doc)}</b> está en <b>{doc.folder_name||"—"}</b>{empresaActual ? <> de <b>{empresaActual.razon_social}</b></> : null}.</p>
+    <p className="muted" style={{marginBottom:14}}><b>{docName(doc)}</b> está en <b>{doc.folder_path||doc.folder_name||"—"}</b>{empresaActual ? <> de <b>{empresaActual.razon_social}</b></> : null}.</p>
     {empresaIds.length>1 && <Field label="Empresa"><select className="inp" value={empresaId} onChange={e=>{ setEmpresaId(e.target.value); setDest(""); }} disabled={busy}>
       {empresaIds.map(id=><option key={id} value={id}>{CRM.empresaById[id].razon_social}{id===doc.empresa_id?" (actual)":""}</option>)}
     </select></Field>}
     {otraEmpresa && <p className="muted" style={{fontSize:12.5,marginTop:-8,marginBottom:12}}>El documento dejará de ser de {empresaActual ? empresaActual.razon_social : "su empresa actual"} y pasará a {CRM.empresaById[empresaId].razon_social}.</p>}
     {otraEmpresa && otras===null ? <div className="muted">Cargando carpetas…</div>
-    : lista.length ? <Field label="Carpeta destino"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)} disabled={busy}>
+    : opciones.length ? <Field label="Carpeta destino"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)} disabled={busy}>
       <option value="" disabled>— Elige carpeta —</option>
-      {lista.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+      {opciones.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
     </select></Field> : <p className="muted">{otraEmpresa ? "Esa empresa no tiene carpetas." : "Esta empresa no tiene otra carpeta. Crea una primero."}</p>}
   </Modal>;
 }
 
 // Crear o renombrar carpeta. Valida antes de enviar con el mismo criterio
-// que la BD (CRM.carpetaNombreIssue); si aun así la BD rechaza (p. ej. otra
-// persona creó el mismo nombre a la vez), se muestra su error traducido.
+// que la BD (CRM.carpetaNombreIssue); "carpetas" son las HERMANAS de la
+// carpeta (la unicidad de nombre es entre hermanas). Si aun así la BD
+// rechaza (p. ej. otra persona creó el mismo nombre a la vez), se muestra
+// su error traducido.
 function FolderNameModal({title, initial, carpetas, exceptId, note, onClose, onSave}){
   const [nombre,setNombre]=uState(initial||"");
   const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
@@ -671,14 +675,49 @@ function FolderNameModal({title, initial, carpetas, exceptId, note, onClose, onS
   </Modal>;
 }
 
-// Borrar carpeta. Vacía: confirmación. Con documentos: destino obligatorio
-// (borrar_carpeta los mueve y borra en una transacción). La carpeta
-// WhatsApp con documentos no llega aquí: el botón no se ofrece.
-function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast}){
-  const opciones = carpetas.filter(k=>k.id!==folder.id);
+// Mover una subcarpeta a otra carpeta raíz (RPC mover_carpeta). Sus
+// documentos van con ella. Destinos: las raíces que admiten subcarpetas
+// (no WhatsApp), salvo la actual. Si una ya tiene una subcarpeta con el
+// mismo nombre se ofrece deshabilitada y explicando por qué: no se fusiona
+// nada. La BD repite la comprobación por si alguien la crea a la vez.
+function MoveFolderModal({folder, carpetas, onClose, onMoved, toast}){
+  const mismoNombre = (a,b)=>a.trim().toLowerCase()===b.trim().toLowerCase();
+  const destinos = CRM.carpetaRaices(carpetas).filter(r=>r.admite_subcarpetas && r.id!==folder.parent_id)
+    .map(r=>({r, choca: CRM.carpetaHijas(carpetas, r.id).some(h=>mismoNombre(h.nombre, folder.nombre))}));
+  const madre = carpetas.find(k=>k.id===folder.parent_id);
   const [dest,setDest]=uState("");
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const go=async()=>{
+    if(!dest) return;
+    setBusy(true); setErr(null);
+    try{
+      await CRM.moverCarpeta(Auth.client, folder.id, dest);
+      toast("«"+folder.nombre+"» movida a "+(carpetas.find(k=>k.id===dest)||{}).nombre);
+      onMoved();
+    }catch(e){ setErr(CRM.docErrorMessage(e)); setBusy(false); }
+  };
+  return <Modal title="Mover subcarpeta" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!dest}>{busy?"Moviendo…":"Mover"}</button></>}>
+    <p className="muted" style={{marginBottom:14}}><b>{folder.nombre}</b> está dentro de <b>{madre ? madre.nombre : "—"}</b>. Sus documentos se mueven con ella.</p>
+    {destinos.length ? <Field label="Mover dentro de"><select className="inp" value={dest} onChange={e=>{ setDest(e.target.value); setErr(null); }} disabled={busy}>
+      <option value="" disabled>— Elige carpeta —</option>
+      {destinos.map(({r,choca})=><option key={r.id} value={r.id} disabled={choca}>{r.nombre}{choca ? " — ya tiene «"+folder.nombre+"»" : ""}</option>)}
+    </select></Field> : <p className="muted">No hay otra carpeta raíz que admita subcarpetas.</p>}
+    {destinos.some(x=>x.choca) && <p className="muted" style={{fontSize:12.5,marginTop:-8}}>Las carpetas que ya tienen una subcarpeta con este nombre no se pueden elegir: renombra una de las dos antes. No se fusionan.</p>}
+    {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:8}}>{err}</p>}
+  </Modal>;
+}
+
+// Borrar carpeta. Vacía: confirmación. Con documentos: destino obligatorio
+// (borrar_carpeta los mueve y borra en una transacción), cualquier carpeta
+// de la empresa en cualquier nivel; si es una subcarpeta, su madre viene
+// preseleccionada. No llegan aquí la WhatsApp con documentos ni una carpeta
+// con subcarpetas: el botón no se ofrece.
+function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast}){
+  const opciones = CRM.carpetaOpciones(carpetas, folder.id);
+  const [dest,setDest]=uState(folder.parent_id && opciones.some(o=>o.id===folder.parent_id) ? folder.parent_id : "");
   const [busy,setBusy]=uState(false);
   const needsDest = count>0;
+  const ruta = CRM.carpetaRuta(carpetas, folder);
   const go=async()=>{
     if(needsDest && !dest) return;
     setBusy(true);
@@ -692,12 +731,12 @@ function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast})
     }
   };
   return <Modal title="Eliminar carpeta" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--danger" onClick={go} disabled={busy||(needsDest && !dest)}>{busy?"Eliminando…":(needsDest?"Mover y eliminar":"Eliminar carpeta")}</button></>}>
-    {!needsDest && <p className="muted">Se eliminará la carpeta <b>{folder.nombre}</b>. Está vacía.</p>}
+    {!needsDest && <p className="muted">Se eliminará la carpeta <b>{ruta}</b>. Está vacía.</p>}
     {needsDest && <>
-      <p className="muted" style={{marginBottom:14}}>La carpeta <b>{folder.nombre}</b> tiene {count} documento{count===1?"":"s"}. Elige a qué carpeta moverlos antes de eliminarla.</p>
+      <p className="muted" style={{marginBottom:14}}>La carpeta <b>{ruta}</b> tiene {count} documento{count===1?"":"s"}. Elige a qué carpeta moverlos antes de eliminarla.</p>
       {opciones.length ? <Field label="Mover los documentos a"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)}>
         <option value="" disabled>— Elige carpeta —</option>
-        {opciones.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+        {opciones.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
       </select></Field> : <p className="muted">No hay otra carpeta a la que moverlos. Crea una primero.</p>}
     </>}
   </Modal>;
@@ -706,10 +745,12 @@ function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast})
 // Subida manual (ver CRM.subirDocumentoManual: fichero primero, fila
 // después, 'stored' directo). El límite de 15 MB se avisa al elegir el
 // archivo, antes de intentar nada. supabase-js no da progreso de subida,
-// así que se muestra un estado "Subiendo…" con barra indeterminada.
+// así que se muestra un estado "Subiendo…" con barra indeterminada. El
+// destino por defecto es la carpeta que se está viendo (raíz o subcarpeta).
 function UploadDocModal({empresaId, carpetas, defaultFolderId, user, onClose, onUploaded, toast}){
+  const opciones = CRM.carpetaOpciones(carpetas);
   const [file,setFile]=uState(null);
-  const [folderId,setFolderId]=uState(defaultFolderId || (carpetas[0]&&carpetas[0].id) || "");
+  const [folderId,setFolderId]=uState(defaultFolderId || (opciones[0]&&opciones[0].id) || "");
   const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
   const tooBig = file && file.size>CRM.MAX_DOCUMENTO_BYTES;
   const go=async()=>{
@@ -734,24 +775,26 @@ function UploadDocModal({empresaId, carpetas, defaultFolderId, user, onClose, on
     </div></Field>
     {tooBig && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:-8}}>Este archivo ocupa {CRM.fmtBytes(file.size)} y el máximo es 15 MB. Comprímelo o divídelo antes de subirlo.</p>}
     <Field label="Carpeta"><select className="inp" value={folderId} onChange={e=>setFolderId(e.target.value)} disabled={busy}>
-      {carpetas.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+      {opciones.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
     </select></Field>
     {busy && <div className="upload-progress" role="progressbar" aria-label="Subiendo"><div className="upload-progress__bar"></div></div>}
     {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:8}}>{err}</p>}
   </Modal>;
 }
 
-// Documentos de una EMPRESA: carpetas (chips), documentos de la carpeta
-// elegida, subida manual y gestión de carpetas. La usan la ficha de empresa
-// y la pestaña de la ficha de contacto (por la empresa elegida, ver
-// ContactDocsTab). onCount: avisa a la ficha del total para el contador de
-// la pestaña. contextEmpresaIds: otras empresas a las que se puede mover un
-// documento (ver MoveDocModal).
+// Documentos de una EMPRESA, en dos niveles. Las carpetas raíz son chips
+// (con el total, incluidas sus subcarpetas); al abrir una raíz se ven sus
+// subcarpetas como filas encima de los documentos sueltos; al abrir una
+// subcarpeta, la cabecera muestra la ruta ("Fiscal › 2026") con vuelta a la
+// raíz. No hay más niveles (lo garantiza la BD), así que no hace falta un
+// árbol. La usan la ficha de empresa y la pestaña de la ficha de contacto
+// (ContactDocsTab). onCount: total para el contador de la pestaña.
+// contextEmpresaIds: otras empresas a las que se puede mover un documento.
 function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
   const [data,setData]=uState(null); // {carpetas, docs}; null = cargando
   const [loadErr,setLoadErr]=uState(null);
-  const [sel,setSel]=uState(null);
-  const [modal,setModal]=uState(null); // {kind:"upload"|"new"|"rename"|"delFolder"|"move"|"delDoc"|"preview"|"renameDoc", doc?}
+  const [sel,setSel]=uState(null); // carpeta abierta: raíz o subcarpeta
+  const [modal,setModal]=uState(null); // {kind:"upload"|"new"|"newSub"|"rename"|"delFolder"|"moveFolder"|"move"|"delDoc"|"preview"|"renameDoc", doc?}
   const [download,busyId]=useDocDownload(toast);
   const isMobile = useIsMobile();
 
@@ -760,8 +803,9 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
       const r = await CRM.loadDocumentosEmpresa(Auth.client, empresaId);
       setData(r); setLoadErr(null);
       if(onCount) onCount(r.docs.length);
-      // Si la carpeta elegida ya no existe (borrada), vuelve a la primera.
-      setSel(s=> r.carpetas.some(k=>k.id===s) ? s : (r.carpetas[0] ? r.carpetas[0].id : null));
+      // Si la carpeta abierta ya no existe (borrada), vuelve a la primera raíz.
+      const primera = CRM.carpetaRaices(r.carpetas)[0];
+      setSel(s=> r.carpetas.some(k=>k.id===s) ? s : (primera ? primera.id : null));
     }catch(e){ setLoadErr(CRM.docErrorMessage(e)); }
   };
   uEffect(()=>{ setData(null); setSel(null); reload(); },[empresaId]);
@@ -770,20 +814,35 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
   if(!data) return <div className="muted" style={{padding:16}}>Cargando documentos…</div>;
 
   const {carpetas, docs} = data;
-  const countOf = (id)=>docs.filter(d=>d.folder_id===id).length;
+  const raices = CRM.carpetaRaices(carpetas);
+  const directos = (id)=>docs.filter(d=>d.folder_id===id).length;
+  const total = (r)=>directos(r.id) + CRM.carpetaHijas(carpetas, r.id).reduce((a,h)=>a+directos(h.id),0);
   const folder = carpetas.find(k=>k.id===sel) || null;
+  const esSub = !!(folder && folder.parent_id);
+  const raiz = folder ? (esSub ? carpetas.find(k=>k.id===folder.parent_id) : folder) : null;
+  const hijas = folder && !esSub ? CRM.carpetaHijas(carpetas, folder.id) : [];
   const folderDocs = folder ? docs.filter(d=>d.folder_id===folder.id) : [];
-  const folderCount = folder ? folderDocs.length : 0;
-  // Carpeta WhatsApp con documentos: ni renombrar ni borrar (lo impone la
-  // BD); no se ofrece en la interfaz.
-  const locked = folder && folder.is_whatsapp && folderCount>0;
+  const folderCount = folderDocs.length;
+  const enHijas = hijas.reduce((a,h)=>a+directos(h.id),0);
+  // Lo que la BD no deja hacer no se ofrece (y se explica):
+  //   - WhatsApp con documentos: ni renombrar ni borrar;
+  //   - una carpeta con subcarpetas: no se borra (hay que vaciarla antes);
+  //   - subcarpetas solo en raíces que no sean WhatsApp;
+  //   - mover solo subcarpetas, y solo si hay otra raíz que las admita.
+  const lockedWa = folder && folder.is_whatsapp && folderCount>0;
+  const conHijas = hijas.length>0;
+  const puedeRenombrar = folder && !lockedWa;
+  const puedeBorrar = folder && !lockedWa && !conHijas;
+  const puedeSubcarpeta = folder && !esSub && folder.admite_subcarpetas;
+  const puedeMoverCarpeta = esSub && raices.some(r=>r.admite_subcarpetas && r.id!==folder.parent_id);
   const close=()=>setModal(null);
   const closeAndReload=()=>{ setModal(null); reload(); };
+  const btnLabel = (txt)=> !isMobile && txt;
 
   return <div className="wrap-gap">
     <div className="doc-folders">
-      {carpetas.map(k=><button key={k.id} className={"chip"+(k.id===sel?" active":"")} onClick={()=>setSel(k.id)}>
-        <Icon name={k.is_whatsapp?"whatsapp":"folder"} size={14}/>{k.nombre}<span className="chip__count">{countOf(k.id)}</span>
+      {raices.map(k=><button key={k.id} className={"chip"+(raiz && raiz.id===k.id?" active":"")} onClick={()=>setSel(k.id)}>
+        <Icon name={k.is_whatsapp?"whatsapp":"folder"} size={14}/>{k.nombre}<span className="chip__count">{total(k)}</span>
       </button>)}
       <button className="chip" onClick={()=>setModal({kind:"new"})}><Icon name="plus" size={14}/>Nueva carpeta</button>
     </div>
@@ -791,16 +850,35 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
     {!folder ? <div className="card"><div className="card__body"><Empty icon="folder" title="Sin carpetas" sub="Crea una carpeta para empezar a subir documentos." action={<button className="btn btn--sm btn--primary" onClick={()=>setModal({kind:"new"})}><Icon name="plus" size={14}/>Nueva carpeta</button>}/></div></div> :
     <div className="card">
       <div className="card__head doc-folder-head">
-        <Icon name={folder.is_whatsapp?"whatsapp":"folder"} size={16} style={{color:"var(--accent)"}}/>
-        <h3 className="doc-folder-head__title">{folder.nombre}</h3>
+        {esSub ? <div className="doc-crumbs">
+          <button className="btn btn--sm btn--ghost doc-crumbs__back" title={"Volver a "+raiz.nombre} aria-label={"Volver a "+raiz.nombre} onClick={()=>setSel(raiz.id)}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/></button>
+          <a className="doc-link doc-crumbs__root" onClick={()=>setSel(raiz.id)}>{raiz.nombre}</a>
+          <span className="doc-crumbs__sep" aria-hidden="true">›</span>
+          <h3 className="doc-folder-head__title">{folder.nombre}</h3>
+        </div> : <>
+          <Icon name={folder.is_whatsapp?"whatsapp":"folder"} size={16} style={{color:"var(--accent)"}}/>
+          <h3 className="doc-folder-head__title">{folder.nombre}</h3>
+        </>}
         <div className="row doc-folder-head__actions" style={{gap:6}}>
-          {!locked && <button className="btn btn--sm btn--ghost" title="Renombrar carpeta" onClick={()=>setModal({kind:"rename"})}><Icon name="edit" size={14}/>{!isMobile && "Renombrar"}</button>}
-          {!locked && <button className="btn btn--sm btn--ghost" title="Eliminar carpeta" onClick={()=>setModal({kind:"delFolder"})}><Icon name="trash" size={14}/>{!isMobile && "Eliminar"}</button>}
+          {puedeSubcarpeta && <button className="btn btn--sm btn--ghost" title="Nueva subcarpeta" onClick={()=>setModal({kind:"newSub"})}><Icon name="plus" size={14}/>{btnLabel("Subcarpeta")}</button>}
+          {puedeRenombrar && <button className="btn btn--sm btn--ghost" title="Renombrar carpeta" onClick={()=>setModal({kind:"rename"})}><Icon name="edit" size={14}/>{btnLabel("Renombrar")}</button>}
+          {puedeMoverCarpeta && <button className="btn btn--sm btn--ghost" title="Mover a otra carpeta" onClick={()=>setModal({kind:"moveFolder"})}><Icon name="folder" size={14}/>{btnLabel("Mover")}</button>}
+          {puedeBorrar && <button className="btn btn--sm btn--ghost" title="Eliminar carpeta" onClick={()=>setModal({kind:"delFolder"})}><Icon name="trash" size={14}/>{btnLabel("Eliminar")}</button>}
           <button className="btn btn--sm btn--primary" onClick={()=>setModal({kind:"upload"})}><Icon name="upload" size={14}/>Subir documento</button>
         </div>
-        {locked && <div className="doc-folder-head__note muted">Carpeta del sistema: no se puede renombrar ni eliminar mientras tenga documentos. Puedes mover sus documentos a otra carpeta.</div>}
+        {lockedWa && <div className="doc-folder-head__note muted">Carpeta del sistema: no se puede renombrar ni eliminar mientras tenga documentos. Puedes mover sus documentos a otra carpeta.</div>}
+        {!lockedWa && conHijas && <div className="doc-folder-head__note muted">No se puede eliminar mientras tenga subcarpetas: bórralas o muévelas a otra carpeta antes, una a una.</div>}
       </div>
       <div className="card__body" style={{paddingTop:4}}>
+        {conHijas && <div className="muted doc-folder-summary">{folderCount} documento{folderCount===1?"":"s"} aquí · {enHijas} en subcarpetas</div>}
+        {hijas.map(h=>{ const n=directos(h.id); return <button key={h.id} className="lrow doc-subfolder" onClick={()=>setSel(h.id)}>
+          <div className="lrow__ico"><Icon name="folder" size={17}/></div>
+          <div className="lrow__main">
+            <div className="lrow__title doc-row__name" title={h.nombre}>{h.nombre}</div>
+            <div className="lrow__sub">{n} documento{n===1?"":"s"}</div>
+          </div>
+          <Icon name="chevronR" size={16} style={{color:"var(--muted)",flex:"none"}}/>
+        </button>; })}
         {folderDocs.map(d=><div key={d.id} className="lrow doc-row">
           <div className="lrow__ico"><Icon name="documents" size={17}/></div>
           <div className="lrow__main">
@@ -816,18 +894,22 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
             onMove={(doc)=>setModal({kind:"move", doc})}
             onDelete={(doc)=>setModal({kind:"delDoc", doc})}/>
         </div>)}
-        {folderDocs.length===0 && <Empty icon="documents" title="Carpeta vacía" sub={folder.is_whatsapp ? "Aquí llegan los adjuntos de WhatsApp de los contactos que tienen esta empresa como principal." : null}/>}
+        {folderDocs.length===0 && !conHijas && <Empty icon="documents" title="Carpeta vacía" sub={folder.is_whatsapp ? "Aquí llegan los adjuntos de WhatsApp de los contactos que tienen esta empresa como principal." : null}/>}
       </div>
     </div>}
 
     {modal && modal.kind==="upload" && <UploadDocModal empresaId={empresaId} carpetas={carpetas} defaultFolderId={sel} user={user} toast={toast} onClose={close}
       onUploaded={(doc)=>{ setModal(null); if(doc.folder_id) setSel(doc.folder_id); reload(); }}/>}
-    {modal && modal.kind==="new" && <FolderNameModal title="Nueva carpeta" carpetas={carpetas} onClose={close}
+    {modal && modal.kind==="new" && <FolderNameModal title="Nueva carpeta" carpetas={CRM.carpetaHermanas(carpetas, null)} onClose={close}
       onSave={async(nombre)=>{ const k = await CRM.crearCarpeta(Auth.client, empresaId, nombre); toast("Carpeta creada"); setModal(null); setSel(k.id); reload(); }}/>}
-    {modal && modal.kind==="rename" && folder && <FolderNameModal title="Renombrar carpeta" initial={folder.nombre} carpetas={carpetas} exceptId={folder.id} onClose={close}
+    {modal && modal.kind==="newSub" && folder && <FolderNameModal title={"Nueva subcarpeta en "+folder.nombre} carpetas={CRM.carpetaHijas(carpetas, folder.id)} onClose={close}
+      onSave={async(nombre)=>{ await CRM.crearCarpeta(Auth.client, empresaId, nombre, folder.id); toast("Subcarpeta creada"); closeAndReload(); }}/>}
+    {modal && modal.kind==="rename" && folder && <FolderNameModal title="Renombrar carpeta" initial={folder.nombre} carpetas={CRM.carpetaHermanas(carpetas, folder.parent_id)} exceptId={folder.id} onClose={close}
       note={folder.is_whatsapp ? "Al renombrarla dejará de ser la carpeta del sistema: los próximos adjuntos de WhatsApp irán a una carpeta \"WhatsApp\" nueva." : null}
       onSave={async(nombre)=>{ await CRM.renombrarCarpeta(Auth.client, folder.id, nombre); toast("Carpeta renombrada"); closeAndReload(); }}/>}
-    {modal && modal.kind==="delFolder" && folder && <DeleteFolderModal folder={folder} count={folderCount} carpetas={carpetas} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
+    {modal && modal.kind==="delFolder" && folder && <DeleteFolderModal folder={folder} count={folderCount} carpetas={carpetas} toast={toast} onClose={close}
+      onDeleted={()=>{ setModal(null); setSel(folder.parent_id || null); reload(); }}/>}
+    {modal && modal.kind==="moveFolder" && folder && <MoveFolderModal folder={folder} carpetas={carpetas} toast={toast} onClose={close} onMoved={closeAndReload}/>}
     {modal && modal.kind==="move" && <MoveDocModal doc={modal.doc} carpetas={carpetas} contextEmpresaIds={contextEmpresaIds} toast={toast} onClose={close} onMoved={closeAndReload}/>}
     {modal && modal.kind==="delDoc" && <DeleteDocModal doc={modal.doc} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
     {modal && modal.kind==="preview" && <DocPreviewModal doc={modal.doc} onClose={close} onDownload={download} downloading={busyId===modal.doc.id}/>}
@@ -2680,15 +2762,16 @@ function Documents({nav, toast}){
     const ids = Array.from(new Set(all.map(d=>d.empresa_id).filter(Boolean)));
     return ids.map(id=>({id, label:docEmpresaLabel(id)||"Empresa sin cargar"})).sort((a,b)=>a.label.localeCompare(b.label,"es"));
   },[docs]);
-  const folderOpts = uMemo(()=>Array.from(new Set(all.map(d=>d.folder_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"es")),[docs]);
+  // Filtro por carpeta RAÍZ: "Fiscal" incluye lo que hay en "Fiscal / 2026".
+  const folderOpts = uMemo(()=>Array.from(new Set(all.map(d=>d.folder_root_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"es")),[docs]);
   const hasOrphans = all.some(d=>!d.empresa_id);
 
   const needle = q.trim().toLowerCase();
   const shown = all.filter(d=>{
     if(empresaF===DOC_FILTER_NONE ? !!d.empresa_id : (empresaF && d.empresa_id!==empresaF)) return false;
-    if(folderF===DOC_FILTER_NONE ? !!d.folder_id : (folderF && d.folder_name!==folderF)) return false;
+    if(folderF===DOC_FILTER_NONE ? !!d.folder_id : (folderF && d.folder_root_name!==folderF)) return false;
     if(!needle) return true;
-    return [docName(d), docEmpresaLabel(d.empresa_id)||"", docContactLabel(d.aportado_por)||"", d.folder_name].some(s=>s.toLowerCase().includes(needle));
+    return [docName(d), docEmpresaLabel(d.empresa_id)||"", docContactLabel(d.aportado_por)||"", d.folder_path].some(s=>s.toLowerCase().includes(needle));
   });
   const filtering = !!(needle || empresaF || folderF);
 
@@ -2734,7 +2817,7 @@ function Documents({nav, toast}){
                 <div className="lrow__ico"><Icon name="documents" size={17}/></div>
                 <div style={{flex:1,minWidth:0}}>
                   <div className="tbl__name doc-row__name">{docName(d)}</div>
-                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{empresaCell(d)}{d.folder_name ? " · "+d.folder_name : ""}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{empresaCell(d)}{d.folder_path ? " · "+d.folder_path : ""}</div>
                   <div className="muted" style={{fontSize:12,marginTop:2}}>{[CRM.fmtBytes(d.size_bytes), d.created, docAportadoLabel(d)].filter(Boolean).join(" · ")}</div>
                 </div>
               </div>
@@ -2752,7 +2835,7 @@ function Documents({nav, toast}){
       {shown.map(d=><tr key={d.id}>
         <td><div className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{docName(d)}</span><DocStatusBadge doc={d}/></div></td>
         <td className="tbl__sub">{empresaCell(d)}</td>
-        <td className="tbl__sub">{d.folder_name || "—"}</td>
+        <td className="tbl__sub">{d.folder_path || "—"}</td>
         <td className="tbl__sub">{CRM.fmtBytes(d.size_bytes)}</td>
         <td>{origin(d)}</td>
         <td className="tbl__sub">{d.created}</td>
@@ -2761,7 +2844,7 @@ function Documents({nav, toast}){
     </tbody></table>{shown.length===0 && <Empty icon="documents" title={filtering?"Ningún documento coincide":"Sin documentos"}/>}</div>
     )}
     {previewDoc && <DocPreviewModal doc={previewDoc} onClose={()=>setPreviewDoc(null)} onDownload={download} downloading={busyId===previewDoc.id}/>}
-    {renameDoc && <RenameDocModal doc={renameDoc} toast={toast} onClose={()=>setRenameDoc(null)} onRenamed={(upd)=>{ setRenameDoc(null); setDocs(ds=>(ds||[]).map(x=>x.id===upd.id?upd:x)); }}/>}
+    {renameDoc && <RenameDocModal doc={renameDoc} toast={toast} onClose={()=>setRenameDoc(null)} onRenamed={(upd)=>{ setRenameDoc(null); setDocs(ds=>(ds||[]).map(x=>x.id===upd.id?{...upd, folder_path:x.folder_path, folder_root_name:x.folder_root_name}:x)); }}/>}
     {delDoc && <DeleteDocModal doc={delDoc} toast={toast} onClose={()=>setDelDoc(null)} onDeleted={(doc)=>{ setDelDoc(null); setDocs(ds=>(ds||[]).filter(x=>x.id!==doc.id)); }}/>}
   </div>;
 }

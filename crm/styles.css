@@ -254,6 +254,18 @@ textarea.inp{resize:vertical;min-height:80px;}
 .doc-actions{flex:none;}
 .doc-link{color:var(--accent);cursor:pointer;font-weight:500;}
 .doc-filter{width:auto;min-width:180px;padding:8px 10px;}
+/* Subcarpetas: filas pulsables encima de los documentos sueltos de la
+   raíz, y la ruta "Fiscal › 2026" en la cabecera de una subcarpeta. Las
+   filas son <button> (se abren con teclado): se les quita el aspecto de
+   botón para que se vean como el resto de .lrow. */
+.doc-subfolder{width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);font:inherit;color:inherit;cursor:pointer;border-radius:0;}
+.doc-subfolder:hover{background:var(--mist);}
+.doc-subfolder:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.doc-folder-summary{font-size:12.5px;padding:10px 0 4px;}
+.doc-crumbs{display:flex;align-items:center;gap:6px;flex:1;min-width:0;}
+.doc-crumbs__back{flex:none;padding:4px 6px;}
+.doc-crumbs__root{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;}
+.doc-crumbs__sep{flex:none;color:var(--muted);}
 /* Visor de documentos. La imagen se ajusta a la caja sin deformarse y sin
    salirse de la pantalla; el PDF ocupa casi todo el alto disponible del
    modal (que ya limita a 90vh). */
@@ -518,6 +530,12 @@ body.no-scroll{overflow:hidden;}
   .doc-filter{flex:1 1 0;min-width:0;}
   .doc-folder-head__actions{flex-wrap:wrap;justify-content:flex-end;}
   .doc-row{gap:10px;}
+  /* Ruta en móvil: la cabecera se parte en dos líneas (ruta arriba,
+     acciones abajo) y la raíz se recorta antes que el nombre de la
+     subcarpeta abierta. La flecha de volver queda como área táctil grande. */
+  .doc-crumbs{flex-basis:100%;}
+  .doc-crumbs__back{padding:8px 10px;}
+  .doc-crumbs__root{max-width:35%;}
   /* Visor: menos margen alrededor para aprovechar el ancho, y la imagen un
      poco más baja para que el pie con "Descargar" quede a la vista. */
   .doc-preview__stage{padding:4px;}

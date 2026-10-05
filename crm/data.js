@@ -981,7 +981,7 @@
   // La carpeta se trae embebida por la FK compuesta (folder_id, empresa_id)
   // → carpetas(id, empresa_id); el nombre de la FK desambigua frente a la
   // de empresa_id → empresas.
-  var DOCUMENTO_SELECT = "*, carpeta:carpetas!documentos_carpeta_fkey(id, nombre, system_key)";
+  var DOCUMENTO_SELECT = "*, carpeta:carpetas!documentos_carpeta_fkey(id, nombre, system_key, parent_id)";
 
   function rowToDocumento(row){
     var carpeta = row.carpeta || null;
@@ -1000,6 +1000,14 @@
       folder_id: row.folder_id || null,
       folder_name: carpeta ? carpeta.nombre : "",
       folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),
+      // Subcarpetas: el embed solo trae la carpeta del documento, no su
+      // madre. folder_path ("Fiscal / 2026") y folder_root_name ("Fiscal")
+      // los completa aplicarRutas() con las carpetas de la empresa o con las
+      // madres que haga falta pedir (ver loadAllDocumentos). Mientras tanto,
+      // la ruta es el propio nombre.
+      folder_parent_id: carpeta ? (carpeta.parent_id || null) : null,
+      folder_path: carpeta ? carpeta.nombre : "",
+      folder_root_name: carpeta && !carpeta.parent_id ? carpeta.nombre : "",
       source: row.source,
       uploaded_by: row.uploaded_by || null,
       whatsapp_conversation_id: row.whatsapp_conversation_id || null,
@@ -1011,14 +1019,65 @@
     return {
       id: row.id,
       empresa_id: row.empresa_id,
+      parent_id: row.parent_id || null,
       nombre: row.nombre,
       system_key: row.system_key || null,
       is_whatsapp: row.system_key==="whatsapp",
+      // Calculada en la BD: raíz y no de sistema (crm/supabase-carpetas.sql, 1b).
+      admite_subcarpetas: row.admite_subcarpetas!==undefined ? !!row.admite_subcarpetas : (!row.parent_id && !row.system_key),
       orden: row.orden || 0
     };
   }
   function sortCarpetas(list){
     return list.sort(function(a,b){ return (a.orden-b.orden) || a.nombre.localeCompare(b.nombre, "es"); });
+  }
+
+  // ---- Árbol de dos niveles (crm/supabase-carpetas.sql, punto 1b) ----
+  // Raíces y subcarpetas salen de la misma lista plana; nunca hay más de
+  // dos niveles (lo garantiza la BD), así que no hace falta recursión.
+  function carpetaRaices(list){ return (list||[]).filter(function(k){ return !k.parent_id; }); }
+  function carpetaHijas(list, parentId){ return (list||[]).filter(function(k){ return k.parent_id===parentId; }); }
+  // Hermanas de una carpeta (o de una carpeta nueva bajo parentId): el
+  // ámbito de la unicidad de nombre (carpetas_hermanas_nombre_key).
+  function carpetaHermanas(list, parentId){ return (list||[]).filter(function(k){ return (k.parent_id||null)===(parentId||null); }); }
+  // "Fiscal / 2026" para una subcarpeta, "Fiscal" para una raíz.
+  function carpetaRuta(list, carpeta){
+    if(!carpeta) return "";
+    if(!carpeta.parent_id) return carpeta.nombre;
+    var madre = (list||[]).filter(function(k){ return k.id===carpeta.parent_id; })[0];
+    return (madre ? madre.nombre : "…")+" / "+carpeta.nombre;
+  }
+  // Opciones de un <select> de destino: cada raíz seguida de sus hijas,
+  // sangradas con espacios duros (un <option> no admite estilos de sangría
+  // fiables, sobre todo en móvil) y con la ruta completa. excludeId: la
+  // carpeta de origen, que no tiene sentido como destino.
+  function carpetaOpciones(list, excludeId){
+    var out = [];
+    carpetaRaices(list).forEach(function(r){
+      if(r.id!==excludeId) out.push({id:r.id, label:r.nombre, carpeta:r});
+      carpetaHijas(list, r.id).forEach(function(h){
+        if(h.id!==excludeId) out.push({id:h.id, label:"\u00a0\u00a0\u00a0\u00a0"+r.nombre+" / "+h.nombre, carpeta:h});
+      });
+    });
+    return out;
+  }
+  // Completa folder_path y folder_root_name de cada documento a partir de
+  // las carpetas conocidas (al menos las madres de sus carpetas).
+  function aplicarRutas(docs, carpetas){
+    var byId = {};
+    (carpetas||[]).forEach(function(k){ byId[k.id]=k; });
+    (docs||[]).forEach(function(d){
+      if(!d.folder_id) return;
+      var madre = d.folder_parent_id ? byId[d.folder_parent_id] : null;
+      if(d.folder_parent_id){
+        d.folder_path = (madre ? madre.nombre : "…")+" / "+d.folder_name;
+        d.folder_root_name = madre ? madre.nombre : "";
+      }else{
+        d.folder_path = d.folder_name;
+        d.folder_root_name = d.folder_name;
+      }
+    });
+    return docs;
   }
 
   // ---- Nombre, extensión y vista previa ----
@@ -1111,11 +1170,23 @@
   // Vista Documentos: todos, incluidos los adjuntos sin empresa (conversación
   // sin vincular). Lanza en caso de error para que la vista distinga
   // "vacío" de "no se pudo cargar".
+  // Las rutas ("Fiscal / 2026") necesitan el nombre de la madre de cada
+  // subcarpeta: se piden solo esas madres, en una segunda consulta pequeña,
+  // en vez de embeber la autorreferencia de carpetas.
   async function loadAllDocumentos(client){
     if(!client) return [];
     var res = await client.from("documentos").select(DOCUMENTO_SELECT).order("created_at",{ascending:false});
     if(res.error) throw res.error;
-    return (res.data||[]).map(rowToDocumento);
+    var docs = (res.data||[]).map(rowToDocumento);
+    var madres = Array.from(new Set(docs.map(function(d){ return d.folder_parent_id; }).filter(Boolean)));
+    if(madres.length){
+      var mres = await client.from("carpetas").select("id, nombre").in("id", madres);
+      if(mres.error) throw mres.error;
+      aplicarRutas(docs, mres.data||[]);
+    }else{
+      aplicarRutas(docs, []);
+    }
+    return docs;
   }
   // Ficha de empresa (y pestaña de la ficha de contacto, por la empresa
   // elegida): sus carpetas y sus documentos, en paralelo.
@@ -1127,9 +1198,10 @@
     ]);
     if(results[0].error) throw results[0].error;
     if(results[1].error) throw results[1].error;
+    var carpetas = sortCarpetas((results[0].data||[]).map(rowToCarpeta));
     return {
-      carpetas: sortCarpetas((results[0].data||[]).map(rowToCarpeta)),
-      docs: (results[1].data||[]).map(rowToDocumento)
+      carpetas: carpetas,
+      docs: aplicarRutas((results[1].data||[]).map(rowToDocumento), carpetas)
     };
   }
   // Solo las carpetas de una empresa (destinos de "Mover a otra empresa").
@@ -1145,15 +1217,21 @@
   // dejan pasar tal cual.
   function docErrorMessage(e){
     if(!e) return "Error desconocido";
+    var m = e.message || "";
+    if(e.code==="23505" && /hermanas_nombre/.test(m)) return "Ya existe una carpeta con ese nombre aquí.";
     if(e.code==="23505") return "Ya existe una carpeta con ese nombre en esta empresa.";
-    if(e.code==="23514" && /whatsapp_reservado/.test(e.message||"")) return "El nombre \"WhatsApp\" está reservado para la carpeta del sistema.";
-    if(e.code==="23514" && /nombre_check/.test(e.message||"")) return "El nombre de la carpeta debe tener entre 1 y 60 caracteres.";
-    return e.message || String(e);
+    if(e.code==="23503" && /carpetas_padre_fkey/.test(m)) return "Ahí no se puede crear una subcarpeta: solo las carpetas raíz admiten subcarpetas, y la de WhatsApp no.";
+    if(e.code==="23503" && /documentos_carpeta_fkey/.test(m)) return "Esa carpeta no es de la empresa del documento.";
+    if(e.code==="23514" && /sistema_es_raiz/.test(m)) return "La carpeta WhatsApp tiene que estar en la raíz.";
+    if(e.code==="23514" && /whatsapp_reservado/.test(m)) return "El nombre \"WhatsApp\" está reservado para la carpeta del sistema.";
+    if(e.code==="23514" && /nombre_check/.test(m)) return "El nombre de la carpeta debe tener entre 1 y 60 caracteres.";
+    return m || String(e);
   }
   // Validación previa de nombre de carpeta: mismo criterio que los checks
   // de carpetas (longitud, "WhatsApp" reservado) y que el índice único
-  // (sin distinguir mayúsculas ni espacios de los extremos). Devuelve el
-  // mensaje de error o null.
+  // (sin distinguir mayúsculas ni espacios de los extremos). La unicidad
+  // es entre hermanas: quien llama pasa en "carpetas" solo las hermanas
+  // (carpetaHermanas). Devuelve el mensaje de error o null.
   function carpetaNombreIssue(nombre, carpetas, exceptId){
     var n = (nombre||"").trim();
     if(!n) return "Escribe un nombre.";
@@ -1166,8 +1244,9 @@
 
   // Entre las 4 por defecto (orden 1-4) y WhatsApp (100): las creadas a mano
   // quedan detrás de las de serie y delante de la del sistema.
-  async function crearCarpeta(client, empresaId, nombre){
-    var res = await client.from("carpetas").insert({empresa_id: empresaId, nombre: nombre.trim(), orden: 50}).select().single();
+  // parentId: la raíz donde va una subcarpeta; null/undefined para una raíz.
+  async function crearCarpeta(client, empresaId, nombre, parentId){
+    var res = await client.from("carpetas").insert({empresa_id: empresaId, parent_id: parentId || null, nombre: nombre.trim(), orden: 50}).select().single();
     if(res.error) throw res.error;
     return rowToCarpeta(res.data);
   }
@@ -1180,6 +1259,14 @@
   // destinoId obligatorio si la carpeta tiene documentos (el RPC lo exige).
   async function borrarCarpeta(client, carpetaId, destinoId){
     var res = await client.rpc("borrar_carpeta", {p_carpeta_id: carpetaId, p_destino: destinoId || null});
+    if(res.error) throw res.error;
+  }
+  // Mueve una subcarpeta a otra raíz de la misma empresa (RPC mover_carpeta).
+  // Si el nombre choca en el destino, la BD responde con un mensaje claro y
+  // no fusiona nada.
+  async function moverCarpeta(client, carpetaId, nuevoPadreId){
+    if(!nuevoPadreId) throw new Error("Hace falta una carpeta destino.");
+    var res = await client.rpc("mover_carpeta", {p_carpeta_id: carpetaId, p_nuevo_padre: nuevoPadreId});
     if(res.error) throw res.error;
   }
   async function moverDocumentos(client, documentoIds, destinoId){
@@ -1743,6 +1830,8 @@
     MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosEmpresa:loadDocumentosEmpresa, loadCarpetasEmpresa:loadCarpetasEmpresa,
     docErrorMessage:docErrorMessage, carpetaNombreIssue:carpetaNombreIssue,
     crearCarpeta:crearCarpeta, renombrarCarpeta:renombrarCarpeta, borrarCarpeta:borrarCarpeta, moverDocumentos:moverDocumentos,
+    moverCarpeta:moverCarpeta, carpetaRaices:carpetaRaices, carpetaHijas:carpetaHijas, carpetaHermanas:carpetaHermanas,
+    carpetaRuta:carpetaRuta, carpetaOpciones:carpetaOpciones,
     subirDocumentoManual:subirDocumentoManual, borrarDocumento:borrarDocumento,
     docExtension:docExtension, docDisplayName:docDisplayName, docDownloadName:docDownloadName, docPreviewKind:docPreviewKind,
     documentoNombreFinal:documentoNombreFinal, documentoNombreIssue:documentoNombreIssue, renombrarDocumento:renombrarDocumento,
