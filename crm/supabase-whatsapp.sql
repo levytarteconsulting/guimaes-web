@@ -37,26 +37,15 @@ create index if not exists whatsapp_conversations_contact_idx on public.whatsapp
 create index if not exists whatsapp_conversations_owner_idx   on public.whatsapp_conversations (owner);
 
 -- ============================================================
--- Seguridad a nivel de fila (RLS) — solo administradores autenticados
--- (mismo criterio que contactos/deals; revisar cuando exista el área de cliente)
+-- Seguridad a nivel de fila (RLS) — solo administradores activos
 -- ============================================================
 alter table public.whatsapp_conversations enable row level security;
 
-drop policy if exists "admins leen whatsapp_conversations" on public.whatsapp_conversations;
-create policy "admins leen whatsapp_conversations"
-  on public.whatsapp_conversations for select to authenticated using (true);
-
-drop policy if exists "admins crean whatsapp_conversations" on public.whatsapp_conversations;
-create policy "admins crean whatsapp_conversations"
-  on public.whatsapp_conversations for insert to authenticated with check (true);
-
-drop policy if exists "admins actualizan whatsapp_conversations" on public.whatsapp_conversations;
-create policy "admins actualizan whatsapp_conversations"
-  on public.whatsapp_conversations for update to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran whatsapp_conversations" on public.whatsapp_conversations;
-create policy "admins borran whatsapp_conversations"
-  on public.whatsapp_conversations for delete to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 drop trigger if exists whatsapp_conversations_set_updated_at on public.whatsapp_conversations;
 create trigger whatsapp_conversations_set_updated_at
@@ -101,21 +90,11 @@ create unique index if not exists whatsapp_messages_wa_message_id_key
 -- ============================================================
 alter table public.whatsapp_messages enable row level security;
 
-drop policy if exists "admins leen whatsapp_messages" on public.whatsapp_messages;
-create policy "admins leen whatsapp_messages"
-  on public.whatsapp_messages for select to authenticated using (true);
-
-drop policy if exists "admins crean whatsapp_messages" on public.whatsapp_messages;
-create policy "admins crean whatsapp_messages"
-  on public.whatsapp_messages for insert to authenticated with check (true);
-
-drop policy if exists "admins actualizan whatsapp_messages" on public.whatsapp_messages;
-create policy "admins actualizan whatsapp_messages"
-  on public.whatsapp_messages for update to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran whatsapp_messages" on public.whatsapp_messages;
-create policy "admins borran whatsapp_messages"
-  on public.whatsapp_messages for delete to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 drop trigger if exists whatsapp_messages_set_updated_at on public.whatsapp_messages;
 create trigger whatsapp_messages_set_updated_at
@@ -148,21 +127,11 @@ create unique index if not exists whatsapp_templates_name_language_key
 -- ============================================================
 alter table public.whatsapp_templates enable row level security;
 
-drop policy if exists "admins leen whatsapp_templates" on public.whatsapp_templates;
-create policy "admins leen whatsapp_templates"
-  on public.whatsapp_templates for select to authenticated using (true);
-
-drop policy if exists "admins crean whatsapp_templates" on public.whatsapp_templates;
-create policy "admins crean whatsapp_templates"
-  on public.whatsapp_templates for insert to authenticated with check (true);
-
-drop policy if exists "admins actualizan whatsapp_templates" on public.whatsapp_templates;
-create policy "admins actualizan whatsapp_templates"
-  on public.whatsapp_templates for update to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran whatsapp_templates" on public.whatsapp_templates;
-create policy "admins borran whatsapp_templates"
-  on public.whatsapp_templates for delete to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 -- ============================================================
 -- Pieza 2 — plantillas: enviar plantillas de verdad requiere el array

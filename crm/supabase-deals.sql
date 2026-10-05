@@ -29,26 +29,15 @@ create index if not exists deals_contact_idx on public.deals (contact_id);
 create index if not exists deals_stage_idx   on public.deals (stage);
 
 -- ============================================================
--- Seguridad a nivel de fila (RLS) — solo administradores autenticados
--- (mismo criterio que contactos; revisar cuando exista el área de cliente)
+-- Seguridad a nivel de fila (RLS) — solo administradores activos
 -- ============================================================
 alter table public.deals enable row level security;
 
-drop policy if exists "admins leen deals" on public.deals;
-create policy "admins leen deals"
-  on public.deals for select to authenticated using (true);
-
-drop policy if exists "admins crean deals" on public.deals;
-create policy "admins crean deals"
-  on public.deals for insert to authenticated with check (true);
-
-drop policy if exists "admins actualizan deals" on public.deals;
-create policy "admins actualizan deals"
-  on public.deals for update to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran deals" on public.deals;
-create policy "admins borran deals"
-  on public.deals for delete to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 drop trigger if exists deals_set_updated_at on public.deals;
 create trigger deals_set_updated_at

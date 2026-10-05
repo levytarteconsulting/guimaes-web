@@ -31,28 +31,17 @@ create index if not exists tareas_assigned_idx on public.tareas (assigned_to);
 -- Seguridad a nivel de fila (RLS) — esto es lo que faltaba y explica por qué
 -- la tabla seguía en 0 filas pese a que el código ya escribía en ella: sin
 -- RLS habilitado (o sin políticas), PostgREST bloquea el acceso.
--- Mismo criterio que contactos/deals: mientras los únicos autenticados sean
--- administradores del despacho, "authenticated = acceso total" es seguro —
--- la vista "Todas" de Tareas depende de que cualquier admin vea las de los
--- demás, no solo las suyas.
+-- Mismo criterio que contactos/deals: cualquier administrador activo ve y
+-- edita todas las tareas — la vista "Todas" de Tareas depende de que
+-- cualquier admin vea las de los demás, no solo las suyas.
 -- ============================================================
 alter table public.tareas enable row level security;
 
-drop policy if exists "admins leen tareas" on public.tareas;
-create policy "admins leen tareas"
-  on public.tareas for select to authenticated using (true);
-
-drop policy if exists "admins crean tareas" on public.tareas;
-create policy "admins crean tareas"
-  on public.tareas for insert to authenticated with check (true);
-
-drop policy if exists "admins actualizan tareas" on public.tareas;
-create policy "admins actualizan tareas"
-  on public.tareas for update to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran tareas" on public.tareas;
-create policy "admins borran tareas"
-  on public.tareas for delete to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 drop trigger if exists tareas_set_updated_at on public.tareas;
 create trigger tareas_set_updated_at

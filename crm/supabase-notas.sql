@@ -23,8 +23,8 @@ create index if not exists notas_deal_idx    on public.notas (deal_id);
 
 -- ============================================================
 -- Seguridad a nivel de fila (RLS)
--- Mismo criterio que el resto de tablas del CRM: cualquier admin autenticado
--- puede leer/crear/borrar cualquier nota. "Solo puedes borrar las tuyas" se
+-- Mismo criterio que el resto de tablas del CRM: cualquier administrador
+-- activo puede leer/crear/borrar cualquier nota. "Solo puedes borrar las tuyas" se
 -- aplica en la UI (crm/app.jsx), no aquí — author guarda un id de CRM.USERS,
 -- no el auth.uid() de Supabase, y no hay tabla de perfiles que mapee uno con
 -- otro, así que RLS no puede comprobar "es tuya" a nivel de fila hoy. Sin
@@ -32,14 +32,9 @@ create index if not exists notas_deal_idx    on public.notas (deal_id);
 -- ============================================================
 alter table public.notas enable row level security;
 
-drop policy if exists "admins leen notas" on public.notas;
-create policy "admins leen notas"
-  on public.notas for select to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
-drop policy if exists "admins crean notas" on public.notas;
-create policy "admins crean notas"
-  on public.notas for insert to authenticated with check (true);
-
-drop policy if exists "admins borran notas" on public.notas;
-create policy "admins borran notas"
-  on public.notas for delete to authenticated using (true);

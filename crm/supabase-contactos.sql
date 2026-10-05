@@ -43,31 +43,11 @@ create index if not exists contactos_email_idx     on public.contactos (email);
 -- ============================================================
 alter table public.contactos enable row level security;
 
--- IMPORTANTE: mientras los ÚNICOS usuarios autenticados sean los
--- administradores del despacho, "authenticated = acceso total" es seguro.
--- Cuando en la fase 2 los clientes inicien sesión en el área de cliente,
--- HAY QUE cambiar estas políticas para que cada cliente solo vea su propia
--- ficha. No dejar esto tal cual cuando exista el área de cliente.
-
-drop policy if exists "admins leen contactos" on public.contactos;
-create policy "admins leen contactos"
-  on public.contactos for select
-  to authenticated using (true);
-
-drop policy if exists "admins crean contactos" on public.contactos;
-create policy "admins crean contactos"
-  on public.contactos for insert
-  to authenticated with check (true);
-
-drop policy if exists "admins actualizan contactos" on public.contactos;
-create policy "admins actualizan contactos"
-  on public.contactos for update
-  to authenticated using (true) with check (true);
-
-drop policy if exists "admins borran contactos" on public.contactos;
-create policy "admins borran contactos"
-  on public.contactos for delete
-  to authenticated using (true);
+-- Políticas: las crea crm/supabase-rls-solo-admins.sql (solo administradores
+-- activos, public.is_admin()), única fuente de las políticas de esta tabla.
+-- Antes se definían aquí como "using (true)" — abiertas a cualquier sesión —
+-- y volver a ejecutar este fichero las recreaba. Sin aquel fichero la tabla
+-- queda con RLS activa y sin políticas: nadie la lee (falla cerrado).
 
 -- Mantener updated_at al día automáticamente en cada edición
 create or replace function public.set_updated_at()

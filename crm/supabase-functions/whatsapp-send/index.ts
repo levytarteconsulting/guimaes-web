@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Método no permitido." }), { status: 405, headers: corsHeaders });
     }
 
-    // ---- Autenticación: solo agentes logueados en el CRM ----
+    // ---- Autenticación: solo administradores activos del CRM ----
     const authHeader = req.headers.get("Authorization") || "";
     const url = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -143,6 +143,28 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) {
       return new Response(JSON.stringify({ error: "No autorizado." }), { status: 401, headers: corsHeaders });
+    }
+
+    // Una sesión válida no basta: con el área de cliente habrá cuentas que no
+    // son del despacho. Quien llama tiene que ser un administrador ACTIVO —
+    // mismo criterio que public.is_admin() en las RLS y que la comprobación
+    // de crm/auth.js al entrar al CRM. Se consulta con la service role
+    // (como admin-users) porque esta función ya la usa después para escribir
+    // y así no depende de las políticas de public.admins. Cualquier fallo de
+    // la consulta deniega: nunca se abre por defecto ante un error.
+    const supabase = createClient(url, serviceKey);
+    const { data: caller, error: callerErr } = await supabase
+      .from("admins")
+      .select("id")
+      .eq("auth_user_id", user.id)
+      .eq("activo", true)
+      .maybeSingle();
+    if (callerErr) {
+      console.error("whatsapp-send: no se pudo comprobar el administrador", callerErr);
+      return new Response(JSON.stringify({ error: "No se pudo comprobar el acceso." }), { status: 500, headers: corsHeaders });
+    }
+    if (!caller) {
+      return new Response(JSON.stringify({ error: "Solo los administradores activos del CRM pueden usar esta función." }), { status: 403, headers: corsHeaders });
     }
 
     // ---- Datos del mensaje a enviar ----
@@ -176,8 +198,6 @@ Deno.serve(async (req) => {
         );
       }
     }
-
-    const supabase = createClient(url, serviceKey);
 
     // ---- Resolver la conversación: por conversation_id (caso normal) o por
     // contact_id (iniciar una conversación nueva con ese contacto) ----
