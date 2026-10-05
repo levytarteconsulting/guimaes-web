@@ -475,6 +475,10 @@ function useDocDownload(toast){
 // sin nombre), uno descriptivo compuesto al vuelo — ver CRM.docDisplayName.
 const docName = (doc)=>CRM.docDisplayName(doc);
 const docContactLabel = (contactId)=>{ const c=contactId && CRM.contactById[contactId]; return c ? (c.full_name||c.company||"—") : null; };
+const docEmpresaLabel = (empresaId)=>{ const e=empresaId && CRM.empresaById[empresaId]; return e ? e.razon_social : null; };
+// "Aportado por X": el contacto que lo mandó (adjuntos de WhatsApp). Los
+// subidos por un admin no tienen contacto que lo aportara.
+const docAportadoLabel = (doc)=>{ const n=docContactLabel(doc.aportado_por); return n ? "Aportado por "+n : null; };
 // Estado del fichero cuando no está listo para descargar. Un manual siempre
 // es 'stored' (lo impone la BD); los demás estados son de adjuntos de WhatsApp.
 function DocStatusBadge({doc}){
@@ -500,19 +504,6 @@ function DocActions({doc, onDownload, downloading, onPreview, onRename, onMove, 
     {onMove && <button className="btn btn--sm btn--ghost" title="Mover a otra carpeta" onClick={()=>onMove(doc)}><Icon name="folder" size={14}/></button>}
     {onDelete && doc.status!=="pending" && <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>onDelete(doc)}><Icon name="trash" size={14}/></button>}
   </div>;
-}
-function EmpresaDocRow({doc, contact, toast}){
-  const [download,busyId]=useDocDownload(toast);
-  const [preview,setPreview]=uState(false);
-  return <tr>
-    <td><div className="row" style={{gap:8}}><Icon name="documents" size={17} style={{color:"var(--muted)"}}/><span className="tbl__name">{docName(doc)}</span><DocStatusBadge doc={doc}/></div></td>
-    <td className="tbl__sub">{contact ? (contact.full_name||contact.company||"—") : "—"}</td>
-    <td className="tbl__sub">{doc.folder_name || "—"}</td>
-    <td className="tbl__sub">{CRM.fmtBytes(doc.size_bytes)}</td>
-    <td className="tbl__sub">{doc.created}</td>
-    <td><DocActions doc={doc} onDownload={download} downloading={busyId===doc.id} onPreview={()=>setPreview(true)}/>
-      {preview && <DocPreviewModal doc={doc} onClose={()=>setPreview(false)} onDownload={download} downloading={busyId===doc.id}/>}</td>
-  </tr>;
 }
 
 // Visor dentro del CRM con la URL firmada (sin "download", para que Storage
@@ -608,28 +599,53 @@ function DeleteDocModal({doc, onClose, onDeleted, toast}){
 }
 
 // Mover un documento: el destino es obligatorio (no existe "Sin carpeta").
-function MoveDocModal({doc, carpetas, onClose, onMoved, toast}){
-  const opciones = carpetas.filter(k=>k.id!==doc.folder_id);
+// Por defecto, a otra carpeta de la misma empresa. "Mover a otra empresa"
+// es para corregir un documento que acabó en la sociedad equivocada: la
+// carpeta elegida decide la empresa (mover_documentos). Empresas ofrecidas:
+// las del contacto que lo aportó y las del contexto (p. ej. las del
+// contacto cuya ficha se está viendo) — no todas las del CRM, para que
+// sacar un documento de una sociedad sea siempre hacia una relacionada.
+function MoveDocModal({doc, carpetas, contextEmpresaIds, onClose, onMoved, toast}){
+  const empresaIds = Array.from(new Set([doc.empresa_id,
+    ...(doc.aportado_por ? CRM.empresasForContact(doc.aportado_por).map(x=>x.empresa.id) : []),
+    ...(contextEmpresaIds||[])].filter(Boolean))).filter(id=>CRM.empresaById[id]);
+  const [empresaId,setEmpresaId]=uState(doc.empresa_id);
+  const [otras,setOtras]=uState(null); // carpetas de otra empresa elegida; null = cargando
   const [dest,setDest]=uState("");
   const [busy,setBusy]=uState(false);
+  const otraEmpresa = empresaId!==doc.empresa_id;
+  uEffect(()=>{
+    if(!otraEmpresa) return;
+    let alive=true; setOtras(null);
+    CRM.loadCarpetasEmpresa(Auth.client, empresaId).then(ks=>{ if(alive) setOtras(ks); }).catch(e=>{ if(alive){ setOtras([]); toast("No se pudieron cargar las carpetas: "+CRM.docErrorMessage(e)); } });
+    return ()=>{alive=false;};
+  },[empresaId]);
+  const lista = otraEmpresa ? (otras||[]) : carpetas.filter(k=>k.id!==doc.folder_id);
   const go=async()=>{
     if(!dest) return;
     setBusy(true);
     try{
       await CRM.moverDocumentos(Auth.client, [doc.id], dest);
-      toast("Movido a "+(carpetas.find(k=>k.id===dest)||{}).nombre);
+      const k = lista.find(x=>x.id===dest)||{};
+      toast("Movido a "+k.nombre+(otraEmpresa ? " de "+CRM.empresaById[empresaId].razon_social : ""));
       onMoved();
     }catch(e){
       toast("No se pudo mover: "+CRM.docErrorMessage(e));
       setBusy(false);
     }
   };
+  const empresaActual = CRM.empresaById[doc.empresa_id];
   return <Modal title="Mover documento" onClose={()=>{ if(!busy) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={go} disabled={busy||!dest}>{busy?"Moviendo…":"Mover"}</button></>}>
-    <p className="muted" style={{marginBottom:14}}><b>{docName(doc)}</b> está en <b>{doc.folder_name||"—"}</b>.</p>
-    {opciones.length ? <Field label="Carpeta destino"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)}>
+    <p className="muted" style={{marginBottom:14}}><b>{docName(doc)}</b> está en <b>{doc.folder_name||"—"}</b>{empresaActual ? <> de <b>{empresaActual.razon_social}</b></> : null}.</p>
+    {empresaIds.length>1 && <Field label="Empresa"><select className="inp" value={empresaId} onChange={e=>{ setEmpresaId(e.target.value); setDest(""); }} disabled={busy}>
+      {empresaIds.map(id=><option key={id} value={id}>{CRM.empresaById[id].razon_social}{id===doc.empresa_id?" (actual)":""}</option>)}
+    </select></Field>}
+    {otraEmpresa && <p className="muted" style={{fontSize:12.5,marginTop:-8,marginBottom:12}}>El documento dejará de ser de {empresaActual ? empresaActual.razon_social : "su empresa actual"} y pasará a {CRM.empresaById[empresaId].razon_social}.</p>}
+    {otraEmpresa && otras===null ? <div className="muted">Cargando carpetas…</div>
+    : lista.length ? <Field label="Carpeta destino"><select className="inp" value={dest} onChange={e=>setDest(e.target.value)} disabled={busy}>
       <option value="" disabled>— Elige carpeta —</option>
-      {opciones.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
-    </select></Field> : <p className="muted">Este contacto no tiene otra carpeta. Crea una primero.</p>}
+      {lista.map(k=><option key={k.id} value={k.id}>{k.nombre}</option>)}
+    </select></Field> : <p className="muted">{otraEmpresa ? "Esa empresa no tiene carpetas." : "Esta empresa no tiene otra carpeta. Crea una primero."}</p>}
   </Modal>;
 }
 
@@ -691,7 +707,7 @@ function DeleteFolderModal({folder, count, carpetas, onClose, onDeleted, toast})
 // después, 'stored' directo). El límite de 15 MB se avisa al elegir el
 // archivo, antes de intentar nada. supabase-js no da progreso de subida,
 // así que se muestra un estado "Subiendo…" con barra indeterminada.
-function UploadDocModal({contactId, carpetas, defaultFolderId, user, onClose, onUploaded, toast}){
+function UploadDocModal({empresaId, carpetas, defaultFolderId, user, onClose, onUploaded, toast}){
   const [file,setFile]=uState(null);
   const [folderId,setFolderId]=uState(defaultFolderId || (carpetas[0]&&carpetas[0].id) || "");
   const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
@@ -701,7 +717,7 @@ function UploadDocModal({contactId, carpetas, defaultFolderId, user, onClose, on
     setBusy(true); setErr(null);
     try{
       const uploadedBy = user && CRM.userById(user.id) ? user.id : null;
-      const doc = await CRM.subirDocumentoManual(Auth.client, {file, contactId, folderId, uploadedBy});
+      const doc = await CRM.subirDocumentoManual(Auth.client, {file, empresaId, folderId, uploadedBy});
       toast("Documento subido");
       onUploaded(doc);
     }catch(e){
@@ -725,10 +741,13 @@ function UploadDocModal({contactId, carpetas, defaultFolderId, user, onClose, on
   </Modal>;
 }
 
-// Pestaña "Documentos" de la ficha de contacto: carpetas (chips), documentos
-// de la carpeta elegida, subida manual y gestión de carpetas.
-// onCount: avisa a la ficha del total para el contador de la pestaña.
-function ContactDocs({contactId, user, toast, onCount}){
+// Documentos de una EMPRESA: carpetas (chips), documentos de la carpeta
+// elegida, subida manual y gestión de carpetas. La usan la ficha de empresa
+// y la pestaña de la ficha de contacto (por la empresa elegida, ver
+// ContactDocsTab). onCount: avisa a la ficha del total para el contador de
+// la pestaña. contextEmpresaIds: otras empresas a las que se puede mover un
+// documento (ver MoveDocModal).
+function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
   const [data,setData]=uState(null); // {carpetas, docs}; null = cargando
   const [loadErr,setLoadErr]=uState(null);
   const [sel,setSel]=uState(null);
@@ -738,14 +757,14 @@ function ContactDocs({contactId, user, toast, onCount}){
 
   const reload=async()=>{
     try{
-      const r = await CRM.loadDocumentosContacto(Auth.client, contactId);
+      const r = await CRM.loadDocumentosEmpresa(Auth.client, empresaId);
       setData(r); setLoadErr(null);
       if(onCount) onCount(r.docs.length);
       // Si la carpeta elegida ya no existe (borrada), vuelve a la primera.
       setSel(s=> r.carpetas.some(k=>k.id===s) ? s : (r.carpetas[0] ? r.carpetas[0].id : null));
     }catch(e){ setLoadErr(CRM.docErrorMessage(e)); }
   };
-  uEffect(()=>{ setData(null); reload(); },[contactId]);
+  uEffect(()=>{ setData(null); setSel(null); reload(); },[empresaId]);
 
   if(loadErr) return <div className="card"><div className="card__body"><Empty icon="documents" title="No se pudieron cargar los documentos" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14}/>Reintentar</button>}/></div></div>;
   if(!data) return <div className="muted" style={{padding:16}}>Cargando documentos…</div>;
@@ -787,57 +806,67 @@ function ContactDocs({contactId, user, toast, onCount}){
           <div className="lrow__main">
             <div className="lrow__title doc-row__name" title={docName(d)}>{docName(d)}</div>
             <div className="lrow__sub doc-row__meta">
-              <span>{[CRM.fmtBytes(d.size_bytes), d.created].filter(Boolean).join(" · ")}</span>
+              <span>{[CRM.fmtBytes(d.size_bytes), d.created, docAportadoLabel(d)].filter(Boolean).join(" · ")}</span>
               <DocSourceBadge doc={d}/><DocStatusBadge doc={d}/>
             </div>
           </div>
           <DocActions doc={d} onDownload={download} downloading={busyId===d.id}
             onPreview={(doc)=>setModal({kind:"preview", doc})}
             onRename={(doc)=>setModal({kind:"renameDoc", doc})}
-            onMove={carpetas.length>1 ? (doc)=>setModal({kind:"move", doc}) : null}
+            onMove={(doc)=>setModal({kind:"move", doc})}
             onDelete={(doc)=>setModal({kind:"delDoc", doc})}/>
         </div>)}
-        {folderDocs.length===0 && <Empty icon="documents" title="Carpeta vacía" sub={folder.is_whatsapp ? "Aquí llegan los adjuntos de las conversaciones de WhatsApp vinculadas a este contacto." : null}/>}
+        {folderDocs.length===0 && <Empty icon="documents" title="Carpeta vacía" sub={folder.is_whatsapp ? "Aquí llegan los adjuntos de WhatsApp de los contactos que tienen esta empresa como principal." : null}/>}
       </div>
     </div>}
 
-    {modal && modal.kind==="upload" && <UploadDocModal contactId={contactId} carpetas={carpetas} defaultFolderId={sel} user={user} toast={toast} onClose={close}
+    {modal && modal.kind==="upload" && <UploadDocModal empresaId={empresaId} carpetas={carpetas} defaultFolderId={sel} user={user} toast={toast} onClose={close}
       onUploaded={(doc)=>{ setModal(null); if(doc.folder_id) setSel(doc.folder_id); reload(); }}/>}
     {modal && modal.kind==="new" && <FolderNameModal title="Nueva carpeta" carpetas={carpetas} onClose={close}
-      onSave={async(nombre)=>{ const k = await CRM.crearCarpeta(Auth.client, contactId, nombre); toast("Carpeta creada"); setModal(null); setSel(k.id); reload(); }}/>}
+      onSave={async(nombre)=>{ const k = await CRM.crearCarpeta(Auth.client, empresaId, nombre); toast("Carpeta creada"); setModal(null); setSel(k.id); reload(); }}/>}
     {modal && modal.kind==="rename" && folder && <FolderNameModal title="Renombrar carpeta" initial={folder.nombre} carpetas={carpetas} exceptId={folder.id} onClose={close}
       note={folder.is_whatsapp ? "Al renombrarla dejará de ser la carpeta del sistema: los próximos adjuntos de WhatsApp irán a una carpeta \"WhatsApp\" nueva." : null}
       onSave={async(nombre)=>{ await CRM.renombrarCarpeta(Auth.client, folder.id, nombre); toast("Carpeta renombrada"); closeAndReload(); }}/>}
     {modal && modal.kind==="delFolder" && folder && <DeleteFolderModal folder={folder} count={folderCount} carpetas={carpetas} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
-    {modal && modal.kind==="move" && <MoveDocModal doc={modal.doc} carpetas={carpetas} toast={toast} onClose={close} onMoved={closeAndReload}/>}
+    {modal && modal.kind==="move" && <MoveDocModal doc={modal.doc} carpetas={carpetas} contextEmpresaIds={contextEmpresaIds} toast={toast} onClose={close} onMoved={closeAndReload}/>}
     {modal && modal.kind==="delDoc" && <DeleteDocModal doc={modal.doc} toast={toast} onClose={close} onDeleted={closeAndReload}/>}
     {modal && modal.kind==="preview" && <DocPreviewModal doc={modal.doc} onClose={close} onDownload={download} downloading={busyId===modal.doc.id}/>}
     {modal && modal.kind==="renameDoc" && <RenameDocModal doc={modal.doc} toast={toast} onClose={close} onRenamed={closeAndReload}/>}
   </div>;
 }
-function EmpresaDetail({id, nav, toast}){
+// Pestaña "Documentos" de la ficha de contacto. Los documentos son de la
+// empresa, no de la persona: se muestran los de su empresa principal y, si
+// tiene varias, un selector para cambiar — el mismo patrón que tendrá el
+// área de cliente.
+function ContactDocsTab({contact, user, toast, onCount, nav}){
+  const empresas = CRM.empresasForContact(contact.id).map(x=>x.empresa);
+  const [empresaId,setEmpresaId]=uState(empresas[0] ? empresas[0].id : null);
+  const actual = empresas.find(e=>e.id===empresaId) || empresas[0] || null;
+  if(!actual) return <div className="card"><div className="card__body"><Empty icon="building" title="Sin empresa" sub="Los documentos se guardan en las carpetas de la empresa. Añade una empresa a este contacto desde «Editar ficha»."/></div></div>;
+  return <div className="wrap-gap">
+    <div className="row doc-empresa-bar" style={{gap:10,flexWrap:"wrap"}}>
+      {empresas.length>1
+        ? <select className="inp doc-filter" value={actual.id} onChange={e=>setEmpresaId(e.target.value)} aria-label="Empresa">
+            {empresas.map((e,i)=><option key={e.id} value={e.id}>{e.razon_social}{i===0?" (principal)":""}</option>)}
+          </select>
+        : <span className="muted" style={{fontSize:13}}>Documentos de <b style={{color:"var(--ink)"}}>{actual.razon_social}</b></span>}
+      <button className="btn btn--sm btn--ghost" onClick={()=>nav("empresa", actual.id)}><Icon name="building" size={14}/>Ver en la ficha de empresa</button>
+    </div>
+    <EmpresaDocs key={actual.id} empresaId={actual.id} user={user} toast={toast} onCount={onCount} contextEmpresaIds={empresas.map(e=>e.id)}/>
+  </div>;
+}
+function EmpresaDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const e = CRM.empresaById[id];
   const [tab,setTab]=uState("contactos");
   const [showEdit,setShowEdit]=uState(false);
-  const [docs,setDocs]=uState(null); // null = todavía no se ha cargado
-  const [loadingDocs,setLoadingDocs]=uState(false);
+  // Total para el contador de la pestaña: lo informa EmpresaDocs al cargar
+  // (null hasta entonces).
+  const [docCount,setDocCount]=uState(null);
+  uEffect(()=>{ setDocCount(null); },[id]);
   const contactos = e ? CRM.contactsForEmpresa(id) : [];
-  const contactIds = contactos.map(c=>c.id);
-  // Los documentos se consultan al vuelo al entrar en la pestaña (no viven
-  // en una caché global como CONTACTS/EMPRESAS) — ver loadDocumentosForContacts.
-  uEffect(()=>{
-    if(!e || tab!=="docs" || docs!==null) return;
-    let alive=true;
-    setLoadingDocs(true);
-    CRM.loadDocumentosForContacts(Auth.client, contactIds).then(rows=>{
-      if(!alive) return;
-      setDocs(rows); setLoadingDocs(false);
-    });
-    return ()=>{alive=false;};
-  },[tab, e && e.id]);
   if(!e) return <div className="content"><Empty icon="building" title="Empresa no encontrada" sub="Puede que haya sido eliminada." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("empresas")}>Volver a empresas</button>}/></div>;
-  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"docs",label:"Documentos",n:docs?docs.length:null}];
+  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"docs",label:"Documentos",n:docCount}];
   return (
     <div className="content">
       <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("empresas")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Empresas</button></div>
@@ -870,12 +899,7 @@ function EmpresaDetail({id, nav, toast}){
               </tr>;
             })}
           </tbody></table>{contactos.length===0 && <Empty icon="contacts" title="Sin contactos"/>}</div>}
-          {tab==="docs" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Carpeta</th><th>Tamaño</th><th>Fecha</th><th></th></tr></thead><tbody>
-            {(docs||[]).map(d=><EmpresaDocRow key={d.id} doc={d} contact={CRM.contactById[d.contact_id]} toast={toast}/>)}
-          </tbody></table>
-          {loadingDocs && <div className="muted" style={{padding:16}}>Cargando documentos…</div>}
-          {!loadingDocs && docs && docs.length===0 && <Empty icon="documents" title="Sin documentos" sub="Ninguno de los contactos de esta empresa tiene documentos todavía."/>}
-          </div>}
+          {tab==="docs" && <EmpresaDocs empresaId={id} user={user} toast={toast} onCount={setDocCount}/>}
         </div>
       </div>
       {showEdit && <EditEmpresa empresa={e} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
@@ -1149,7 +1173,7 @@ function ContactDetail({id, nav, toast, user}){
   const [editingTask,setEditingTask]=uState(null);
   const [noteText,setNoteText]=uState(""); const [savingNote,setSavingNote]=uState(false);
   // Total de documentos para el contador de la pestaña: lo informa
-  // ContactDocs al cargar (null hasta entonces, igual que en EmpresaDetail).
+  // ContactDocsTab al cargar (null hasta entonces, igual que en EmpresaDetail).
   const [docCount,setDocCount]=uState(null);
   uEffect(()=>{ setDocCount(null); },[id]);
   if(!c) return <div className="content"><Empty icon="contacts" title="Contacto no encontrado" sub="Puede que haya sido eliminado." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("contacts")}>Volver a contactos</button>}/></div>;
@@ -1290,7 +1314,7 @@ function ContactDetail({id, nav, toast, user}){
           {tab==="correos" && <div className="wrap-gap">{emails.length? emails.map(e=><EmailThreadCard key={e.id} email={e} toast={toast} bump={bump}/>) : <Empty icon="mail" title="Sin correos vinculados"/>}</div>}
           {tab==="docs" && (isLead
             ? <div className="card"><div className="card__body"><Empty icon="documents" title="Convierte el lead en contacto" sub="Los documentos se guardan en las carpetas del contacto, que se crean al convertirlo."/></div></div>
-            : <ContactDocs contactId={id} user={user} toast={toast} onCount={setDocCount}/>)}
+            : <ContactDocsTab contact={c} user={user} toast={toast} onCount={setDocCount} nav={nav}/>)}
           {tab==="actividad" && <div className="card"><div className="card__body"><div className="tl">{acts.map((a,i)=><div key={i} className="tl-item"><div className="tl-item__ico"><Icon name={a.type==="call"?"phone":a.type==="note"?"note":a.type==="email"?"mail":a.type==="doc"?"documents":a.type==="stage"?"pipeline":"contacts"} size={11}/></div><div className="tl-item__head">{a.text}</div><div className="tl-item__meta">{a.who?CRM.userById(a.who)?.name+" · ":""}{a.at}</div></div>)}</div></div></div>}
         </div>
       </div>
@@ -1307,7 +1331,7 @@ function ContactDetail({id, nav, toast, user}){
       }}/>}
       {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
         <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s) y notas asociadas. Esta acción no se puede deshacer.</p>
-        <p className="muted" style={{fontSize:12.5,marginTop:8}}>Los documentos y conversaciones de WhatsApp no se borran — quedan sin vincular a ningún contacto, pero siguen accesibles.</p>
+        <p className="muted" style={{fontSize:12.5,marginTop:8}}>Los documentos no se borran: son de la empresa y siguen en sus carpetas. Las conversaciones de WhatsApp quedan sin vincular a ningún contacto.</p>
       </Modal>}
       {showNewDeal && <NewDeal contactId={id} onClose={()=>setShowNewDeal(false)} onSave={async(f)=>{
         try{
@@ -1401,6 +1425,7 @@ function EditContactEmpresas({contact, toast, onChange}){
       ))}
     </div>
     {adding ? <EmpresaPicker onPick={pick}/> : <button className="btn btn--sm btn--ghost" disabled={busy} onClick={()=>setAdding(true)}><Icon name="plus" size={14}/>Añadir empresa</button>}
+    {links.length>1 && <p className="muted" style={{fontSize:12,marginTop:8}}>Los adjuntos de WhatsApp de este contacto van a la carpeta WhatsApp de su empresa principal. Cambiarla no mueve los documentos ya archivados, solo los que lleguen a partir de ahora.</p>}
   </Field>;
 }
 function EditContact({contact, toast, onEmpresaChange, onClose, onSave}){
@@ -2242,13 +2267,22 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
 // a dos contactos de la misma empresa. Los que tienen el mismo teléfono que
 // la conversación salen primero como sugerencia; vincular sigue siendo
 // decisión de quien pulsa Guardar.
+// Dónde acabarán los adjuntos al vincular: en la carpeta WhatsApp de la
+// empresa principal del contacto (public.empresa_principal_de decide en la
+// BD; esto solo lo anticipa).
+function linkEmpresaNote(contact){
+  if(!contact) return "Sus adjuntos pasarán a la carpeta WhatsApp de la empresa principal del contacto que elijas.";
+  const e = CRM.empresaPrincipalDe(contact.id);
+  return e ? <>Sus adjuntos pasarán a la carpeta WhatsApp de <b>{e.razon_social}</b>.</>
+    : "Este contacto no tiene empresa: sus adjuntos se quedarán sin carpeta hasta que tenga una.";
+}
 function LinkWhatsapp({conv, onClose, onSave}){
   const [contact,setContact]=uState(conv.contact ? CRM.contactById[conv.contact] || null : null);
   const [saving,setSaving]=uState(false);
   const save=async()=>{ if(!contact) return; setSaving(true); try{ await onSave(contact.id); }finally{ setSaving(false); } };
   const l = contact ? contactPersonLabel(contact) : null;
   return <Modal title="Vincular a contacto" onClose={()=>{ if(!saving) onClose(); }} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={!contact||saving}>{saving?"Guardando…":"Guardar"}</button></>}>
-    <p className="muted" style={{fontSize:12.5,marginBottom:12}}>Conversación con <b>{waPhoneOf(conv) || "número desconocido"}</b>. Sus adjuntos pasarán a la carpeta WhatsApp del contacto.</p>
+    <p className="muted" style={{fontSize:12.5,marginBottom:12}}>Conversación con <b>{waPhoneOf(conv) || "número desconocido"}</b>. {linkEmpresaNote(contact)}</p>
     {contact ? <div className="row" style={{gap:10,justifyContent:"space-between"}}>
       <div className="row" style={{gap:10,minWidth:0}}>
         <Avatar name={l.name} size="sm" color={CRM.colorFor(l.name)}/>
@@ -2623,7 +2657,7 @@ function Documents({nav, toast}){
   const [docs,setDocs]=uState(null); // null = cargando
   const [loadErr,setLoadErr]=uState(null);
   const [q,setQ]=uState("");
-  const [contactF,setContactF]=uState("");
+  const [empresaF,setEmpresaF]=uState("");
   const [folderF,setFolderF]=uState("");
   const [delDoc,setDelDoc]=uState(null);
   const [previewDoc,setPreviewDoc]=uState(null);
@@ -2639,46 +2673,54 @@ function Documents({nav, toast}){
 
   const all = docs || [];
   // Opciones de filtro a partir de lo que hay, no del catálogo completo:
-  // solo contactos con documentos, y carpetas por nombre (agrupa "Fiscal"
-  // de todos los contactos).
-  const contactOpts = uMemo(()=>{
-    const ids = Array.from(new Set(all.map(d=>d.contact_id).filter(Boolean)));
-    return ids.map(id=>({id, label:docContactLabel(id)||"Contacto sin cargar"})).sort((a,b)=>a.label.localeCompare(b.label,"es"));
+  // solo empresas con documentos, y carpetas por nombre (agrupa "Fiscal"
+  // de todas las empresas). "Sin empresa": adjuntos de conversaciones sin
+  // vincular.
+  const empresaOpts = uMemo(()=>{
+    const ids = Array.from(new Set(all.map(d=>d.empresa_id).filter(Boolean)));
+    return ids.map(id=>({id, label:docEmpresaLabel(id)||"Empresa sin cargar"})).sort((a,b)=>a.label.localeCompare(b.label,"es"));
   },[docs]);
   const folderOpts = uMemo(()=>Array.from(new Set(all.map(d=>d.folder_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"es")),[docs]);
-  const hasOrphans = all.some(d=>!d.contact_id);
+  const hasOrphans = all.some(d=>!d.empresa_id);
 
   const needle = q.trim().toLowerCase();
   const shown = all.filter(d=>{
-    if(contactF===DOC_FILTER_NONE ? !!d.contact_id : (contactF && d.contact_id!==contactF)) return false;
+    if(empresaF===DOC_FILTER_NONE ? !!d.empresa_id : (empresaF && d.empresa_id!==empresaF)) return false;
     if(folderF===DOC_FILTER_NONE ? !!d.folder_id : (folderF && d.folder_name!==folderF)) return false;
     if(!needle) return true;
-    return [docName(d), docContactLabel(d.contact_id)||"", d.folder_name].some(s=>s.toLowerCase().includes(needle));
+    return [docName(d), docEmpresaLabel(d.empresa_id)||"", docContactLabel(d.aportado_por)||"", d.folder_name].some(s=>s.toLowerCase().includes(needle));
   });
-  const filtering = !!(needle || contactF || folderF);
+  const filtering = !!(needle || empresaF || folderF);
 
-  const contactCell = (d)=>{
-    const label = docContactLabel(d.contact_id);
-    if(!d.contact_id) return <span className="muted">Sin contacto</span>;
+  const empresaCell = (d)=>{
+    const label = docEmpresaLabel(d.empresa_id);
+    if(!d.empresa_id) return <span className="muted">Sin empresa</span>;
     if(!label) return <span className="muted">—</span>;
-    return <a className="doc-link" onClick={e=>{ e.stopPropagation(); nav("contact", d.contact_id); }}>{label}</a>;
+    return <a className="doc-link" onClick={e=>{ e.stopPropagation(); nav("empresa", d.empresa_id); }}>{label}</a>;
   };
-  const origin = (d)=> d.source==="whatsapp" ? <Badge label="WhatsApp" color="#1F9D6B"/> : (ownerAvatar(d.uploaded_by) || <span className="muted" style={{fontSize:12.5}}>Manual</span>);
+  // Origen: WhatsApp (con quién lo aportó, si se sabe) o el admin que lo subió.
+  const origin = (d)=>{
+    if(d.source==="whatsapp"){
+      const who = docContactLabel(d.aportado_por);
+      return <div className="row" style={{gap:6,flexWrap:"wrap"}}><Badge label="WhatsApp" color="#1F9D6B"/>{who && <a className="doc-link" style={{fontSize:12.5}} onClick={e=>{ e.stopPropagation(); nav("contact", d.aportado_por); }}>{who}</a>}</div>;
+    }
+    return ownerAvatar(d.uploaded_by) || <span className="muted" style={{fontSize:12.5}}>Manual</span>;
+  };
 
   return <div className="content">
     <div className="toolbar doc-toolbar">
-      <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento, contacto o carpeta…" value={q} onChange={e=>setQ(e.target.value)}/></div>
-      <select className="inp doc-filter" value={contactF} onChange={e=>setContactF(e.target.value)} aria-label="Filtrar por contacto">
-        <option value="">Todos los contactos</option>
-        {hasOrphans && <option value={DOC_FILTER_NONE}>Sin contacto</option>}
-        {contactOpts.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+      <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento, empresa, contacto o carpeta…" value={q} onChange={e=>setQ(e.target.value)}/></div>
+      <select className="inp doc-filter" value={empresaF} onChange={e=>setEmpresaF(e.target.value)} aria-label="Filtrar por empresa">
+        <option value="">Todas las empresas</option>
+        {hasOrphans && <option value={DOC_FILTER_NONE}>Sin empresa</option>}
+        {empresaOpts.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
       </select>
       <select className="inp doc-filter" value={folderF} onChange={e=>setFolderF(e.target.value)} aria-label="Filtrar por carpeta">
         <option value="">Todas las carpetas</option>
         {hasOrphans && <option value={DOC_FILTER_NONE}>Sin carpeta</option>}
         {folderOpts.map(n=><option key={n} value={n}>{n}</option>)}
       </select>
-      {filtering && <button className="btn btn--sm btn--ghost" onClick={()=>{setQ("");setContactF("");setFolderF("");}}>Limpiar</button>}
+      {filtering && <button className="btn btn--sm btn--ghost" onClick={()=>{setQ("");setEmpresaF("");setFolderF("");}}>Limpiar</button>}
     </div>
 
     {loadErr ? <Empty icon="documents" title="No se pudieron cargar los documentos" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14}/>Reintentar</button>}/>
@@ -2692,8 +2734,8 @@ function Documents({nav, toast}){
                 <div className="lrow__ico"><Icon name="documents" size={17}/></div>
                 <div style={{flex:1,minWidth:0}}>
                   <div className="tbl__name doc-row__name">{docName(d)}</div>
-                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{contactCell(d)}{d.folder_name ? " · "+d.folder_name : ""}</div>
-                  <div className="muted" style={{fontSize:12,marginTop:2}}>{[CRM.fmtBytes(d.size_bytes), d.created].filter(Boolean).join(" · ")}</div>
+                  <div className="muted" style={{fontSize:12.5,marginTop:2}}>{empresaCell(d)}{d.folder_name ? " · "+d.folder_name : ""}</div>
+                  <div className="muted" style={{fontSize:12,marginTop:2}}>{[CRM.fmtBytes(d.size_bytes), d.created, docAportadoLabel(d)].filter(Boolean).join(" · ")}</div>
                 </div>
               </div>
               <div className="row" style={{marginTop:10,justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
@@ -2706,10 +2748,10 @@ function Documents({nav, toast}){
         {shown.length===0 && <Empty icon="documents" title={filtering?"Ningún documento coincide":"Sin documentos"}/>}
       </div>
     ) : (
-    <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Contacto</th><th>Carpeta</th><th>Tamaño</th><th>Origen</th><th>Fecha</th><th></th></tr></thead><tbody>
+    <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Empresa</th><th>Carpeta</th><th>Tamaño</th><th>Origen</th><th>Fecha</th><th></th></tr></thead><tbody>
       {shown.map(d=><tr key={d.id}>
         <td><div className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{docName(d)}</span><DocStatusBadge doc={d}/></div></td>
-        <td className="tbl__sub">{contactCell(d)}</td>
+        <td className="tbl__sub">{empresaCell(d)}</td>
         <td className="tbl__sub">{d.folder_name || "—"}</td>
         <td className="tbl__sub">{CRM.fmtBytes(d.size_bytes)}</td>
         <td>{origin(d)}</td>
@@ -3241,7 +3283,7 @@ function App(){
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
   else if(view.name==="empresas") screen=<Empresas nav={nav} toast={fireToast}/>;
-  else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast}/>;
+  else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;

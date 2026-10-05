@@ -173,9 +173,9 @@ function extractBody(message: any): string {
 // crm/supabase-whatsapp-match.sql — debe haberse ejecutado ya). Solo enlaza
 // si hay EXACTAMENTE un contacto que coincide; con 0 o varias coincidencias
 // contact_id queda null y se puede asociar a mano desde el CRM.
-// Devuelve también contact_id (no solo el id): un adjunto que llega en una
-// conversación ya vinculada tiene que nacer con ese contact_id puesto en
-// public.documentos, no esperar a que alguien vincule/desvincule después.
+// Devuelve también contact_id, pero los adjuntos ya no lo usan: el trigger
+// de public.documentos lee el contacto vinculado a la conversación en el
+// momento del insert (ver handleMediaAttachment).
 async function findOrCreateConversation(supabase: any, waId: string): Promise<{ id: string; contact_id: string | null }> {
   const { data: existing, error: selectErr } = await supabase
     .from("whatsapp_conversations")
@@ -277,10 +277,12 @@ async function handleMediaAttachment(
     mime_type: mimeType,
     size_bytes: info.fileSize || null,
     original_filename: mediaRef.filename || null,
-    // Sin folder: el trigger documentos_resolver_carpeta (crm/supabase-
-    // carpetas.sql) pone la carpeta WhatsApp del contacto dentro de este
-    // mismo insert, o ninguna si la conversación no está vinculada.
-    contact_id: conversation.contact_id,
+    // Ni contacto, ni empresa, ni carpeta: el trigger documentos_resolver_carpeta
+    // (crm/supabase-carpetas.sql) los resuelve dentro de este mismo insert a
+    // partir de whatsapp_conversation_id — el contacto vinculado a la
+    // conversación EN ESE MOMENTO (no el que se leyó al principio de esta
+    // petición), su empresa principal y la carpeta WhatsApp de esa empresa;
+    // o nada si la conversación no está vinculada.
     source: "whatsapp",
     whatsapp_conversation_id: conversation.id,
     whatsapp_message_id: messageDbId,

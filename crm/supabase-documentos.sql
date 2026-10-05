@@ -61,10 +61,12 @@ create policy "admins borran documentos (storage)"
 -- renombrarlo solo reescribe columnas de esta tabla (contact_id,
 -- folder_id, original_filename), nunca mueve el fichero.
 --
--- Carpetas: viven en public.carpetas y se enlazan con documentos.folder_id
--- — ambas las crea crm/supabase-carpetas.sql, que va después de este
--- fichero. La antigua columna de texto documentos.folder se eliminó en
--- el Paso B (crm/supabase-carpetas-paso-b.sql) y ya no se crea aquí.
+-- Carpetas y dueño: los documentos son de la EMPRESA. public.carpetas,
+-- documentos.empresa_id y documentos.folder_id los crea
+-- crm/supabase-carpetas.sql, que va después de este fichero. contact_id
+-- (abajo) ya no es el dueño: es quién aportó el documento. La antigua
+-- columna de texto documentos.folder se eliminó en el Paso B
+-- (crm/supabase-carpetas-paso-b.sql) y ya no se crea aquí.
 --
 -- whatsapp_conversation_id / whatsapp_message_id: "on delete set null"
 -- (no cascade) — borrar una conversación o un mensaje no borra la fila de
@@ -85,7 +87,7 @@ create table if not exists public.documentos (
   original_filename         text,
   status                    text not null default 'pending', -- 'pending' / 'stored' / 'failed' / 'too_large'
 
-  -- Organización / visibilidad (folder_id lo añade crm/supabase-carpetas.sql)
+  -- Quién lo aportó (NO el dueño: empresa_id/folder_id los añade crm/supabase-carpetas.sql)
   contact_id                uuid references public.contactos(id) on delete set null,
 
   -- Origen

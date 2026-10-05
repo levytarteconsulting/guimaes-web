@@ -1,4 +1,11 @@
 -- ============================================================
+-- HISTÓRICO — NO VOLVER A EJECUTAR. Es del modelo de carpetas por
+-- CONTACTO (Fase 5). Desde crm/supabase-documentos-empresa.sql las
+-- carpetas y los documentos cuelgan de la empresa y este fichero falla
+-- (escribe carpetas.contact_id, que ya no existe). Se conserva como
+-- registro de lo que se aplicó.
+-- ============================================================
+-- ============================================================
 -- GUIMAES — Fase 5, Paso B: retirar documentos.folder (texto)
 --
 -- La organización de documentos vive en public.carpetas + documentos.folder_id

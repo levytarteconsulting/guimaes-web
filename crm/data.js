@@ -374,11 +374,11 @@
   async function linkWhatsappConversation(client, id, contactId){
     var w = WHATSAPP.find(function(x){return x.id===id;});
     if(client){
-      // Un solo RPC (crm/supabase-carpetas.sql) en vez de dos updates
-      // sueltos: vincula la conversación y coloca sus adjuntos en la carpeta
-      // WhatsApp del contacto (o los deja sin contacto ni carpeta al
-      // desvincular), todo en la misma transacción. Los ficheros no se
-      // mueven en Storage, solo cambian contact_id/folder_id.
+      // Un solo RPC (crm/supabase-carpetas.sql): vincula la conversación y
+      // coloca sus adjuntos en la carpeta WhatsApp de la empresa principal
+      // del contacto (o los deja sin empresa ni carpeta al desvincular), todo
+      // en la misma transacción. Los ficheros no se mueven en Storage, solo
+      // cambian empresa_id/folder_id/contact_id (aportado por).
       var res = await client.rpc("vincular_conversacion", {p_conversation_id: id, p_contact_id: contactId || null});
       if(res.error) throw res.error;
     }
@@ -748,10 +748,17 @@
     return EMPRESAS.filter(function(e){ return normalizeCompanyName(e.razon_social).indexOf(norm) > -1; });
   }
   // Crea una empresa real en Supabase y la inyecta en EMPRESAS
+  // Sin nombre no se crea: antes caía a "Por definir", y como la conversión
+  // de leads buscaba esa empresa por nombre, acababa siendo un cajón común
+  // de personas sin relación entre sí — que con los documentos colgando de
+  // la empresa compartirían carpetas. Quien llame sin razón social decide
+  // el nombre (ver convertLeadToContact).
   async function addEmpresa(client, data){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var razonSocial = (data.razon_social||"").trim();
+    if(!razonSocial) throw new Error("La empresa necesita una razón social.");
     var payload = {
-      razon_social: (data.razon_social||"").trim() || "Por definir",
+      razon_social: razonSocial,
       cif: data.cif ? data.cif.trim() : null,
       address: data.address || null,
       city: data.city || null,
@@ -785,7 +792,7 @@
     return e;
   }
   function rowToContactoEmpresa(row){
-    return { id: row.id, contact_id: row.contact_id, empresa_id: row.empresa_id, principal: !!row.principal };
+    return { id: row.id, contact_id: row.contact_id, empresa_id: row.empresa_id, principal: !!row.principal, created_at: row.created_at || "" };
   }
   // Carga la relación contacto↔empresa completa (una sola vez, al arrancar)
   async function loadContactoEmpresa(client){
@@ -805,7 +812,17 @@
     return CONTACTO_EMPRESA.filter(function(l){ return l.contact_id===contactId; })
       .map(function(l){ return {link:l, empresa: empresaById[l.empresa_id]}; })
       .filter(function(x){ return !!x.empresa; })
-      .sort(function(a,b){ return (b.link.principal?1:0)-(a.link.principal?1:0); });
+      .sort(function(a,b){
+        return ((b.link.principal?1:0)-(a.link.principal?1:0)) || (a.link.created_at<b.link.created_at ? -1 : a.link.created_at>b.link.created_at ? 1 : 0);
+      });
+  }
+  // Empresa a la que van los adjuntos de WhatsApp del contacto: la
+  // principal o, si no hay ninguna marcada, la enlazada más antigua — el
+  // mismo criterio que public.empresa_principal_de en la BD, que es quien
+  // decide de verdad; esto es solo para decirlo en la interfaz.
+  function empresaPrincipalDe(contactId){
+    var list = empresasForContact(contactId);
+    return list.length ? list[0].empresa : null;
   }
   function contactsForEmpresa(empresaId){
     return CONTACTO_EMPRESA.filter(function(l){ return l.empresa_id===empresaId; })
@@ -961,9 +978,9 @@
   // rechazar, pero el error de la BD sigue siendo la última palabra (ver
   // docErrorMessage).
   var MAX_DOCUMENTO_BYTES = 15 * 1024 * 1024; // mismo tope que el bucket (crm/supabase-documentos.sql)
-  // La carpeta se trae embebida por la FK compuesta (folder_id, contact_id)
-  // → carpetas(id, contact_id); el nombre de la FK desambigua frente a la
-  // de contact_id → contactos.
+  // La carpeta se trae embebida por la FK compuesta (folder_id, empresa_id)
+  // → carpetas(id, empresa_id); el nombre de la FK desambigua frente a la
+  // de empresa_id → empresas.
   var DOCUMENTO_SELECT = "*, carpeta:carpetas!documentos_carpeta_fkey(id, nombre, system_key)";
 
   function rowToDocumento(row){
@@ -975,7 +992,11 @@
       size_bytes: row.size_bytes,
       original_filename: row.original_filename || "",
       status: row.status,
-      contact_id: row.contact_id,
+      // Dueño: la empresa. contact_id en la BD ya no es el dueño sino quién
+      // lo aportó (el contacto que lo mandó por WhatsApp; null si lo subió
+      // un admin) — se expone con ese nombre para que no se confunda.
+      empresa_id: row.empresa_id || null,
+      aportado_por: row.contact_id || null,
       folder_id: row.folder_id || null,
       folder_name: carpeta ? carpeta.nombre : "",
       folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),
@@ -989,7 +1010,7 @@
   function rowToCarpeta(row){
     return {
       id: row.id,
-      contact_id: row.contact_id,
+      empresa_id: row.empresa_id,
       nombre: row.nombre,
       system_key: row.system_key || null,
       is_whatsapp: row.system_key==="whatsapp",
@@ -1087,30 +1108,22 @@
     return rowToDocumento(res.data[0]);
   }
 
-  // Ficha de empresa: los de todos sus contactos.
-  async function loadDocumentosForContacts(client, contactIds){
-    if(!client || !contactIds || !contactIds.length) return [];
-    try{
-      var res = await client.from("documentos").select(DOCUMENTO_SELECT).in("contact_id", contactIds).order("created_at",{ascending:false});
-      if(res.error || !res.data) return [];
-      return res.data.map(rowToDocumento);
-    }catch(e){ if(window.console) console.error("loadDocumentosForContacts:", e); return []; }
-  }
-  // Vista Documentos: todos, incluidos los adjuntos sin contacto (conversación
-  // sin vincular o contacto borrado). Lanza en caso de error para que la
-  // vista distinga "vacío" de "no se pudo cargar".
+  // Vista Documentos: todos, incluidos los adjuntos sin empresa (conversación
+  // sin vincular). Lanza en caso de error para que la vista distinga
+  // "vacío" de "no se pudo cargar".
   async function loadAllDocumentos(client){
     if(!client) return [];
     var res = await client.from("documentos").select(DOCUMENTO_SELECT).order("created_at",{ascending:false});
     if(res.error) throw res.error;
     return (res.data||[]).map(rowToDocumento);
   }
-  // Ficha de contacto: sus carpetas y sus documentos, en paralelo.
-  async function loadDocumentosContacto(client, contactId){
-    if(!client || !contactId) return {carpetas:[], docs:[]};
+  // Ficha de empresa (y pestaña de la ficha de contacto, por la empresa
+  // elegida): sus carpetas y sus documentos, en paralelo.
+  async function loadDocumentosEmpresa(client, empresaId){
+    if(!client || !empresaId) return {carpetas:[], docs:[]};
     var results = await Promise.all([
-      client.from("carpetas").select("*").eq("contact_id", contactId),
-      client.from("documentos").select(DOCUMENTO_SELECT).eq("contact_id", contactId).order("created_at",{ascending:false})
+      client.from("carpetas").select("*").eq("empresa_id", empresaId),
+      client.from("documentos").select(DOCUMENTO_SELECT).eq("empresa_id", empresaId).order("created_at",{ascending:false})
     ]);
     if(results[0].error) throw results[0].error;
     if(results[1].error) throw results[1].error;
@@ -1119,13 +1132,20 @@
       docs: (results[1].data||[]).map(rowToDocumento)
     };
   }
+  // Solo las carpetas de una empresa (destinos de "Mover a otra empresa").
+  async function loadCarpetasEmpresa(client, empresaId){
+    if(!client || !empresaId) return [];
+    var res = await client.from("carpetas").select("*").eq("empresa_id", empresaId);
+    if(res.error) throw res.error;
+    return sortCarpetas((res.data||[]).map(rowToCarpeta));
+  }
 
   // Traduce los errores de BD que la UI puede provocar a un mensaje legible.
   // Los mensajes propios de los triggers/RPCs ya están en español y se
   // dejan pasar tal cual.
   function docErrorMessage(e){
     if(!e) return "Error desconocido";
-    if(e.code==="23505") return "Ya existe una carpeta con ese nombre en este contacto.";
+    if(e.code==="23505") return "Ya existe una carpeta con ese nombre en esta empresa.";
     if(e.code==="23514" && /whatsapp_reservado/.test(e.message||"")) return "El nombre \"WhatsApp\" está reservado para la carpeta del sistema.";
     if(e.code==="23514" && /nombre_check/.test(e.message||"")) return "El nombre de la carpeta debe tener entre 1 y 60 caracteres.";
     return e.message || String(e);
@@ -1146,8 +1166,8 @@
 
   // Entre las 4 por defecto (orden 1-4) y WhatsApp (100): las creadas a mano
   // quedan detrás de las de serie y delante de la del sistema.
-  async function crearCarpeta(client, contactId, nombre){
-    var res = await client.from("carpetas").insert({contact_id: contactId, nombre: nombre.trim(), orden: 50}).select().single();
+  async function crearCarpeta(client, empresaId, nombre){
+    var res = await client.from("carpetas").insert({empresa_id: empresaId, nombre: nombre.trim(), orden: 50}).select().single();
     if(res.error) throw res.error;
     return rowToCarpeta(res.data);
   }
@@ -1191,15 +1211,19 @@
   //     falla queda un huérfano invisible en Storage (lo detecta la consulta
   //     de huérfanos), nunca una fila apuntando a un fichero que no existe.
   // La fila nace 'stored': una subida manual nunca pasa por 'pending'.
-  // Ruta: manual/{contact_id}/{documento_id}/{nombre}. La carpeta no forma
-  // parte de la ruta: mover de carpeta solo cambia folder_id.
+  // Ruta: manual/{empresa_id}/{documento_id}/{nombre}. Ni la carpeta ni la
+  // empresa cambian la ruta después: mover solo cambia folder_id/empresa_id
+  // (los documentos subidos antes del cambio a empresas conservan su ruta
+  // manual/{contact_id}/… — la ruta es la identidad del fichero).
+  // contact_id ("aportado por") queda NULL: lo sube un admin, no lo aporta
+  // ningún contacto; quién lo subió está en uploaded_by.
   async function subirDocumentoManual(client, opts){
     var file = opts.file;
     if(!file) throw new Error("Elige un archivo.");
     if(file.size>MAX_DOCUMENTO_BYTES) throw new Error("El archivo supera el máximo de 15 MB.");
-    if(!opts.contactId || !opts.folderId) throw new Error("Hace falta contacto y carpeta.");
+    if(!opts.empresaId || !opts.folderId) throw new Error("Hace falta empresa y carpeta.");
     var id = crypto.randomUUID();
-    var path = "manual/"+opts.contactId+"/"+id+"/"+storageSafeFilename(file.name);
+    var path = "manual/"+opts.empresaId+"/"+id+"/"+storageSafeFilename(file.name);
     var up = await client.storage.from("documentos").upload(path, file, {contentType: file.type || "application/octet-stream", upsert: false});
     if(up.error) throw up.error;
     var ins = await client.from("documentos").insert({
@@ -1209,7 +1233,7 @@
       size_bytes: file.size,
       original_filename: file.name,
       status: "stored",
-      contact_id: opts.contactId,
+      empresa_id: opts.empresaId,
       folder_id: opts.folderId,
       source: "manual",
       uploaded_by: opts.uploadedBy || null
@@ -1620,11 +1644,18 @@
     // de contactos.lead_id de más arriba).
     var linkCheck = await client.from("contacto_empresa").select("id").eq("contact_id", contactRow.id).limit(1);
     if(!linkCheck.error && (!linkCheck.data || linkCheck.data.length===0)){
-      var companyRaw = (lead.company||"").trim() || "Por definir";
-      var empresa = searchEmpresasByName(companyRaw).filter(function(e){
-        return normalizeCompanyName(e.razon_social) === normalizeCompanyName(companyRaw);
-      })[0] || null;
-      if(!empresa) empresa = await addEmpresa(client, {razon_social: companyRaw});
+      // Sin empresa en el lead: una empresa PROPIA con el nombre de la
+      // persona, sin buscar coincidencias — dos leads llamados igual no
+      // tienen por qué ser la misma persona, y las empresas comparten
+      // carpetas y documentos. Nunca se reutiliza un nombre genérico.
+      var companyRaw = (lead.company||"").trim();
+      var empresa = null;
+      if(companyRaw){
+        empresa = searchEmpresasByName(companyRaw).filter(function(e){
+          return normalizeCompanyName(e.razon_social) === normalizeCompanyName(companyRaw);
+        })[0] || null;
+      }
+      if(!empresa) empresa = await addEmpresa(client, {razon_social: companyRaw || (lead.full_name||"").trim() || (lead.email||"").trim() || "Lead sin nombre"});
       await linkContactoEmpresa(client, contactRow.id, empresa.id, true);
       contactRow.company = empresa.razon_social;
     }
@@ -1708,8 +1739,8 @@
     empresasForContact:empresasForContact, contactsForEmpresa:contactsForEmpresa,
     linkContactoEmpresa:linkContactoEmpresa, addContactoEmpresaLink:addContactoEmpresaLink,
     setPrincipalEmpresa:setPrincipalEmpresa, removeContactoEmpresaLink:removeContactoEmpresaLink,
-    loadDocumentosForContacts:loadDocumentosForContacts, createEmpresaConContacto:createEmpresaConContacto,
-    MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosContacto:loadDocumentosContacto,
+    empresaPrincipalDe:empresaPrincipalDe, createEmpresaConContacto:createEmpresaConContacto,
+    MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosEmpresa:loadDocumentosEmpresa, loadCarpetasEmpresa:loadCarpetasEmpresa,
     docErrorMessage:docErrorMessage, carpetaNombreIssue:carpetaNombreIssue,
     crearCarpeta:crearCarpeta, renombrarCarpeta:renombrarCarpeta, borrarCarpeta:borrarCarpeta, moverDocumentos:moverDocumentos,
     subirDocumentoManual:subirDocumentoManual, borrarDocumento:borrarDocumento,
