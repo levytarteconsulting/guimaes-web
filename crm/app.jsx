@@ -947,8 +947,9 @@ function EmpresaDetail({id, nav, toast, user}){
   const [docCount,setDocCount]=uState(null);
   uEffect(()=>{ setDocCount(null); },[id]);
   const contactos = e ? CRM.contactsForEmpresa(id) : [];
+  const deals = CRM.DEALS.filter(d=>d.empresa===id);
   if(!e) return <div className="content"><Empty icon="building" title="Empresa no encontrada" sub="Puede que haya sido eliminada." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("empresas")}>Volver a empresas</button>}/></div>;
-  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"docs",label:"Documentos",n:docCount}];
+  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"deals",label:"Deals",n:deals.length},{id:"docs",label:"Documentos",n:docCount}];
   return (
     <div className="content">
       <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("empresas")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Empresas</button></div>
@@ -981,6 +982,19 @@ function EmpresaDetail({id, nav, toast, user}){
               </tr>;
             })}
           </tbody></table>{contactos.length===0 && <Empty icon="contacts" title="Sin contactos"/>}</div>}
+          {tab==="deals" && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Deal</th><th>Contacto</th><th>Servicio</th><th>Etapa</th><th>Importe</th><th>Owner</th></tr></thead><tbody>
+            {deals.map(d=>{
+              const c = CRM.contactById[d.contact];
+              return <tr key={d.id} style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}>
+                <td className="tbl__name">{d.title}</td>
+                <td className="tbl__sub">{c ? (c.full_name||c.company) : "—"}</td>
+                <td><ServiceBadge id={d.service}/></td>
+                <td><StageBadge id={d.stage}/></td>
+                <td className="mono">{CRM.fmtEUR(d.amount)} <span className="muted" style={{fontSize:11}}>/{d.frequency}</span></td>
+                <td>{ownerAvatar(d.owner)}</td>
+              </tr>;
+            })}
+          </tbody></table>{deals.length===0 && <Empty icon="briefcase" title="Sin deals"/>}</div>}
           {tab==="docs" && <EmpresaDocs empresaId={id} user={user} toast={toast} onCount={setDocCount}/>}
         </div>
       </div>
@@ -1702,12 +1716,20 @@ function Tasks({nav, toast, user, focusId}){
   );
 }
 
+// Empresa por defecto de un deal nuevo: la principal del contacto (mismo
+// criterio que public.empresa_principal_de y el trigger de deals).
+function principalEmpresaId(contactId){ return (contactId && CRM.empresaPrincipalDe(contactId)?.id) || ""; }
+
 function NewDeal({contactId, onClose, onSave}){
-  const [f,setF]=uState({title:"", contact:contactId||"", service:"", stage:"reunion", amount:"", frequency:"", priority:"", num_nominas:"", coste_nomina:20});
+  const [f,setF]=uState({title:"", contact:contactId||"", empresa:principalEmpresaId(contactId), service:"", stage:"reunion", amount:"", frequency:"", priority:"", num_nominas:"", coste_nomina:20});
   const [saving,setSaving]=uState(false);
   const isLaboral = f.service===LABORAL_SERVICE_ID;
   const computedAmount = (parseFloat(f.num_nominas)||0) * (parseFloat(f.coste_nomina)||0);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
+  // Selector de empresa solo si el contacto tiene varias; con una (o
+  // ninguna) no hay nada que elegir.
+  const empresasDelContacto = f.contact ? CRM.empresasForContact(f.contact) : [];
+  const setContact=(e)=>setF({...f, contact:e.target.value, empresa:principalEmpresaId(e.target.value)});
   const setService=(e)=>{
     const newId = e.target.value;
     const newName = CRM.serviceById(newId)?.name || "";
@@ -1727,13 +1749,14 @@ function NewDeal({contactId, onClose, onSave}){
       const payload = isLaboral
         ? {...f, amount:computedAmount, frequency:"mensual"}
         : {...f, num_nominas:"", coste_nomina:""};
-      await onSave(payload);
+      await onSave({...payload, empresa_id:f.empresa});
     }
     finally{ setSaving(false); }
   };
   return <Modal title="Nuevo deal" onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button><button className="btn btn--primary" onClick={save} disabled={saving}>{saving?"Creando…":"Crear deal"}</button></>}>
     <Field label="Título"><input className="inp" placeholder="Ej. CFO externo para escalado" value={f.title} onChange={set("title")}/></Field>
-    {!contactId && <Field label="Contacto"><select className="inp" value={f.contact} onChange={set("contact")}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>}
+    {!contactId && <Field label="Contacto"><select className="inp" value={f.contact} onChange={setContact}><option value="">— Selecciona un contacto —</option>{CRM.CONTACTS.map(c=><option key={c.id} value={c.id}>{c.company}</option>)}</select></Field>}
+    {empresasDelContacto.length>1 && <Field label="Empresa"><select className="inp" value={f.empresa} onChange={set("empresa")}>{empresasDelContacto.map(x=><option key={x.empresa.id} value={x.empresa.id}>{x.empresa.razon_social}{x.link.principal?" (principal)":""}</option>)}</select></Field>}
     <div className="fld-row">
       <Field label="Servicio"><select className="inp" value={f.service} onChange={setService}><option value="">— Sin especificar —</option>{CRM.SERVICES.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
       <Field label="Etapa"><select className="inp" value={f.stage} onChange={set("stage")}>{CRM.STAGES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></Field>
@@ -1804,11 +1827,11 @@ function Pipeline({nav, toast}){
             onDrop={e=>{e.preventDefault();setOver(null);if(drag)move(drag,col.id);}}>
             <div className="kcol__head"><span className="dot" style={{background:col.color,width:9,height:9}}></span><span className="kcol__title">{col.label}</span><span className="kcol__count">{items.length}</span><span className="kcol__sum">{sum?CRM.fmtEUR(sum):""}</span></div>
             <div className="kcol__body">
-              {items.map(d=>{ const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
+              {items.map(d=>{ const emp=CRM.empresaById[d.empresa]; const s=CRM.serviceById(d.service);
                 return <div key={d.id} className={"kcard"+(drag===d.id?" dragging":"")} draggable onDragStart={()=>setDrag(d.id)} onDragEnd={()=>{setDrag(null);setOver(null);}} onClick={()=>nav("deal",d.id)}>
                   <div className="kcard__top"><span className="dot" style={{background:s?.color || "#888"}}></span><span className="muted" style={{fontSize:11,fontWeight:600}}>{s?.short || "—"}</span><span className="right">{ownerAvatar(d.owner)}</span></div>
                   <div className="kcard__title">{d.title}</div>
-                  <div className="kcard__co">{c?.company}</div>
+                  <div className="kcard__co">{emp?.razon_social}</div>
                   <div className="kcard__foot"><span className="kcard__amt">{CRM.fmtEUR(d.amount)}</span><span className="kcard__freq">/{d.frequency}</span><span className="right"><PriorityDot id={d.priority}/></span></div>
                 </div>;
               })}
@@ -1889,7 +1912,7 @@ function DealDetail({id, nav, toast, user}){
       toast("No se pudo mover el deal: "+e.message);
     }
   };
-  const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service);
+  const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service); const emp=CRM.empresaById[d.empresa];
   const notes=CRM.NOTES.filter(n=>n.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
   const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
   const dealEmails=CRM.EMAILS.filter(e=>e.deal===id);
@@ -1901,7 +1924,7 @@ function DealDetail({id, nav, toast, user}){
       <div className="detail">
         <div className="detail__aside">
           <div className="profile">
-            <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:(s?.color || "#888")+"1A",color:s?.color || "#888",borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div><div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("contact",c.id)}>{c.company}</div></div>
+            <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:(s?.color || "#888")+"1A",color:s?.color || "#888",borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div>{emp ? <div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("empresa",emp.id)}>{emp.razon_social}</div> : <div className="profile__sub">Sin empresa</div>}{c && <div className="profile__sub" style={{cursor:"pointer"}} onClick={()=>nav("contact",c.id)}>{c.full_name||c.company}</div>}</div>
             <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/></div>
             <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{(d.service===LABORAL_SERVICE_ID && d.num_nominas && d.coste_nomina) ? <>{d.num_nominas} nóminas × {CRM.fmtEUR(d.coste_nomina)} = {CRM.fmtEUR(d.amount)}/mes</> : <>{CRM.fmtEUR(d.amount)} / {d.frequency}</>}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
             <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar deal</button>

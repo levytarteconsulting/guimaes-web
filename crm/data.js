@@ -542,7 +542,7 @@
     return n;
   }
 
-  var DEALS_COLUMNS = ["title","contact_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at","num_nominas","coste_nomina"];
+  var DEALS_COLUMNS = ["title","contact_id","empresa_id","service","stage","owner","amount","frequency","priority","loss_reason","signed_at","renewal_at","num_nominas","coste_nomina"];
   async function updateDeal(client, id, patch){
     var d = DEALS.find(function(x){return x.id===id;}); if(!d) return null;
     // Los deals de la maqueta no existen como fila en public.deals: solo se persiste en memoria.
@@ -551,6 +551,7 @@
       DEALS_COLUMNS.forEach(function(k){ if(patch[k]!==undefined) payload[k] = patch[k]; });
       delete payload.id;
       delete payload.created_at;
+      if(payload.empresa_id==="") payload.empresa_id = null;
       if(payload.amount!==undefined){
         payload.amount = (payload.amount===null || payload.amount==="") ? null : parseFloat(payload.amount);
         if(isNaN(payload.amount)) payload.amount = null;
@@ -568,6 +569,10 @@
       if(!res.data || res.data.length===0) throw new Error("El update no afectó a ninguna fila (id: "+id+")");
     }
     Object.assign(d, patch);
+    // patch usa los nombres de columna; el objeto en memoria, los de
+    // rowToDeal (mismo caso que updateTask).
+    if(patch.contact_id!==undefined) d.contact = patch.contact_id;
+    if(patch.empresa_id!==undefined) d.empresa = patch.empresa_id || null;
     return d;
   }
   // ---- Bandeja de entrada (Gmail — info@guimaes.es) ----
@@ -816,10 +821,15 @@
         return ((b.link.principal?1:0)-(a.link.principal?1:0)) || (a.link.created_at<b.link.created_at ? -1 : a.link.created_at>b.link.created_at ? 1 : 0);
       });
   }
-  // Empresa a la que van los adjuntos de WhatsApp del contacto: la
-  // principal o, si no hay ninguna marcada, la enlazada más antigua — el
-  // mismo criterio que public.empresa_principal_de en la BD, que es quien
-  // decide de verdad; esto es solo para decirlo en la interfaz.
+  // Empresa principal del contacto: la marcada como principal o, si no hay
+  // ninguna, la enlazada más antigua. DEBE mantener el mismo criterio que
+  // public.empresa_principal_de() en la BD (crm/supabase-carpetas.sql).
+  // No es solo informativa: además de decir en la interfaz adónde van los
+  // adjuntos de WhatsApp (ahí decide la BD), NewDeal (app.jsx) envía su
+  // resultado como empresa_id, y un empresa_id explícito prevalece sobre
+  // el trigger deals_rellenar_empresa. Si los dos criterios divergen, un
+  // deal creado desde la interfaz iría a otra empresa que uno creado sin
+  // ella (leads).
   function empresaPrincipalDe(contactId){
     var list = empresasForContact(contactId);
     return list.length ? list[0].empresa : null;
@@ -962,9 +972,12 @@
     // Deal opcional: si falla, NO se deshace nada de lo de arriba — mismo
     // criterio que loadWebLeads con dealFailures. Se avisa y se deja crear
     // a mano desde la ficha del contacto.
+    // empresa_id explícito: con un contacto existente, la empresa de este
+    // alta se enlaza como secundaria, y sin él el trigger pondría la
+    // principal — el deal es de la empresa que se está dando de alta.
     var deal = null, dealError = null;
     if(opts.dealFields){
-      try{ deal = await addDeal(client, Object.assign({}, opts.dealFields, {contact_id: contact.id})); }
+      try{ deal = await addDeal(client, Object.assign({}, opts.dealFields, {contact_id: contact.id, empresa_id: empresa ? empresa.id : undefined})); }
       catch(e){ dealError = e.message; }
     }
     return {contact:contact, empresa:empresa, deal:deal, dealError:dealError};
@@ -1358,6 +1371,10 @@
       id: row.id,
       title: row.title || "",
       contact: row.contact_id,
+      // Empresa del deal (ver crm/supabase-deals-empresa.sql): si el alta no
+      // la elige, el trigger deals_rellenar_empresa pone la principal del
+      // contacto. contact sigue siendo el interlocutor.
+      empresa: row.empresa_id || null,
       service: row.service || "",
       stage: row.stage || "reunion",
       owner: row.owner || "",
@@ -1392,7 +1409,7 @@
   async function addDeal(client, data){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     if(!data.contact_id) throw new Error("Un deal necesita un contacto asociado");
-    var fields = ["title","contact_id","service","stage","owner","amount","frequency","priority","num_nominas","coste_nomina"];
+    var fields = ["title","contact_id","empresa_id","service","stage","owner","amount","frequency","priority","num_nominas","coste_nomina"];
     var payload = {};
     fields.forEach(function(k){ if(data[k]!==undefined && data[k]!=="") payload[k] = data[k]; });
     if(!payload.stage) payload.stage = "reunion";
@@ -1722,9 +1739,10 @@
 
     // Empresa: igual que el alta manual, todo contacto debe tener una —
     // pero aquí no hay nadie que desambigüe, así que la resolución es
-    // automática: CIF si el lead trae uno y coincide, si no nombre
-    // normalizado SOLO si hay una única coincidencia, y si no (ninguna o
-    // varias) se crea una empresa nueva — nunca se adivina entre varias.
+    // automática y solo por nombre (el formulario web no pide CIF): se
+    // reutiliza una empresa existente si su razón social normalizada es
+    // idéntica a la del lead (si hubiera varias idénticas, la primera de
+    // EMPRESAS); si no, se crea una nueva.
     // Se comprueba primero si el contacto YA tiene empresa enlazada por si
     // esta función se reintenta tras un fallo que llegó hasta aquí en un
     // intento anterior (mismo criterio de idempotencia que el índice único
