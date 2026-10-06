@@ -30,7 +30,9 @@ create table if not exists public.contactos (
   kyc           boolean not null default false,  -- documentación KYC completada
   registered    boolean not null default false,  -- tiene acceso al área de cliente
 
-  -- Enlace con el login del área de cliente (se usa en la fase 2)
+  -- Enlace con el login del área de cliente (se usa en la fase 2). El
+  -- índice único parcial y la FK a auth.users (on delete set null) los
+  -- añade crm/supabase-portal-fase0.sql (bloque 3B).
   auth_user_id  uuid
 );
 

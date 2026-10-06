@@ -83,12 +83,39 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
 
+    // Solo dispositivos de administradores activos, con all:true y con
+    // user_ids: las notificaciones llevan datos del CRM (nombre y texto de un
+    // WhatsApp, leads nuevos) y en auth.users habrá cuentas que no son del
+    // equipo (área cliente). La service_role ignora la RLS de
+    // push_subscriptions, así que el filtro tiene que estar aquí también.
+    // Va en la propia consulta de suscripciones (user_id in admins), no en un
+    // bucle después. Son dos consultas porque push_subscriptions y admins no
+    // tienen FK entre sí (las dos apuntan a auth.users) y PostgREST no puede
+    // unirlas.
+    const { data: admins, error: adminsErr } = await supabase
+      .from("admins")
+      .select("auth_user_id")
+      .eq("activo", true)
+      .not("auth_user_id", "is", null);
+    if (adminsErr) throw adminsErr;
+    const adminIds = (admins || []).map((a) => a.auth_user_id as string);
+
     // all:true (notificar a todo el equipo) omite el filtro por usuario en vez
     // de que cada disparador tenga que consultar esta tabla por su cuenta —
     // "a quién avisar" es responsabilidad de esta función, no de sus llamantes.
-    let subsQuery = supabase.from("push_subscriptions").select("id, endpoint, p256dh, auth");
-    if (!sendToAll) subsQuery = subsQuery.in("user_id", userIds);
-    const { data: subs, error: subsErr } = await subsQuery;
+    // Con user_ids, los destinatarios son los que además sean admin activo:
+    // un user_id que no lo sea no recibe nada.
+    const destinatarios = sendToAll ? adminIds : userIds.filter((id) => adminIds.includes(id));
+    if (destinatarios.length === 0) {
+      return new Response(
+        JSON.stringify({ ok: true, targeted: 0, sent: 0, failed: 0, removed: 0 }),
+        { status: 200, headers: corsHeaders },
+      );
+    }
+    const { data: subs, error: subsErr } = await supabase
+      .from("push_subscriptions")
+      .select("id, endpoint, p256dh, auth")
+      .in("user_id", destinatarios);
     if (subsErr) throw subsErr;
 
     // url: reservado para cuando el CRM tenga rutas de verdad y el service

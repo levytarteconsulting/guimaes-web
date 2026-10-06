@@ -50,7 +50,7 @@ function GoogleG({size=18}){
     <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .94 4.97l3.01 2.33C4.66 5.17 6.65 3.58 9 3.58Z"/>
   </svg>;
 }
-function Login({onLogin, onPortal}){
+function Login({onLogin}){
   const [email,setEmail]=uState(""); const [password,setPassword]=uState("");
   const [err,setErr]=uState(null); const [busy,setBusy]=uState(false); const [resetSent,setResetSent]=uState(false);
 
@@ -3147,34 +3147,6 @@ function NewService({onClose,onSave}){
   </Modal>;
 }
 
-/* ============ PORTAL CLIENTE ============ */
-function Portal({onExit, toast}){
-  const client = CRM.contactById["c1"]; // demo: Nordia Logística
-  const myDeals = CRM.DEALS.filter(d=>d.contact===client.id && d.stage==="cliente_activo");
-  const myDocs = CRM.DOCUMENTS.filter(d=>d.contact===client.id && d.visible);
-  const [req,setReq]=uState(false);
-  return <div className="portal">
-    <div className="portal__nav"><span className="sb-brand__logo" style={{color:"var(--ink)"}}>GUIMAES</span><span className="badge" style={{background:"var(--accent-soft)",color:"var(--accent-ink)"}}>Área cliente</span><div className="right row" style={{gap:12}}><Avatar name={client.company} size="sm" color={CRM.colorFor(client.company)}/><span style={{fontWeight:600,fontSize:14}}>{client.company}</span><button className="btn btn--sm btn--ghost" onClick={onExit}><Icon name="logout" size={15}/>Salir</button></div></div>
-    <div className="portal__wrap">
-      <h1 style={{fontSize:28}}>Hola, {client.full_name.split(" ")[0]} 👋</h1>
-      <p className="muted" style={{marginBottom:24}}>Tus servicios activos con GUIMAES y tus documentos, en un solo sitio.</p>
-      <div className="row" style={{justifyContent:"space-between",marginBottom:12}}><h3 style={{fontSize:17}}>Tus servicios activos</h3><button className="btn btn--sm btn--primary" onClick={()=>setReq(true)}><Icon name="plus" size={15}/>Solicitar nuevo servicio</button></div>
-      <div className="svc-grid">
-        {myDeals.map(d=>{ const s=CRM.serviceById(d.service);
-          return <div key={d.id} className="svc-card"><div className="row" style={{gap:10}}><div className="lrow__ico" style={{background:s.color+"1A",color:s.color}}><Icon name="briefcase" size={18}/></div><div><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{s.name}</div><div className="muted" style={{fontSize:12}}>{d.title}</div></div></div><div className="row" style={{justifyContent:"space-between",marginTop:14}}><span className="muted" style={{fontSize:12}}>Cuota {d.frequency}</span><span style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</span></div>{d.renewal&&<div className="muted" style={{fontSize:12,marginTop:6}}>Renueva el {d.renewal}</div>}</div>;
-        })}
-      </div>
-      <h3 style={{fontSize:17,margin:"28px 0 12px"}}>Documentos compartidos</h3>
-      <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Documento</th><th>Tipo</th><th>Fecha</th><th></th></tr></thead><tbody>{myDocs.map(d=><tr key={d.id}><td className="row" style={{gap:10}}><div className="lrow__ico"><Icon name="documents" size={17}/></div><span className="tbl__name">{d.name}</span></td><td><Badge label={d.type} color="#6E8298"/></td><td className="tbl__sub">{d.at}</td><td><button className="btn btn--sm btn--ghost" onClick={()=>toast("Descargando…")}><Icon name="download" size={14}/>Descargar</button></td></tr>)}</tbody></table></div>
-    </div>
-    {req && <Modal title="Solicitar un nuevo servicio" onClose={()=>setReq(false)} footer={<><button className="btn btn--ghost" onClick={()=>setReq(false)}>Cancelar</button><button className="btn btn--primary" onClick={()=>{setReq(false);toast("Solicitud enviada — se ha creado un lead en el CRM");}}>Enviar solicitud</button></>}>
-      <p className="muted" style={{marginBottom:14}}>Elige el servicio que te interesa. Tu asesor recibirá la solicitud como una nueva oportunidad.</p>
-      <Field label="Servicio"><select className="inp">{CRM.SERVICES.map(s=><option key={s.id}>{s.name}</option>)}</select></Field>
-      <Field label="Comentario"><textarea className="inp" placeholder="Cuéntanos brevemente qué necesitas…"></textarea></Field>
-    </Modal>}
-  </div>;
-}
-
 /* ============ WEB LEAD (demo integración) — botón flotante ============ */
 function WebLeadDemo({onLead}){
   const [open,setOpen]=uState(false);
@@ -3278,16 +3250,15 @@ function viewToSearch(name, id){
   if(id) params.set("id", id);
   return "?"+params.toString();
 }
-// Lee {portal, view} a partir de un search string ("?view=...&id=...").
+// Lee la vista {name, id} a partir de un search string ("?view=...&id=...").
 // Se reutiliza tanto al arrancar (window.location.search) como al recibir el
 // postMessage del service worker (con la URL del push, ver App más abajo).
 function parseViewFromSearch(search){
   const params = new URLSearchParams(search);
   const name = params.get("view");
   const id = params.get("id");
-  if(name==="portal") return {portal:true, view:{name:"home", id:null}};
-  if(name && ROUTABLE_VIEWS.includes(name)) return {portal:false, view:{name, id:id||null}};
-  return {portal:false, view:{name:"home", id:null}};
+  if(name && ROUTABLE_VIEWS.includes(name)) return {name, id:id||null};
+  return {name:"home", id:null};
 }
 
 /* ============ ROOT ============ */
@@ -3295,9 +3266,9 @@ function App(){
   // Estado inicial leído de la URL una sola vez, al montar — cubre tanto una
   // recarga como un deep-link abierto directamente (p. ej. desde una
   // notificación push cuando no había ninguna pestaña abierta ya).
-  const initialRoute = uMemo(()=>parseViewFromSearch(window.location.search), []);
-  const [user,setUser]=uState(null); const [portal,setPortal]=uState(initialRoute.portal);
-  const [view,setView]=uState(initialRoute.view); const [toast,fireToast]=useToast();
+  const initialView = uMemo(()=>parseViewFromSearch(window.location.search), []);
+  const [user,setUser]=uState(null);
+  const [view,setView]=uState(initialView); const [toast,fireToast]=useToast();
   const [booting,setBooting]=uState(true); const [recovery,setRecovery]=uState(false);
 
   uEffect(()=>{
@@ -3346,20 +3317,16 @@ function App(){
     if(window.location.search!==search) window.history.pushState({name,id}, "", search);
   };
   const nav=(name,id=null)=>{
-    if(name==="portal"){ setPortal(true); pushUrl("portal", null); return; }
     setView({name,id});
     pushUrl(name,id);
   };
-  const exitPortal=()=>{ setPortal(false); pushUrl(view.name, view.id); };
   const logout=async()=>{ await Auth.signOut(); setUser(null); nav("home"); };
 
   // Atrás/adelante del navegador: la URL ya la actualiza el propio navegador
   // antes de disparar popstate, así que basta con releer window.location.
   uEffect(()=>{
     const onPopState=()=>{
-      const r = parseViewFromSearch(window.location.search);
-      setPortal(r.portal);
-      setView(r.view);
+      setView(parseViewFromSearch(window.location.search));
     };
     window.addEventListener("popstate", onPopState);
     return ()=>window.removeEventListener("popstate", onPopState);
@@ -3374,7 +3341,7 @@ function App(){
       if(!event.data || event.data.type!=="push-navigate" || !event.data.url) return;
       const targetUrl = new URL(event.data.url, window.location.origin);
       const r = parseViewFromSearch(targetUrl.search);
-      nav(r.portal?"portal":r.view.name, r.portal?null:r.view.id);
+      nav(r.name, r.id);
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return ()=>navigator.serviceWorker.removeEventListener("message", onMessage);
@@ -3382,8 +3349,7 @@ function App(){
 
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
-  if(!user && !portal) return <><Login onLogin={u=>setUser(u)} onPortal={()=>nav("portal")}/><Toast msg={toast}/></>;
-  if(portal) return <><Portal onExit={exitPortal} toast={fireToast}/><Toast msg={toast}/></>;
+  if(!user) return <><Login onLogin={u=>setUser(u)}/><Toast msg={toast}/></>;
   const titles={home:["Inicio","Resumen del despacho"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;

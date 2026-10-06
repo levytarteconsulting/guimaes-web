@@ -102,7 +102,11 @@
   }
   function sbClient() {
     if (_sbClient) return _sbClient;
-    if (window.supabase) _sbClient = window.supabase.createClient(SB_URL, SB_KEY);
+    // Sin sesión: el formulario solo inserta en leads como anon. Comparte
+    // origen con el CRM (crm/auth.js usa la clave de sesión por defecto); con
+    // persistencia, este cliente leería y refrescaría la sesión de un admin
+    // que tenga el CRM abierto en el mismo navegador.
+    if (window.supabase) _sbClient = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
     return _sbClient;
   }
 

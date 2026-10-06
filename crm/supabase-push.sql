@@ -39,26 +39,37 @@ create index if not exists push_subscriptions_user_idx on public.push_subscripti
 -- A diferencia del resto de tablas del CRM (cualquier admin autenticado ve
 -- todo), aquí cada usuario SOLO puede ver/crear/borrar SUS PROPIAS
 -- suscripciones — son credenciales de su dispositivo, no datos de negocio
--- compartidos. push-send (Edge Function) usa la service_role key y por tanto
--- no pasa por estas políticas.
+-- compartidos — y además tiene que ser administrador activo: en auth.users
+-- también hay cuentas del área cliente, que no deben recibir avisos del
+-- CRM (ver crm/supabase-portal-fase0.sql). push-send (Edge Function) usa
+-- la service_role key y por tanto no pasa por estas políticas: filtra por
+-- admins en su propia consulta.
 -- ============================================================
 alter table public.push_subscriptions enable row level security;
 
 drop policy if exists "usuarios leen sus push_subscriptions" on public.push_subscriptions;
-create policy "usuarios leen sus push_subscriptions"
-  on public.push_subscriptions for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "admins leen sus push_subscriptions" on public.push_subscriptions;
+create policy "admins leen sus push_subscriptions"
+  on public.push_subscriptions for select to authenticated
+  using ((select auth.uid()) = user_id and (select public.is_admin()));
 
 drop policy if exists "usuarios crean sus push_subscriptions" on public.push_subscriptions;
-create policy "usuarios crean sus push_subscriptions"
-  on public.push_subscriptions for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "admins crean sus push_subscriptions" on public.push_subscriptions;
+create policy "admins crean sus push_subscriptions"
+  on public.push_subscriptions for insert to authenticated
+  with check ((select auth.uid()) = user_id and (select public.is_admin()));
 
--- No la pediste explícitamente (pediste "ve y borra"), pero hace falta para
--- que el upsert de re-suscripción (mismo endpoint → refresca claves/fecha en
--- vez de duplicar) funcione bajo RLS — sin UPDATE, ese upsert fallaría.
+-- UPDATE hace falta para que el upsert de re-suscripción (mismo endpoint →
+-- refresca claves/fecha en vez de duplicar) funcione bajo RLS.
 drop policy if exists "usuarios actualizan sus push_subscriptions" on public.push_subscriptions;
-create policy "usuarios actualizan sus push_subscriptions"
-  on public.push_subscriptions for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "admins actualizan sus push_subscriptions" on public.push_subscriptions;
+create policy "admins actualizan sus push_subscriptions"
+  on public.push_subscriptions for update to authenticated
+  using ((select auth.uid()) = user_id and (select public.is_admin()))
+  with check ((select auth.uid()) = user_id and (select public.is_admin()));
 
 drop policy if exists "usuarios borran sus push_subscriptions" on public.push_subscriptions;
-create policy "usuarios borran sus push_subscriptions"
-  on public.push_subscriptions for delete to authenticated using (auth.uid() = user_id);
+drop policy if exists "admins borran sus push_subscriptions" on public.push_subscriptions;
+create policy "admins borran sus push_subscriptions"
+  on public.push_subscriptions for delete to authenticated
+  using ((select auth.uid()) = user_id and (select public.is_admin()));

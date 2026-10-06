@@ -4,7 +4,13 @@
   var cfg = window.SUPABASE_CONFIG || {};
   var configured = !!(cfg.url && cfg.anonKey &&
     cfg.url.indexOf("YOUR-PROJECT") === -1 && cfg.anonKey.indexOf("YOUR-ANON-KEY") === -1);
-  var client = (configured && window.supabase) ? window.supabase.createClient(cfg.url, cfg.anonKey) : null;
+  // storageKey propia: el CRM (crm/auth.js) vive en el mismo origen y usa la
+  // clave por defecto de supabase-js (sb-<ref>-auth-token). Con la misma
+  // clave, las dos apps compartirían sesión: entrar en una cambiaría o
+  // cerraría la sesión de la otra.
+  var client = (configured && window.supabase)
+    ? window.supabase.createClient(cfg.url, cfg.anonKey, { auth: { storageKey: "guimaes-portal-auth" } })
+    : null;
 
   // PASSWORD_RECOVERY: Supabase lo dispara UNA sola vez, muy pronto (dentro
   // de su propio setTimeout(0) al detectar el token de recuperación en la
