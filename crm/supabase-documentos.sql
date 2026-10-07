@@ -105,7 +105,7 @@ alter table public.documentos add constraint documentos_status_check
 
 alter table public.documentos drop constraint if exists documentos_source_check;
 alter table public.documentos add constraint documentos_source_check
-  check (source in ('manual','whatsapp'));
+  check (source in ('manual','whatsapp','cliente'));
 
 create unique index if not exists documentos_storage_path_key on public.documentos (storage_path);
 create unique index if not exists documentos_whatsapp_message_id_key
@@ -117,6 +117,40 @@ create unique index if not exists documentos_whatsapp_message_id_key
 -- columna.
 create index if not exists documentos_whatsapp_conversation_idx
   on public.documentos (whatsapp_conversation_id);
+
+-- Compartido con el cliente: cuándo y qué admin puso visible = true
+-- (crm/supabase-portal-fase1.sql). Lo rellena el trigger con auth.uid();
+-- se limpia al dejar de compartir y no se puede tocar a mano mientras
+-- visible no cambie. shared_by → admins(id), como uploaded_by.
+alter table public.documentos add column if not exists shared_at timestamptz;
+alter table public.documentos add column if not exists shared_by uuid references public.admins(id) on delete set null;
+
+create or replace function public.documentos_registrar_compartido()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if tg_op = 'UPDATE' and new.visible is not distinct from old.visible then
+    new.shared_at := old.shared_at;
+    new.shared_by := old.shared_by;
+  elsif new.visible then
+    new.shared_at := now();
+    new.shared_by := (select a.id from public.admins a where a.auth_user_id = auth.uid());
+  else
+    new.shared_at := null;
+    new.shared_by := null;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.documentos_registrar_compartido() from public, anon, authenticated, service_role;
+
+drop trigger if exists documentos_registrar_compartido on public.documentos;
+create trigger documentos_registrar_compartido
+  before insert or update on public.documentos
+  for each row execute function public.documentos_registrar_compartido();
 
 drop trigger if exists documentos_set_updated_at on public.documentos;
 create trigger documentos_set_updated_at

@@ -35,3 +35,23 @@ verify_jwt = true  # explícito: la llama el CRM autenticado, igual que whatsapp
 [functions.push-send]
 entrypoint = "../supabase-functions/push-send/index.ts"
 verify_jwt = true  # bloquea peticiones sin ningún JWT válido; el propio código exige además que sea EXACTAMENTE la service_role key, no cualquier usuario autenticado
+
+# Área cliente (crm/supabase-portal-fase1.sql). Las cuatro con verify_jwt:
+# las tres primeras las llama el navegador con el JWT del usuario (y
+# validan llamando a las RPC con ese mismo JWT); portal-limpieza la llama
+# pg_cron con la anon key y el secreto en x-hook-secret.
+[functions.portal-descargar]
+entrypoint = "../supabase-functions/portal-descargar/index.ts"
+verify_jwt = true
+
+[functions.portal-subir]
+entrypoint = "../supabase-functions/portal-subir/index.ts"
+verify_jwt = true
+
+[functions.portal-cuentas]
+entrypoint = "../supabase-functions/portal-cuentas/index.ts"
+verify_jwt = true
+
+[functions.portal-limpieza]
+entrypoint = "../supabase-functions/portal-limpieza/index.ts"
+verify_jwt = true

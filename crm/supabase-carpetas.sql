@@ -75,11 +75,16 @@ alter table public.carpetas add constraint carpetas_nombre_check
 
 alter table public.carpetas drop constraint if exists carpetas_system_key_check;
 alter table public.carpetas add constraint carpetas_system_key_check
-  check (system_key in ('whatsapp'));
+  check (system_key in ('whatsapp', 'cliente'));
 
 alter table public.carpetas drop constraint if exists carpetas_whatsapp_reservado_check;
 alter table public.carpetas add constraint carpetas_whatsapp_reservado_check
   check ((system_key is not distinct from 'whatsapp') = (lower(btrim(nombre)) = 'whatsapp'));
+
+-- "Aportados por el cliente" reservado igual para la carpeta de sistema 'cliente'.
+alter table public.carpetas drop constraint if exists carpetas_cliente_reservado_check;
+alter table public.carpetas add constraint carpetas_cliente_reservado_check
+  check ((system_key is not distinct from 'cliente') = (lower(btrim(nombre)) = 'aportados por el cliente'));
 
 alter table public.carpetas drop constraint if exists carpetas_id_empresa_key cascade;
 alter table public.carpetas add constraint carpetas_id_empresa_key unique (id, empresa_id);
@@ -248,18 +253,52 @@ as $$
   limit 1;
 $$;
 
+-- Carpeta "Aportados por el cliente" de la empresa, creándola si no
+-- existe (mismo patrón y misma concurrencia que carpeta_whatsapp). Ahí
+-- van las subidas del área cliente (crm/supabase-portal-fase1.sql). No
+-- se puede renombrar; vacía se puede borrar y se recrea en la siguiente
+-- subida. SECURITY INVOKER con EXECUTE para authenticated y service_role:
+-- la llama el trigger de empresas (vía sembrar_carpetas_por_defecto) con el
+-- rol de quien crea la empresa (el CRM, o código de servidor con la clave
+-- de servicio); a un cliente la RLS de carpetas no le deja hacer nada.
+create or replace function public.carpeta_cliente(p_empresa_id uuid)
+returns uuid
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_id uuid;
+begin
+  insert into public.carpetas (empresa_id, nombre, system_key, orden)
+  values (p_empresa_id, 'Aportados por el cliente', 'cliente', 90)
+  on conflict (empresa_id, system_key) where system_key is not null do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    select id into v_id from public.carpetas
+    where empresa_id = p_empresa_id and system_key = 'cliente';
+  end if;
+  return v_id;
+end;
+$$;
+revoke all on function public.carpeta_cliente(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.carpeta_cliente(uuid) to authenticated, service_role;
+
 -- Juego por defecto. La lista vive SOLO aquí.
 create or replace function public.sembrar_carpetas_por_defecto(p_empresa_id uuid)
 returns void
-language sql
+language plpgsql
 set search_path = public
 as $$
+begin
   insert into public.carpetas (empresa_id, nombre, orden)
   values (p_empresa_id, 'Fiscal',    1),
          (p_empresa_id, 'Laboral',   2),
          (p_empresa_id, 'Mercantil', 3),
          (p_empresa_id, 'Contratos', 4)
   on conflict do nothing;
+  perform public.carpeta_cliente(p_empresa_id);
+end;
 $$;
 
 -- Al crear una empresa, por cualquier camino (alta guiada, alta de
@@ -280,6 +319,9 @@ drop trigger if exists empresas_sembrar_carpetas on public.empresas;
 create trigger empresas_sembrar_carpetas
   after insert on public.empresas
   for each row execute function public.empresas_sembrar_carpetas();
+
+-- Empresas ya existentes: su carpeta "Aportados por el cliente" (idempotente).
+select public.carpeta_cliente(e.id) from public.empresas e;
 
 -- Carpeta WhatsApp de la empresa, creándola si no existe. Concurrencia: si
 -- dos adjuntos llegan a la vez, el segundo "on conflict" espera al commit
@@ -340,6 +382,9 @@ begin
     if new.parent_id is distinct from old.parent_id
        and (old.parent_id is null or new.parent_id is null) then
       raise exception 'Solo se puede mover una subcarpeta a otra carpeta raíz';
+    end if;
+    if old.system_key = 'cliente' and new.nombre is distinct from old.nombre then
+      raise exception 'La carpeta "Aportados por el cliente" no se puede renombrar';
     end if;
     if old.system_key = 'whatsapp' and new.nombre is distinct from old.nombre then
       if exists (select 1 from public.documentos where folder_id = old.id) then
@@ -416,6 +461,10 @@ begin
     new.folder_id := null;
   end if;
   if new.folder_id is not null then
+    if new.source <> 'cliente'
+       and exists (select 1 from public.carpetas where id = new.folder_id and system_key = 'cliente') then
+      raise exception 'En "Aportados por el cliente" solo puede haber documentos aportados por el cliente';
+    end if;
     return new;
   end if;
 
@@ -603,8 +652,8 @@ begin
   select coalesce(array_agg(id), '{}') into v_docs from public.documentos where folder_id = p_carpeta_id;
 
   if cardinality(v_docs) > 0 then
-    if v_carpeta.system_key = 'whatsapp' then
-      raise exception 'La carpeta WhatsApp tiene documentos: muévelos antes de borrarla';
+    if v_carpeta.system_key is not null then
+      raise exception 'La carpeta "%" es de sistema y tiene documentos: muévelos antes de borrarla', v_carpeta.nombre;
     end if;
     if p_destino is null then
       raise exception 'La carpeta "%" tiene % documento(s): indica la carpeta destino', v_carpeta.nombre, cardinality(v_docs);
@@ -668,8 +717,8 @@ begin
   if v_destino.parent_id is not null then
     raise exception 'El destino tiene que ser una carpeta raíz: "%" ya es una subcarpeta', v_destino.nombre;
   end if;
-  if v_destino.system_key = 'whatsapp' then
-    raise exception 'La carpeta WhatsApp no admite subcarpetas';
+  if v_destino.system_key is not null then
+    raise exception 'La carpeta "%" es de sistema y no admite subcarpetas', v_destino.nombre;
   end if;
   if exists (select 1 from public.carpetas
              where parent_id = p_nuevo_padre and id <> p_carpeta_id
