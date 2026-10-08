@@ -1454,6 +1454,47 @@
     return res.data;
   }
 
+  // ---- Área cliente: lo que el cliente cambia o pide sobre su empresa ----
+  // (crm/supabase-portal-fase31.sql). Lectura directa: las dos tablas son de
+  // solo lectura para admins (RLS is_admin()).
+  async function loadSolicitudesEmpresa(client, empresaId){
+    var res = await client.from("empresa_solicitudes").select("*, contacto:contactos(full_name, email)")
+      .eq("empresa_id", empresaId).order("created_at", {ascending:false});
+    if(res.error) throw res.error;
+    return res.data || [];
+  }
+  async function loadCambiosEmpresa(client, empresaId){
+    var res = await client.from("empresa_cambios").select("*, contacto:contactos(full_name, email)")
+      .eq("empresa_id", empresaId).order("created_at", {ascending:false}).limit(100);
+    if(res.error) throw res.error;
+    return res.data || [];
+  }
+  // Aplica (o rechaza) una solicitud de cambio de razón social o CIF. Al
+  // aplicarla se relee la empresa (y contactos.company, que lo sincroniza un
+  // trigger al cambiar la razón social) para que el CRM lo vea sin recargar.
+  async function resolverSolicitud(client, solicitud, aplicar){
+    var res = await client.rpc("admin_resolver_solicitud", {p_solicitud_id: solicitud.id, p_aplicar: !!aplicar});
+    if(res.error) throw res.error;
+    if(aplicar){
+      var er = await client.from("empresas").select("*").eq("id", solicitud.empresa_id).maybeSingle();
+      if(!er.error && er.data){
+        var e = empresaById[solicitud.empresa_id];
+        if(e) Object.assign(e, rowToEmpresa(er.data));
+      }
+      await refreshContactsCompany(client, contactsForEmpresa(solicitud.empresa_id).map(function(c){ return c.id; }));
+    }
+    return res.data && res.data[0] ? res.data[0].estado : null;
+  }
+  // Tras un cambio de dirección hecho por el cliente, el CRM puede tener la
+  // empresa en caché con los datos viejos: se relee al abrir su ficha.
+  async function refrescarEmpresa(client, empresaId){
+    var er = await client.from("empresas").select("*").eq("id", empresaId).maybeSingle();
+    if(er.error || !er.data) return null;
+    var e = empresaById[empresaId];
+    if(e) Object.assign(e, rowToEmpresa(er.data));
+    return e;
+  }
+
   // ---- Deals reales (tabla "deals" de Supabase) ----
   function rowToDeal(row){
     return {
@@ -1464,6 +1505,8 @@
       // la elige, el trigger deals_rellenar_empresa pone la principal del
       // contacto. contact sigue siendo el interlocutor.
       empresa: row.empresa_id || null,
+      // 'portal' si lo pidió el cliente desde el área cliente (crm/supabase-portal-fase31.sql).
+      origen: row.origen || "crm",
       service: row.service || "",
       stage: row.stage || "reunion",
       owner: row.owner || "",
@@ -1960,6 +2003,8 @@
     CUENTAS_PENDIENTES:CUENTAS_PENDIENTES, loadCuentasPendientes:loadCuentasPendientes,
     vincularCuentaPortal:vincularCuentaPortal, eliminarCuentaPortal:eliminarCuentaPortal,
     cuentaDeContacto:cuentaDeContacto, desvincularCuentaPortal:desvincularCuentaPortal,
+    loadSolicitudesEmpresa:loadSolicitudesEmpresa, loadCambiosEmpresa:loadCambiosEmpresa,
+    resolverSolicitud:resolverSolicitud, refrescarEmpresa:refrescarEmpresa,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,

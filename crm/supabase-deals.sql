@@ -8,6 +8,9 @@
 -- antes empresas, contacto_empresa y public.empresa_principal_de()
 -- (supabase-empresas.sql y supabase-carpetas.sql). Esa es su única fuente,
 -- igual que las políticas lo son de supabase-rls-solo-admins.sql.
+--
+-- origen ('crm' por defecto, o 'portal' si lo pidió el cliente desde el
+-- área cliente) lo añade crm/supabase-portal-fase31.sql (bloque 1B).
 -- ============================================================
 
 create table if not exists public.deals (

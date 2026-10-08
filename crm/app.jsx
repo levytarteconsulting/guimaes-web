@@ -999,10 +999,22 @@ function EmpresaDetail({id, nav, toast, user}){
   // (null hasta entonces).
   const [docCount,setDocCount]=uState(null);
   uEffect(()=>{ setDocCount(null); },[id]);
+  // Área cliente: solicitudes de cambio (razón social / CIF) y cambios que ha
+  // hecho el cliente. Se cargan al abrir la ficha para el contador de la
+  // pestaña; de paso se relee la empresa por si el cliente cambió su dirección.
+  const [portal,setPortal]=uState(null); // {solicitudes, cambios} | {error}
+  const cargarPortal=async()=>{
+    try{
+      const [solicitudes, cambios] = await Promise.all([CRM.loadSolicitudesEmpresa(Auth.client, id), CRM.loadCambiosEmpresa(Auth.client, id)]);
+      setPortal({solicitudes, cambios});
+    }catch(err){ setPortal({error: CRM.docErrorMessage(err), solicitudes:[], cambios:[]}); }
+  };
+  uEffect(()=>{ setPortal(null); cargarPortal(); CRM.refrescarEmpresa(Auth.client, id).then(bump); },[id]);
   const contactos = e ? CRM.contactsForEmpresa(id) : [];
   const deals = CRM.DEALS.filter(d=>d.empresa===id);
+  const pendientesPortal = portal ? portal.solicitudes.filter(x=>x.estado==="pendiente").length : null;
   if(!e) return <div className="content"><Empty icon="building" title="Empresa no encontrada" sub="Puede que haya sido eliminada." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("empresas")}>Volver a empresas</button>}/></div>;
-  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"deals",label:"Deals",n:deals.length},{id:"docs",label:"Documentos",n:docCount}];
+  const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"deals",label:"Deals",n:deals.length},{id:"docs",label:"Documentos",n:docCount},{id:"portal",label:"Área cliente",n:pendientesPortal||null}];
   return (
     <div className="content">
       <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("empresas")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Empresas</button></div>
@@ -1049,6 +1061,7 @@ function EmpresaDetail({id, nav, toast, user}){
             })}
           </tbody></table>{deals.length===0 && <Empty icon="briefcase" title="Sin deals"/>}</div>}
           {tab==="docs" && <EmpresaDocs empresaId={id} user={user} toast={toast} onCount={setDocCount}/>}
+          {tab==="portal" && <EmpresaPortalTab empresa={e} portal={portal} toast={toast} onCambio={()=>{ cargarPortal(); bump(); }}/>}
         </div>
       </div>
       {showEdit && <EditEmpresa empresa={e} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
@@ -1063,6 +1076,68 @@ function EmpresaDetail({id, nav, toast, user}){
       }}/>}
     </div>
   );
+}
+// Ficha de empresa → "Área cliente": solicitudes de cambio de razón social o
+// CIF (aplicar / rechazar) y el historial de lo que el cliente cambia
+// directamente (dirección, ciudad, provincia).
+const CAMPO_EMPRESA = {razon_social:"Razón social", cif:"CIF", address:"Dirección", city:"Ciudad", province:"Provincia"};
+function EmpresaPortalTab({empresa, portal, toast, onCambio}){
+  const [busyId,setBusyId]=uState(null);
+  const [confirmar,setConfirmar]=uState(null); // {solicitud, aplicar}
+  if(!portal) return <div className="muted" style={{padding:16}}>Cargando…</div>;
+  if(portal.error) return <div className="card"><div className="card__body"><Empty icon="users" title="No se pudo cargar" sub={portal.error}/></div></div>;
+  const pendientes = portal.solicitudes.filter(x=>x.estado==="pendiente");
+  const resueltas = portal.solicitudes.filter(x=>x.estado!=="pendiente");
+  const quien = (x)=> x.contacto ? (x.contacto.full_name || x.contacto.email) : "—";
+  const fechaHora = (iso)=> iso ? new Date(iso).toLocaleString("es-ES", {dateStyle:"short", timeStyle:"short"}) : "—";
+  const resolver=async()=>{
+    const {solicitud, aplicar} = confirmar;
+    setBusyId(solicitud.id);
+    try{
+      await CRM.resolverSolicitud(Auth.client, solicitud, aplicar);
+      toast(aplicar ? CAMPO_EMPRESA[solicitud.campo]+" actualizado" : "Solicitud rechazada");
+      setConfirmar(null); onCambio();
+    }catch(err){ toast("No se pudo: "+err.message); }
+    finally{ setBusyId(null); }
+  };
+  return <div className="wrap-gap">
+    <div className="card"><div className="card__head"><h3>Solicitudes de cambio</h3></div><div className="card__body">
+      {pendientes.length===0 ? <span className="muted">No hay solicitudes pendientes.</span>
+      : pendientes.map(x=><div key={x.id} className="lrow" style={{alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+          <div className="lrow__main" style={{minWidth:220}}>
+            <div className="lrow__title">{CAMPO_EMPRESA[x.campo]}: <span className="muted" style={{textDecoration:"line-through"}}>{x.valor_actual||"—"}</span> → <b>{x.valor_solicitado}</b></div>
+            <div className="lrow__sub">Pedido por {quien(x)} · {fechaHora(x.created_at)}{x.comentario ? " · «"+x.comentario+"»" : ""}</div>
+          </div>
+          <div className="row" style={{gap:6}}>
+            <button className="btn btn--sm btn--primary" disabled={busyId===x.id} onClick={()=>setConfirmar({solicitud:x, aplicar:true})}><Icon name="check" size={14}/>Aplicar</button>
+            <button className="btn btn--sm btn--ghost" disabled={busyId===x.id} onClick={()=>setConfirmar({solicitud:x, aplicar:false})}><Icon name="x" size={14}/>Rechazar</button>
+          </div>
+        </div>)}
+      {resueltas.length>0 && <div className="muted" style={{fontSize:12.5,marginTop:12}}>
+        Resueltas: {resueltas.slice(0,5).map(x=>CAMPO_EMPRESA[x.campo]+" → "+x.valor_solicitado+" ("+x.estado+", "+fechaHora(x.resuelta_at)+")").join(" · ")}
+      </div>}
+    </div></div>
+    <div className="card"><div className="card__head"><h3>Cambios hechos por el cliente</h3></div>
+      {portal.cambios.length===0 ? <div className="card__body"><span className="muted">El cliente no ha cambiado ningún dato desde el área cliente.</span></div>
+      : <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Fecha</th><th>Dato</th><th>Antes</th><th>Ahora</th><th>Quién</th></tr></thead><tbody>
+          {portal.cambios.map(x=><tr key={x.id}>
+            <td className="tbl__sub">{fechaHora(x.created_at)}</td>
+            <td>{CAMPO_EMPRESA[x.campo]}</td>
+            <td className="tbl__sub">{x.valor_anterior||"—"}</td>
+            <td>{x.valor_nuevo||"—"}</td>
+            <td className="tbl__sub">{quien(x)}</td>
+          </tr>)}
+        </tbody></table></div>}
+    </div>
+    {confirmar && <Modal title={confirmar.aplicar ? "Aplicar cambio" : "Rechazar solicitud"} onClose={()=>{ if(!busyId) setConfirmar(null); }} footer={<>
+      <button className="btn btn--ghost" onClick={()=>setConfirmar(null)} disabled={!!busyId}>Cancelar</button>
+      <button className={"btn "+(confirmar.aplicar?"btn--primary":"btn--danger")} onClick={resolver} disabled={!!busyId}>{busyId?"Guardando…":(confirmar.aplicar?"Aplicar":"Rechazar")}</button>
+    </>}>
+      {confirmar.aplicar
+        ? <p className="muted">La {CAMPO_EMPRESA[confirmar.solicitud.campo].toLowerCase()} de <b>{empresa.razon_social}</b> pasará a ser <b>{confirmar.solicitud.valor_solicitado}</b>{confirmar.solicitud.campo==="razon_social" ? ", también en la ficha de sus contactos" : ""}. El cliente lo verá como aplicada.</p>
+        : <p className="muted">No se cambiará nada. El cliente verá que su solicitud no se ha aplicado.</p>}
+    </Modal>}
+  </div>;
 }
 function EditEmpresa({empresa, onClose, onSave}){
   const [f,setF]=uState({razon_social:empresa.razon_social||"", cif:empresa.cif||"", address:empresa.address||"", city:empresa.city||"", province:empresa.province||""});
@@ -2015,6 +2090,7 @@ function Pipeline({nav, toast}){
                 return <div key={d.id} className={"kcard"+(drag===d.id?" dragging":"")} draggable onDragStart={()=>setDrag(d.id)} onDragEnd={()=>{setDrag(null);setOver(null);}} onClick={()=>nav("deal",d.id)}>
                   <div className="kcard__top"><span className="dot" style={{background:s?.color || "#888"}}></span><span className="muted" style={{fontSize:11,fontWeight:600}}>{s?.short || "—"}</span><span className="right">{ownerAvatar(d.owner)}</span></div>
                   <div className="kcard__title">{d.title}</div>
+                  {d.origen==="portal" && <div style={{margin:"2px 0 4px"}}><Badge label="Área cliente" color="#7C5CFC"/></div>}
                   <div className="kcard__co">{emp?.razon_social}</div>
                   <div className="kcard__foot"><span className="kcard__amt">{CRM.fmtEUR(d.amount)}</span><span className="kcard__freq">/{d.frequency}</span><span className="right"><PriorityDot id={d.priority}/></span></div>
                 </div>;
@@ -2109,7 +2185,7 @@ function DealDetail({id, nav, toast, user}){
         <div className="detail__aside">
           <div className="profile">
             <div style={{textAlign:"center"}}><div className="lrow__ico" style={{width:52,height:52,margin:"0 auto 10px",background:(s?.color || "#888")+"1A",color:s?.color || "#888",borderRadius:14}}><Icon name="briefcase" size={24}/></div><div className="profile__name" style={{fontSize:17}}>{d.title}</div>{emp ? <div className="profile__sub" style={{cursor:"pointer",color:"var(--accent)"}} onClick={()=>nav("empresa",emp.id)}>{emp.razon_social}</div> : <div className="profile__sub">Sin empresa</div>}{c && <div className="profile__sub" style={{cursor:"pointer"}} onClick={()=>nav("contact",c.id)}>{c.full_name||c.company}</div>}</div>
-            <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/></div>
+            <div style={{margin:"14px 0"}}><StageBadge id={d.stage}/>{d.origen==="portal" && <> <Badge label="Pedido desde el área cliente" color="#7C5CFC"/></>}</div>
             <div><KV k="Servicio"><ServiceBadge id={d.service}/></KV><KV k="Importe">{(d.service===LABORAL_SERVICE_ID && d.num_nominas && d.coste_nomina) ? <>{d.num_nominas} nóminas × {CRM.fmtEUR(d.coste_nomina)} = {CRM.fmtEUR(d.amount)}/mes</> : <>{CRM.fmtEUR(d.amount)} / {d.frequency}</>}</KV><KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(d.owner)}{CRM.userById(d.owner)?.name}</span></KV><KV k="Prioridad"><PriorityDot id={d.priority} showLabel/></KV><KV k="Creado">{d.created}</KV>{d.signed&&<KV k="Firmado">{d.signed}</KV>}{d.renewal&&<KV k="Renovación">{d.renewal}</KV>}</div>
             <button className="btn btn--sm btn--primary" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar deal</button>
             <button className="btn btn--sm btn--danger" style={{width:"100%",marginTop:8}} onClick={()=>setConfirmDel(true)}><Icon name="trash" size={15}/>Eliminar deal</button>

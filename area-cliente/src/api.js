@@ -60,6 +60,17 @@ export const empresas = () => rpc("portal_empresas");
 export const deals = (empresaId) => rpc("portal_deals", { p_empresa_id: empresaId });
 export const carpetas = (empresaId) => rpc("portal_carpetas", { p_empresa_id: empresaId });
 export const documentos = (empresaId) => rpc("portal_documentos", { p_empresa_id: empresaId });
+export const servicios = () => rpc("portal_servicios");
+export const solicitudes = (empresaId) => rpc("portal_solicitudes_empresa", { p_empresa_id: empresaId });
+
+// Escrituras que avisan al equipo: van por la Edge Function portal-solicitudes
+// (las comprobaciones están en las RPC que llama; ver crm/supabase-portal-fase31.sql).
+export const solicitarServicio = (empresaId, servicio, mensaje) =>
+  funcion("portal-solicitudes", { accion: "servicio", empresa_id: empresaId, servicio, mensaje });
+export const actualizarEmpresa = (empresaId, { direccion, ciudad, provincia }) =>
+  funcion("portal-solicitudes", { accion: "editar_empresa", empresa_id: empresaId, direccion, ciudad, provincia });
+export const solicitarCambio = (empresaId, campo, valor, comentario) =>
+  funcion("portal-solicitudes", { accion: "cambio_empresa", empresa_id: empresaId, campo, valor, comentario });
 
 // Descarga: URL firmada de 60 s con el nombre del fichero (Storage la sirve
 // como adjunto, así que asignarla a location descarga sin salir de la página).
