@@ -643,6 +643,9 @@
       kyc: !!row.kyc,
       registered: !!row.registered,
       lead_id: row.lead_id || null,
+      // Cuenta del área cliente vinculada (crm/supabase-portal-fase0.sql). El
+      // email de esa cuenta no está aquí: lo da admin_cuenta_de_contacto.
+      auth_user_id: row.auth_user_id || null,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -1013,6 +1016,7 @@
       folder_id: row.folder_id || null,
       folder_name: carpeta ? carpeta.nombre : "",
       folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),
+      folder_is_cliente: !!(carpeta && carpeta.system_key==="cliente"),
       // Subcarpetas: el embed solo trae la carpeta del documento, no su
       // madre. folder_path ("Fiscal / 2026") y folder_root_name ("Fiscal")
       // los completa aplicarRutas() con las carpetas de la empresa o con las
@@ -1023,6 +1027,13 @@
       folder_root_name: carpeta && !carpeta.parent_id ? carpeta.nombre : "",
       source: row.source,
       uploaded_by: row.uploaded_by || null,
+      // Compartido con el cliente (área cliente). shared_at/shared_by los
+      // rellena un trigger al cambiar visible; shared_by es admins.id
+      // (CRM.userById). Lo que aporta el cliente (source 'cliente') lo ve
+      // siempre, esté o no compartido.
+      visible: !!row.visible,
+      shared_at: row.shared_at || null,
+      shared_by: row.shared_by || null,
       whatsapp_conversation_id: row.whatsapp_conversation_id || null,
       created_at: row.created_at || "",
       created: (row.created_at||"").toString().slice(0,10)
@@ -1036,6 +1047,9 @@
       nombre: row.nombre,
       system_key: row.system_key || null,
       is_whatsapp: row.system_key==="whatsapp",
+      // "Aportados por el cliente": solo admite lo que sube el cliente desde
+      // el área cliente (lo exige la BD), así que nunca es destino en el CRM.
+      is_cliente: row.system_key==="cliente",
       // Calculada en la BD: raíz y no de sistema (crm/supabase-carpetas.sql, 1b).
       admite_subcarpetas: row.admite_subcarpetas!==undefined ? !!row.admite_subcarpetas : (!row.parent_id && !row.system_key),
       orden: row.orden || 0
@@ -1336,7 +1350,8 @@
       empresa_id: opts.empresaId,
       folder_id: opts.folderId,
       source: "manual",
-      uploaded_by: opts.uploadedBy || null
+      uploaded_by: opts.uploadedBy || null,
+      visible: !!opts.visible
     }).select(DOCUMENTO_SELECT).single();
     if(ins.error){
       var rm = await client.storage.from("documentos").remove([path]);
@@ -1363,6 +1378,80 @@
       return {fileRemoved:false};
     }
     return {fileRemoved:true};
+  }
+
+  // Compartir (o dejar de compartir) un documento con el cliente. Solo tiene
+  // sentido para documentos guardados y que no haya aportado el cliente; la
+  // fecha y el admin que lo comparte los pone el trigger
+  // documentos_registrar_compartido.
+  async function setDocumentoVisible(client, doc, visible){
+    var res = await client.from("documentos").update({visible: !!visible}).eq("id", doc.id).select(DOCUMENTO_SELECT).single();
+    if(res.error) throw res.error;
+    var d = rowToDocumento(res.data);
+    // La ruta completa ("Fiscal / 2026") no viaja en el embed: se conserva la de la fila anterior.
+    d.folder_path = doc.folder_path; d.folder_root_name = doc.folder_root_name;
+    return d;
+  }
+
+  // ---- Cuentas del área cliente (crm/supabase-portal-fase1.sql y -fase2.sql) ----
+  // Cuentas de Auth que no son de un admin ni están vinculadas a un contacto.
+  // Se cargan al arrancar (contador del menú) y se recargan tras cada acción.
+  var CUENTAS_PENDIENTES = [];
+  async function loadCuentasPendientes(client){
+    if(!client) return 0;
+    try{
+      var res = await client.rpc("admin_cuentas_pendientes");
+      if(res.error || !res.data) return 0;
+      CUENTAS_PENDIENTES.length = 0;
+      res.data.forEach(function(r){ CUENTAS_PENDIENTES.push(r); });
+      return CUENTAS_PENDIENTES.length;
+    }catch(e){ if(window.console) console.error("loadCuentasPendientes:", e); return 0; }
+  }
+  // Llama a la Edge Function portal-cuentas. Ante un error devuelve el
+  // mensaje que trae su cuerpo (409 "está vinculada…", 400 "no ha confirmado
+  // su email"…), no el genérico de supabase-js para respuestas no 2xx.
+  async function invokePortalCuentas(client, body){
+    var res = await client.functions.invoke("portal-cuentas", { body: body });
+    if(res.error){
+      var msg = res.error.message || "Error al llamar a portal-cuentas";
+      try{
+        var ctx = res.error.context;
+        if(ctx && typeof ctx.json==="function"){ var j = await ctx.json(); if(j && j.error) msg = j.error; }
+      }catch(e){ /* sin cuerpo JSON: se queda el mensaje genérico */ }
+      throw new Error(msg);
+    }
+    return res.data;
+  }
+  // Vincula una cuenta pendiente a un contacto y envía el email al cliente.
+  // Devuelve {emails_coinciden, email_cuenta, email_contacto, email_enviado}.
+  async function vincularCuentaPortal(client, authUserId, contactId){
+    var r = await invokePortalCuentas(client, {accion:"vincular", auth_user_id: authUserId, contact_id: contactId});
+    var c = contactById[contactId]; if(c) c.auth_user_id = authUserId;
+    var i = CUENTAS_PENDIENTES.findIndex(function(x){ return x.auth_user_id===authUserId; });
+    if(i>-1) CUENTAS_PENDIENTES.splice(i,1);
+    return r;
+  }
+  // Borra de Auth una cuenta pendiente (nunca un admin ni una vinculada: lo
+  // comprueba portal-cuentas).
+  async function eliminarCuentaPortal(client, authUserId){
+    await invokePortalCuentas(client, {accion:"eliminar", auth_user_id: authUserId});
+    var i = CUENTAS_PENDIENTES.findIndex(function(x){ return x.auth_user_id===authUserId; });
+    if(i>-1) CUENTAS_PENDIENTES.splice(i,1);
+  }
+  // Cuenta del área cliente vinculada a un contacto, o null.
+  async function cuentaDeContacto(client, contactId){
+    var res = await client.rpc("admin_cuenta_de_contacto", {p_contact_id: contactId});
+    if(res.error) throw res.error;
+    return (res.data && res.data[0]) || null;
+  }
+  // Quita el acceso al área cliente: el contacto se queda sin cuenta y la
+  // cuenta vuelve a la lista de pendientes (no se borra de Auth).
+  async function desvincularCuentaPortal(client, contactId){
+    var res = await client.rpc("admin_desvincular_cuenta", {p_contact_id: contactId});
+    if(res.error) throw res.error;
+    var c = contactById[contactId]; if(c) c.auth_user_id = null;
+    await loadCuentasPendientes(client);
+    return res.data;
   }
 
   // ---- Deals reales (tabla "deals" de Supabase) ----
@@ -1867,6 +1956,10 @@
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,
     updateContact:updateContact, removeDeal:removeDeal, removeContact:removeContact, removeContacts:removeContacts,
     updateDeal:updateDeal, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
+    setDocumentoVisible:setDocumentoVisible,
+    CUENTAS_PENDIENTES:CUENTAS_PENDIENTES, loadCuentasPendientes:loadCuentasPendientes,
+    vincularCuentaPortal:vincularCuentaPortal, eliminarCuentaPortal:eliminarCuentaPortal,
+    cuentaDeContacto:cuentaDeContacto, desvincularCuentaPortal:desvincularCuentaPortal,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,

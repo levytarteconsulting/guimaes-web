@@ -402,6 +402,19 @@ button.wa-attach[disabled]{opacity:.6;cursor:not-allowed;}
 .install-banner__x{color:#fff;opacity:.75;padding:6px;border-radius:8px;flex:none;}
 .install-banner__x:hover{opacity:1;background:rgba(255,255,255,.12);}
 
+/* ---------------- Área cliente (compartir, cuentas) ---------------- */
+.switch-sm{position:relative;width:34px;height:20px;border-radius:20px;background:var(--line-strong);flex:none;transition:background .15s;}
+.switch-sm .switch-sm__dot{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--shadow-sm);transition:left .15s;}
+.switch-sm.on{background:var(--accent);}
+.switch-sm.on .switch-sm__dot{left:16px;}
+.switch-sm:disabled{opacity:.45;cursor:not-allowed;}
+.switch-sm:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.doc-share{display:inline-flex;align-items:center;padding:0 6px;}
+.doc-shared{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:var(--accent-soft);border-radius:20px;padding:2px 8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;}
+.check-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin:4px 0 12px;cursor:pointer;}
+.check-row input{margin-top:3px;width:16px;height:16px;flex:none;}
+.warn-box{background:#FDF3E7;border:1px solid #F2C894;color:#7A4A0E;border-radius:10px;padding:10px 12px;font-size:13.5px;}
+
 /* ---------------- Rejilla de servicios (Configuración) ---------------- */
 .svc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
 
