@@ -378,7 +378,7 @@
       // coloca sus adjuntos en la carpeta WhatsApp de la empresa principal
       // del contacto (o los deja sin empresa ni carpeta al desvincular), todo
       // en la misma transacción. Los ficheros no se mueven en Storage, solo
-      // cambian empresa_id/folder_id/contact_id (aportado por).
+      // cambian empresa_id/folder_id/aportado_por_contact_id.
       var res = await client.rpc("vincular_conversacion", {p_conversation_id: id, p_contact_id: contactId || null});
       if(res.error) throw res.error;
     }
@@ -458,7 +458,7 @@
     if(res.error) throw res.error;
     return cacheAdmin(rowToAdmin(res.data));
   }
-  var CONTACTOS_COLUMNS = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source","kyc","registered"];
+  var CONTACTOS_COLUMNS = ["company","full_name","email","phone","dni","city","province","employees","lifecycle","priority","owner","source","kyc"];
   async function updateContact(client, id, patch){
     var c = contactById[id]; if(!c) return null;
     // Los leads aún no convertidos usan un id sintético "lead-<uuid>" que no
@@ -475,7 +475,6 @@
         payload.employees = (typeof emp!=="number" || isNaN(emp)) ? null : emp;
       }
       if(payload.kyc!==undefined) payload.kyc = !!payload.kyc;
-      if(payload.registered!==undefined) payload.registered = !!payload.registered;
       // Los campos de texto en blanco ("") se envían tal cual, no se convierten a null.
       var res = await client.from("contactos").update(payload).eq("id", id).select();
       if(res.error) throw res.error;
@@ -506,9 +505,10 @@
     // existe como fila en public.contactos: solo se borra en memoria.
     var contact = contactById[id];
     if(client && id.indexOf("lead-")!==0){
-      var delDeals = await client.from("deals").delete().eq("contact_id", id);
-      if(delDeals.error) throw delDeals.error;
-      var res = await client.from("contactos").delete().eq("id", id);
+      // En una transacción (crm/supabase-pasoB.sql): los deals con empresa
+      // se quedan, sin interlocutor; los que no tienen empresa se borran; las
+      // notas y tareas de los deals que se quedan siguen con su deal.
+      var res = await client.rpc("admin_borrar_contacto", {p_contact_id: id});
       if(res.error) throw res.error;
       // Si el contacto venía de un lead, márcalo como 'deleted' para que
       // loadWebLeads (que solo procesa status='new') no lo vuelva a convertir.
@@ -522,11 +522,14 @@
     var idx = CONTACTS.findIndex(function(c){return c.id===id;});
     if(idx>-1) CONTACTS.splice(idx,1);
     delete contactById[id];
-    // Los deals asociados ya se borraron en Supabase arriba; aquí solo limpiamos
-    // memoria, sin repetir la llamada remota (client=null).
-    for(var i=DEALS.length-1;i>=0;i--) if(DEALS[i].contact===id) await removeDeal(null, DEALS[i].id);
-    for(var j=NOTES.length-1;j>=0;j--) if(NOTES[j].contact===id) NOTES.splice(j,1);
-    for(var k=TASKS.length-1;k>=0;k--) if(TASKS[k].contact===id) TASKS.splice(k,1);
+    // Lo mismo en memoria (sin repetir llamadas remotas: client=null).
+    for(var i=DEALS.length-1;i>=0;i--){
+      if(DEALS[i].contact!==id) continue;
+      if(DEALS[i].empresa) DEALS[i].contact = null; else await removeDeal(null, DEALS[i].id);
+    }
+    var sigue = function(dealId){ return !!dealId && DEALS.some(function(d){ return d.id===dealId; }); };
+    for(var j=NOTES.length-1;j>=0;j--) if(NOTES[j].contact===id){ if(sigue(NOTES[j].deal)) NOTES[j].contact = null; else NOTES.splice(j,1); }
+    for(var k=TASKS.length-1;k>=0;k--) if(TASKS[k].contact===id){ if(sigue(TASKS[k].deal)) TASKS[k].contact = null; else TASKS.splice(k,1); }
     for(var l=DOCUMENTS.length-1;l>=0;l--) if(DOCUMENTS[l].contact===id) DOCUMENTS.splice(l,1);
     for(var m=WHATSAPP.length-1;m>=0;m--) if(WHATSAPP[m].contact===id) WHATSAPP.splice(m,1);
     for(var n=ACTIVITY.length-1;n>=0;n--) if(ACTIVITY[n].contact===id) ACTIVITY.splice(n,1);
@@ -641,7 +644,6 @@
       owner: row.owner || "",
       source: row.source || "",
       kyc: !!row.kyc,
-      registered: !!row.registered,
       lead_id: row.lead_id || null,
       // Cuenta del área cliente vinculada (crm/supabase-portal-fase0.sql). El
       // email de esa cuenta no está aquí: lo da admin_cuenta_de_contacto.
@@ -1012,11 +1014,12 @@
       size_bytes: row.size_bytes,
       original_filename: row.original_filename || "",
       status: row.status,
-      // Dueño: la empresa. contact_id en la BD ya no es el dueño sino quién
-      // lo aportó (el contacto que lo mandó por WhatsApp; null si lo subió
-      // un admin) — se expone con ese nombre para que no se confunda.
+      // Dueño: la empresa. aportado_por_contact_id es quién lo aportó (el
+      // contacto que lo mandó por WhatsApp o lo subió desde el área cliente;
+      // null si lo subió un admin). Mientras convivan las dos columnas
+      // (crm/supabase-pasoB.sql) se lee la nueva y, si no viene, la vieja.
       empresa_id: row.empresa_id || null,
-      aportado_por: row.contact_id || null,
+      aportado_por: (row.aportado_por_contact_id !== undefined ? row.aportado_por_contact_id : row.contact_id) || null,
       folder_id: row.folder_id || null,
       folder_name: carpeta ? carpeta.nombre : "",
       folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),
@@ -1333,7 +1336,7 @@
   // empresa cambian la ruta después: mover solo cambia folder_id/empresa_id
   // (los documentos subidos antes del cambio a empresas conservan su ruta
   // manual/{contact_id}/… — la ruta es la identidad del fichero).
-  // contact_id ("aportado por") queda NULL: lo sube un admin, no lo aporta
+  // aportado_por_contact_id queda NULL: lo sube un admin, no lo aporta
   // ningún contacto; quién lo subió está en uploaded_by.
   async function subirDocumentoManual(client, opts){
     var file = opts.file;
@@ -1809,7 +1812,7 @@
       priority: "medium",
       service_interest: row.servicio || "",
       utm: "",
-      kyc:false, registered:false,
+      kyc:false,
       created: created.slice(0,10),
       employees: null,
       _lead:true, _mensaje: row.mensaje||""
@@ -2029,11 +2032,18 @@
   }
 
   // ---- KPIs (dashboard) ----
+  // MRR y ARR: solo deals en cliente_activo. Mensual cuenta entero,
+  // trimestral /3 y anual /12; lo puntual no es recurrente y no cuenta.
+  // ARR = MRR × 12.
+  var MESES_POR_PERIODO = {mensual:1, trimestral:3, anual:12};
   function computeKpis(deals){
     var active = deals.filter(function(d){return d.stage==="cliente_activo";});
-    var mrr = active.filter(function(d){return d.frequency==="mensual";}).reduce(function(a,d){return a+d.amount;},0);
-    var annual = active.filter(function(d){return d.frequency==="anual";}).reduce(function(a,d){return a+d.amount;},0);
-    var arr = mrr*12 + annual;
+    var mrr = active.reduce(function(a,d){
+      var meses = MESES_POR_PERIODO[d.frequency];
+      return meses ? a + (Number(d.amount)||0)/meses : a;
+    },0);
+    mrr = Math.round(mrr*100)/100;
+    var arr = Math.round(mrr*12*100)/100;
     var open = deals.filter(function(d){return d.stage!=="cliente_activo"&&d.stage!=="perdido";});
     var pipeline = open.reduce(function(a,d){return a+(d.frequency==="mensual"?d.amount*12:d.amount);},0);
     return {mrr:mrr, arr:arr, openDeals:open.length, pipeline:pipeline, activeClients:active.length};

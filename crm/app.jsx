@@ -1889,7 +1889,7 @@ function ContactDetail({id, nav, toast, user}){
         }
       }}/>}
       {confirmDel && <Modal title="Eliminar contacto" onClose={()=>setConfirmDel(false)} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmDel(false)} disabled={deleting}>Cancelar</button><button className="btn btn--danger" onClick={doDelete} disabled={deleting}>{deleting?"Eliminando…":"Eliminar definitivamente"}</button></>}>
-        <p className="muted">Se eliminará <b>{c.company}</b> junto con sus {deals.length} deal(s) y notas asociadas. Esta acción no se puede deshacer.</p>
+        <p className="muted">Se eliminará <b>{c.company}</b> con sus notas. {deals.some(x=>x.empresa) && <>Sus {deals.filter(x=>x.empresa).length} deal(s) de empresa se conservan, sin contacto. </>}{deals.some(x=>!x.empresa) && <>Se eliminarán sus {deals.filter(x=>!x.empresa).length} deal(s) sin empresa. </>}Esta acción no se puede deshacer.</p>
         <p className="muted" style={{fontSize:12.5,marginTop:8}}>Los documentos no se borran: son de la empresa y siguen en sus carpetas. Las conversaciones de WhatsApp quedan sin vincular a ningún contacto.</p>
       </Modal>}
       {showNewDeal && <NewDeal contactId={id} onClose={()=>setShowNewDeal(false)} onSave={async(f)=>{
@@ -2378,7 +2378,7 @@ function DealDetail({id, nav, toast, user}){
   };
   const c=CRM.contactById[d.contact]; const s=CRM.serviceById(d.service); const emp=CRM.empresaById[d.empresa];
   const notes=CRM.NOTES.filter(n=>n.deal===id); const tasks=CRM.TASKS.filter(t=>t.deal===id && !t.archived);
-  const wa=CRM.WHATSAPP.filter(w=>w.contact===d.contact);
+  const wa=d.contact ? CRM.WHATSAPP.filter(w=>w.contact===d.contact) : [];
   const dealEmails=CRM.EMAILS.filter(e=>e.deal===id);
   const tabs=[{id:"resumen",label:"Resumen"},{id:"notas",label:"Notas",n:notes.length},{id:"tareas",label:"Tareas",n:tasks.length},{id:"whatsapp",label:"WhatsApp",n:wa.reduce((a,w)=>a+w.messages.length,0)||null},{id:"correos",label:"Correos",n:dealEmails.length||null}];
   const stageIdx=CRM.STAGES.findIndex(x=>x.id===d.stage);
