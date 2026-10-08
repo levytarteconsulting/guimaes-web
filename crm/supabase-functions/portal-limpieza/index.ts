@@ -6,12 +6,15 @@
 // (solo service_role); el borrado va por la API de Storage, que es la que
 // borra el fichero de verdad (un DELETE sobre storage.objects no lo haría).
 //
-// (también los de pendientes/ del alta autónoma sin fila de alta).
-// 2) Altas caducadas (crm/supabase-portal-fase32.sql): cuentas sin vincular,
-// que no son admin, creadas hace más de 30 días. Borra sus ficheros con la
-// API de Storage y elimina la cuenta (el borrador cae en cascada). Justo
-// antes de cada borrado se vuelve a comprobar que no es admin ni está
-// vinculada.
+// (también los de pendientes/, de las altas de la fase 3.2).
+// 2) Altas provisionales sin validar en 30 días (crm/supabase-portal-fase33.sql):
+// portal_eliminar_provisional borra empresa, contacto, documentos y deals
+// (solo si sigue provisional y caducada); aquí se borran sus ficheros y la
+// cuenta.
+// 3) Cuentas sin vincular, que no son admin, creadas hace más de 30 días
+// (portal_altas_caducadas): se elimina la cuenta.
+// Justo antes de borrar una cuenta se vuelve a comprobar que no es admin ni
+// está vinculada.
 //
 // La lanza pg_cron una vez al día (crm/supabase-portal-fase1.sql, bloque
 // 3B) con la anon key como Authorization —para pasar verify_jwt— y el
@@ -63,7 +66,38 @@ Deno.serve(async (req) => {
       borrados += (hechos || []).length;
     }
 
-    // ---- 2) altas caducadas ----
+    // ---- 2) altas provisionales caducadas ----
+    const { data: prov, error: provErr } = await admin.rpc("portal_provisionales_caducadas", { p_dias: DIAS_CADUCIDAD, p_limite: 100 });
+    if (provErr) throw provErr;
+    let provBorradas = 0, provError = 0;
+    for (const p of (prov || []) as { empresa_id: string }[]) {
+      try {
+        const { data: del, error: delErr } = await admin.rpc("portal_eliminar_provisional", { p_empresa_id: p.empresa_id, p_dias: DIAS_CADUCIDAD });
+        if (delErr) throw delErr;
+        const r = ((del || []) as { auth_user_id: string | null; rutas: string[] | null }[])[0];
+        const suyas = (r?.rutas || []).filter((x) => typeof x === "string" && x.length > 0);
+        for (let i = 0; i < suyas.length; i += LOTE) {
+          const { error: rmErr } = await admin.storage.from("documentos").remove(suyas.slice(i, i + LOTE));
+          if (rmErr) console.error("portal-limpieza: ficheros de un alta caducada (quedan como huérfanos)", rmErr);
+        }
+        if (r?.auth_user_id) {
+          const [esAdmin, vinculada] = await Promise.all([
+            admin.from("admins").select("id").eq("auth_user_id", r.auth_user_id).limit(1),
+            admin.from("contactos").select("id").eq("auth_user_id", r.auth_user_id).limit(1),
+          ]);
+          if (!esAdmin.error && !vinculada.error && !(esAdmin.data || []).length && !(vinculada.data || []).length) {
+            const { error: duErr } = await admin.auth.admin.deleteUser(r.auth_user_id);
+            if (duErr && !/not found/i.test(duErr.message)) throw duErr;
+          }
+        }
+        provBorradas++;
+      } catch (e) {
+        provError++;
+        console.error("portal-limpieza: no se pudo borrar el alta provisional caducada", p.empresa_id, e);
+      }
+    }
+
+    // ---- 3) cuentas sin vincular caducadas ----
     const { data: cad, error: cadErr } = await admin.rpc("portal_altas_caducadas", { p_dias: DIAS_CADUCIDAD, p_limite: 100 });
     if (cadErr) throw cadErr;
     let cuentasBorradas = 0, cuentasError = 0;
@@ -88,8 +122,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`portal-limpieza: huérfanos ${rutas.length}/${borrados} (errores ${errores}); altas caducadas ${cuentasBorradas} (errores ${cuentasError})`);
-    return json(200, { encontrados: rutas.length, borrados, errores, altas_caducadas: cuentasBorradas, altas_error: cuentasError });
+    console.log(`portal-limpieza: huérfanos ${rutas.length}/${borrados} (errores ${errores}); provisionales caducadas ${provBorradas} (errores ${provError}); cuentas caducadas ${cuentasBorradas} (errores ${cuentasError})`);
+    return json(200, { encontrados: rutas.length, borrados, errores, provisionales_caducadas: provBorradas, provisionales_error: provError, altas_caducadas: cuentasBorradas, altas_error: cuentasError });
   } catch (e) {
     console.error("portal-limpieza: fallo inesperado", e);
     return json(500, { error: "Error interno." });

@@ -646,6 +646,8 @@
       // Cuenta del área cliente vinculada (crm/supabase-portal-fase0.sql). El
       // email de esa cuenta no está aquí: lo da admin_cuenta_de_contacto.
       auth_user_id: row.auth_user_id || null,
+      // Alta del área cliente pendiente de validar (crm/supabase-portal-fase33.sql).
+      provisional_at: row.provisional_at || null,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -723,6 +725,7 @@
       address: row.address || "",
       city: row.city || "",
       province: row.province || "",
+      provisional_at: row.provisional_at || null,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -747,7 +750,8 @@
   function findEmpresaByCif(cif){
     var norm = normalizeCif(cif);
     if(!norm) return null;
-    return EMPRESAS.filter(function(e){ return e.cif && normalizeCif(e.cif)===norm; })[0] || null;
+    // Las provisionales (altas del área cliente sin validar) no cuentan.
+    return EMPRESAS.filter(function(e){ return e.cif && !e.provisional_at && normalizeCif(e.cif)===norm; })[0] || null;
   }
   // Coincidencias por nombre normalizado (substring) — para el desplegable de "¿es esta empresa?"
   function searchEmpresasByName(name){
@@ -1454,68 +1458,81 @@
     return res.data;
   }
 
-  // ---- Alta autónoma (crm/supabase-portal-fase32.sql) ----
-  // Borradores y documentos que mandan las cuentas pendientes. Lectura
-  // directa (RLS: solo admins); las acciones van por portal-cuentas.
-  // Devuelve {auth_user_id: {borrador, docs[]}} (docs aún sin mover).
-  async function loadAltas(client){
-    var b = await client.from("alta_borradores").select("*");
-    if(b.error) throw b.error;
-    var d = await client.from("alta_documentos").select("*").is("destino_path", null).order("created_at", {ascending:true});
-    if(d.error) throw d.error;
-    var r = {};
-    (b.data||[]).forEach(function(x){ r[x.auth_user_id] = {borrador:x, docs:[]}; });
-    (d.data||[]).forEach(function(x){ (r[x.auth_user_id] = r[x.auth_user_id] || {borrador:null, docs:[]}).docs.push(x); });
-    return r;
+  // ---- Altas provisionales del área cliente (crm/supabase-portal-fase33.sql) ----
+  // Empresas y contactos REALES marcados con provisional_at. La lista (con
+  // el email de la cuenta) la da admin_altas_provisionales; las acciones van
+  // por portal-cuentas.
+  var ALTAS_PROVISIONALES = [];
+  async function loadAltasProvisionales(client){
+    if(!client) return 0;
+    try{
+      var res = await client.rpc("admin_altas_provisionales");
+      if(res.error || !res.data) return 0;
+      ALTAS_PROVISIONALES.length = 0;
+      res.data.forEach(function(r){ ALTAS_PROVISIONALES.push(r); });
+      return ALTAS_PROVISIONALES.length;
+    }catch(e){ if(window.console) console.error("loadAltasProvisionales:", e); return 0; }
   }
-  // URL firmada de un fichero del alta (pendientes/…): los admins leen todo
-  // el bucket. opts {download: nombre} fuerza la descarga.
-  async function altaDocSignedUrl(client, doc, opts){
-    var s = await client.storage.from("documentos").createSignedUrl(doc.storage_path, 600, opts||{});
-    if(s.error) return null;
-    return s.data.signedUrl;
-  }
-  // Coincidencias para revisar un alta: empresas con el mismo CIF y
-  // contactos con el mismo email (de la cuenta o, si lo hubiera, otro).
-  function normCifAlta(s){ return String(s||"").replace(/[\s.\-]/g,"").toUpperCase(); }
-  function coincidenciasAlta(borrador, email){
-    var cif = normCifAlta(borrador && borrador.cif);
-    var em = String(email||"").trim().toLowerCase();
-    return {
-      empresas: cif ? EMPRESAS.filter(function(e){ return normCifAlta(e.cif)===cif; }) : [],
-      contactos: em ? CONTACTS.filter(function(c){ return c.id.indexOf("lead-")!==0 && String(c.email||"").trim().toLowerCase()===em; }) : [],
-    };
+  // loadContactos/loadDeals solo añaden: tras confirmar, fusionar o rechazar
+  // hay filas que cambian o desaparecen. Esto deja CONTACTS y DEALS iguales
+  // que la base de datos (los leads sin convertir, "lead-…", no se tocan).
+  async function sincronizar(client, tabla, lista, porId, mapear, esReal){
+    var res = await client.from(tabla).select("*");
+    if(res.error || !res.data) return;
+    var vistos = {};
+    res.data.forEach(function(row){
+      var x = mapear(row); vistos[x.id] = true;
+      var actual = porId ? porId[x.id] : lista.find(function(y){ return y.id===x.id; });
+      if(actual) Object.assign(actual, x);
+      else { lista.unshift(x); if(porId) porId[x.id] = x; }
+    });
+    for(var i = lista.length - 1; i >= 0; i--){
+      if(esReal(lista[i]) && !vistos[lista[i].id]){ if(porId) delete porId[lista[i].id]; lista.splice(i, 1); }
+    }
   }
   async function recargarTrasAlta(client){
-    await Promise.all([loadEmpresas(client), loadContactos(client)]);
-    await Promise.all([loadContactoEmpresa(client), loadDeals(client), loadCuentasPendientes(client)]);
+    await loadEmpresas(client);
+    await sincronizar(client, "contactos", CONTACTS, contactById, rowToContact, function(c){ return String(c.id).indexOf("lead-")!==0; });
+    await sincronizar(client, "deals", DEALS, null, rowToDeal, function(){ return true; });
+    await Promise.all([loadContactoEmpresa(client), loadCuentasPendientes(client), loadAltasProvisionales(client)]);
   }
-  // Dar de alta (sin empresa ni contacto: se crean con lo enviado) o
-  // vincular a existentes (empresaId obligatorio; contactId opcional: sin él
-  // se crea el contacto en esa empresa). Devuelve lo de portal-cuentas:
-  // {empresa_id, contact_id, documentos_movidos, documentos_pendientes, email_enviado}.
-  async function resolverAlta(client, authUserId, empresaId, contactId){
-    var r = await invokePortalCuentas(client, {accion:"alta", auth_user_id:authUserId, empresa_id:empresaId||null, contact_id:contactId||null});
-    await recargarTrasAlta(client);
-    return r;
+  // Coincidencias para revisar un alta: empresas validadas con el mismo CIF
+  // y contactos validados con el mismo email.
+  function normCifAlta(s){ return String(s||"").replace(/[\s.\-]/g,"").toUpperCase(); }
+  function coincidenciasAlta(empresa, email){
+    var cif = normCifAlta(empresa && empresa.cif);
+    var em = String(email||"").trim().toLowerCase();
+    return {
+      empresas: cif ? EMPRESAS.filter(function(e){ return !e.provisional_at && e.id!==(empresa&&empresa.id) && normCifAlta(e.cif)===cif; }) : [],
+      contactos: em ? CONTACTS.filter(function(c){ return String(c.id).indexOf("lead-")!==0 && !c.provisional_at && String(c.email||"").trim().toLowerCase()===em; }) : [],
+    };
   }
-  // Rechazar: borra la cuenta, su borrador y sus ficheros.
-  async function rechazarAlta(client, authUserId){
-    var r = await invokePortalCuentas(client, {accion:"rechazar", auth_user_id:authUserId});
-    var i = CUENTAS_PENDIENTES.findIndex(function(x){ return x.auth_user_id===authUserId; });
-    if(i>-1) CUENTAS_PENDIENTES.splice(i,1);
-    return r;
+  // Devuelven lo de portal-cuentas (documentos movidos/pendientes, email enviado…).
+  async function confirmarAlta(client, empresaId){
+    var r = await invokePortalCuentas(client, {accion:"confirmar", empresa_id:empresaId});
+    await recargarTrasAlta(client); return r;
   }
-  // Documentos de un alta ya resuelta que no se pudieron mover (fallo de
-  // Storage): se reintentan desde la ficha del contacto.
-  async function altaDocsPorMover(client, authUserId){
-    var res = await client.from("alta_documentos").select("id", {count:"exact", head:true})
-      .eq("auth_user_id", authUserId).not("destino_path", "is", null);
+  async function fusionarAlta(client, empresaId, destinoId, contactId){
+    var r = await invokePortalCuentas(client, {accion:"fusionar", empresa_id:empresaId, destino_id:destinoId, contact_id:contactId||null});
+    await recargarTrasAlta(client); return r;
+  }
+  async function rechazarAlta(client, empresaId){
+    var r = await invokePortalCuentas(client, {accion:"rechazar", empresa_id:empresaId});
+    await recargarTrasAlta(client); return r;
+  }
+  // Ficheros que quedaron sin mover (fallo de Storage al fusionar/confirmar).
+  async function documentosPorMover(client){
+    var res = await client.rpc("admin_documentos_por_mover", {p_empresa_id:null});
     if(res.error) throw res.error;
-    return res.count||0;
+    return res.data || [];
   }
-  async function reintentarDocsAlta(client, authUserId){
-    return invokePortalCuentas(client, {accion:"reintentar_documentos", auth_user_id:authUserId});
+  async function moverDocumentosPendientes(client){
+    return invokePortalCuentas(client, {accion:"mover_documentos"});
+  }
+  async function documentosDeEmpresa(client, empresaId){
+    var res = await client.from("documentos").select("*").eq("empresa_id", empresaId).order("created_at", {ascending:false});
+    if(res.error) throw res.error;
+    return res.data || [];
   }
 
   // ---- Área cliente: lo que el cliente cambia o pide sobre su empresa ----
@@ -2065,8 +2082,9 @@
     updateDeal:updateDeal, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     setDocumentoVisible:setDocumentoVisible,
     CUENTAS_PENDIENTES:CUENTAS_PENDIENTES, loadCuentasPendientes:loadCuentasPendientes,
-    loadAltas:loadAltas, altaDocSignedUrl:altaDocSignedUrl, coincidenciasAlta:coincidenciasAlta, resolverAlta:resolverAlta,
-    rechazarAlta:rechazarAlta, altaDocsPorMover:altaDocsPorMover, reintentarDocsAlta:reintentarDocsAlta,
+    ALTAS_PROVISIONALES:ALTAS_PROVISIONALES, loadAltasProvisionales:loadAltasProvisionales, coincidenciasAlta:coincidenciasAlta,
+    confirmarAlta:confirmarAlta, fusionarAlta:fusionarAlta, rechazarAlta:rechazarAlta, documentosPorMover:documentosPorMover,
+    moverDocumentosPendientes:moverDocumentosPendientes, documentosDeEmpresa:documentosDeEmpresa, recargarTrasAlta:recargarTrasAlta,
     vincularCuentaPortal:vincularCuentaPortal, eliminarCuentaPortal:eliminarCuentaPortal,
     cuentaDeContacto:cuentaDeContacto, desvincularCuentaPortal:desvincularCuentaPortal,
     loadSolicitudesEmpresa:loadSolicitudesEmpresa, loadCambiosEmpresa:loadCambiosEmpresa,

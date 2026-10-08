@@ -115,17 +115,9 @@ body { background: var(--mist); min-height: 100vh; }
 .pt-marca { background: var(--accent-soft); color: var(--accent-ink); font-family: var(--display); font-weight: 600; font-size: .75rem; padding: 2px 8px; border-radius: 100px; }
 .pt-doc .btn { flex: none; }
 
-/* Alta autónoma (cuenta pendiente) */
+/* Alta inmediata (cuenta pendiente) */
 .pt-alta { max-width: 760px; }
-.pt-pasos { list-style: none; padding: 0; margin: 0 0 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; counter-reset: none; }
-.pt-pasos li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; min-width: 0; }
-.pt-pasos__n { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--line); font-weight: 700; background: #fff; }
-.pt-pasos li.on { color: var(--ink); font-weight: 600; }
-.pt-pasos li.on .pt-pasos__n { border-color: var(--accent); color: var(--accent); }
-.pt-pasos li.hecho .pt-pasos__n { background: var(--accent); border-color: var(--accent); color: #fff; }
-@media (max-width: 560px) { .pt-pasos__t { display: none; } .pt-pasos li.on .pt-pasos__t { display: inline; } .pt-pasos { grid-template-columns: auto auto auto auto; justify-content: start; } }
+.pt-alta .pt-card__titulo + .pt-aviso, .pt-alta .pt-card__titulo { margin-top: 4px; }
 .pt-acciones { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 18px; }
-.pt-resumen dd { overflow-wrap: anywhere; white-space: pre-line; }
 .pt-captcha { margin: 6px 0 14px; min-height: 65px; }
-.pt-card__titulo:focus { outline: none; }
-
+.pt-aviso--info { background: var(--accent-soft); border: 1px solid #C9DCFB; color: var(--ink); margin-bottom: 16px; }

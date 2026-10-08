@@ -1,33 +1,21 @@
 // Supabase Edge Function: portal-alta
-// Área cliente: alta autónoma de una cuenta PENDIENTE (email confirmado, sin
-// contacto vinculado). Envuelve las RPC del borrador de alta
-// (crm/supabase-portal-fase32.sql), llamadas con el JWT del usuario, que son
-// las que hacen todas las comprobaciones. La service role se usa solo en
-// Storage (firmar la subida, borrar ficheros) y para avisar al equipo.
-//
-//   "solicitar_subida": límites (10 documentos, 50 MB en total) y URL de
-//       subida firmada para pendientes/{auth_uid}/{documento_id}/{nombre}.
-//   "confirmar_subida": la RPC comprueba el fichero REAL en Storage y lo
-//       registra; si lo rechaza por el fichero (GU002), aquí se borra.
-//   "borrar_documento": quita un documento del borrador y su fichero.
-//   "enviar": marca la solicitud como enviada; solo el PRIMER envío avisa al
-//       equipo por push (editar y reenviar no vuelve a avisar).
-// Guardar los datos del borrador no pasa por aquí: el portal llama a la RPC
-// portal_alta_guardar directamente (no avisa a nadie).
+// Área cliente: alta inmediata (crm/supabase-portal-fase33.sql). Una cuenta
+// PENDIENTE (email confirmado, sin contacto vinculado) envía los datos de su
+// empresa y de contacto; la RPC portal_alta_crear, llamada con el JWT del
+// usuario, hace todas las comprobaciones y crea al momento la empresa y el
+// contacto provisionales, con la cuenta vinculada. Aquí solo se avisa al
+// equipo por push (la service role se usa únicamente para eso).
 //
 // Entrada (POST, Authorization: Bearer <JWT del usuario>):
-//   { accion: "solicitar_subida", nombre, tamano, tipo } → { documento_id, ruta, token }
-//   { accion: "confirmar_subida", documento_id, nombre } → { documento_id, nombre }
-//   { accion: "borrar_documento", documento_id }           → { ok: true }
-//   { accion: "enviar" }                                    → { ok: true }
+//   { accion: "crear", razon_social, cif, direccion, ciudad, provincia, nombre_contacto, telefono }
+//     → 200 { empresa_id, razon_social }
 // Errores: 400 { error } (texto para el cliente) · 403 (email sin confirmar) ·
-//          404 { error: "No disponible" } · 429 (límites) · 401
+//          404 { error: "No disponible" } · 401
 //
 // Desplegar (desde crm/, lee verify_jwt = true de crm/supabase/config.toml):
 //   supabase functions deploy portal-alta --project-ref zuktsotrcolqdowpbnrx
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { esUuid, validarSolicitud } from "../portal-subir/validacion.ts";
 
 const ORIGENES = ["https://guimaes.es"];
 const cabecerasCors = (req: Request) => {
@@ -39,6 +27,7 @@ const cabecerasCors = (req: Request) => {
     "Vary": "Origin",
   };
 };
+const texto = (x: unknown) => (typeof x === "string" ? x : null);
 
 Deno.serve(async (req) => {
   const corsHeaders = cabecerasCors(req);
@@ -57,84 +46,33 @@ Deno.serve(async (req) => {
     });
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return json(401, { error: "No autorizado." });
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
-
-    const errorRpc = (e: { code?: string; message: string }) =>
-      e.code === "GU005" || e.code === "GU002" ? json(400, { error: e.message.replace(/^Fichero no válido: /, "") })
-      : e.code === "GU003" ? json(429, { error: e.message })
-      : e.code === "GU006" ? json(403, { error: e.message })
-      : e.code === "GU001" ? json(404, { error: "No disponible" })
-      : json(500, { error: "No se ha podido completar. Vuelve a intentarlo." });
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const { accion } = body;
+    if (body.accion !== "crear") return json(400, { error: "Acción no reconocida." });
 
-    if (accion === "solicitar_subida") {
-      const v = validarSolicitud(body.nombre, body.tamano, body.tipo);
-      if (!v.ok) return json(400, { error: v.error });
-      const { error } = await userClient.rpc("portal_alta_preparar_subida", { p_tamano: body.tamano });
-      if (error) return errorRpc(error);
-      const documento_id = crypto.randomUUID();
-      const ruta = `pendientes/${user.id}/${documento_id}/${v.nombreSeguro}`;
-      const { data: firmada, error: firmaErr } = await admin.storage.from("documentos").createSignedUploadUrl(ruta);
-      if (firmaErr || !firmada?.token) {
-        console.error("portal-alta: no se pudo firmar la subida", ruta, firmaErr);
-        return json(500, { error: "No se pudo preparar la subida." });
-      }
-      return json(200, { documento_id, ruta, token: firmada.token });
+    const { data, error } = await userClient.rpc("portal_alta_crear", {
+      p_razon_social: texto(body.razon_social), p_cif: texto(body.cif), p_direccion: texto(body.direccion),
+      p_ciudad: texto(body.ciudad), p_provincia: texto(body.provincia),
+      p_nombre_contacto: texto(body.nombre_contacto), p_telefono: texto(body.telefono),
+    });
+    if (error) {
+      return error.code === "GU005" ? json(400, { error: error.message })
+        : error.code === "GU006" ? json(403, { error: error.message })
+        : error.code === "GU001" ? json(404, { error: "No disponible" })
+        : json(500, { error: "No se ha podido completar. Vuelve a intentarlo." });
     }
+    const r = (data as { empresa_id: string; razon_social: string }[])[0];
 
-    if (accion === "confirmar_subida") {
-      const { documento_id, nombre } = body;
-      if (!esUuid(documento_id) || typeof nombre !== "string") return json(404, { error: "No disponible" });
-      const { data, error } = await userClient.rpc("portal_alta_confirmar_subida", { p_documento_id: documento_id, p_nombre: nombre });
-      if (error) {
-        if (error.code === "GU002") {
-          // Rechazado por el fichero: es de su propia carpeta (pendientes/{uid}/)
-          // y no hay ninguna fila que apunte a él.
-          const prefijo = `pendientes/${user.id}/${documento_id}`;
-          const { data: lista } = await admin.storage.from("documentos").list(prefijo, { limit: 100 });
-          const rutas = (lista || []).map((o) => `${prefijo}/${o.name}`);
-          if (rutas.length) await admin.storage.from("documentos").remove(rutas);
-        }
-        return errorRpc(error);
-      }
-      const fila = (data as { documento_id: string; nombre: string }[])[0];
-      return json(200, fila);
-    }
+    try {
+      const res = await fetch(`${url}/functions/v1/push-send`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true, title: "Nueva alta en el área cliente (pendiente de validar)", body: r.razon_social, url: "/crm?view=cuentas", tag: `alta-${r.empresa_id}` }),
+      });
+      if (!res.ok) console.error("portal-alta: push-send respondió", res.status, await res.text());
+    } catch (e) { console.error("portal-alta: no se pudo avisar al equipo", e); }
 
-    if (accion === "borrar_documento") {
-      const { documento_id } = body;
-      if (!esUuid(documento_id)) return json(404, { error: "No disponible" });
-      const { data, error } = await userClient.rpc("portal_alta_borrar_documento", { p_documento_id: documento_id });
-      if (error) return errorRpc(error);
-      const ruta = (data as { storage_path: string }[])[0]?.storage_path;
-      // Solo dentro de su propia carpeta; si falla, lo recoge portal-limpieza.
-      if (ruta && ruta.startsWith(`pendientes/${user.id}/`)) {
-        const { error: rmErr } = await admin.storage.from("documentos").remove([ruta]);
-        if (rmErr) console.error("portal-alta: no se pudo borrar el fichero (lo hará portal-limpieza)", ruta, rmErr);
-      }
-      return json(200, { ok: true });
-    }
-
-    if (accion === "enviar") {
-      const { data, error } = await userClient.rpc("portal_alta_enviar");
-      if (error) return errorRpc(error);
-      const r = (data as { primera: boolean; razon_social: string }[])[0];
-      if (r.primera) {
-        try {
-          const res = await fetch(`${url}/functions/v1/push-send`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ all: true, title: "Nueva solicitud de alta en el área cliente", body: r.razon_social, url: "/crm?view=cuentas", tag: `alta-${user.id}` }),
-          });
-          if (!res.ok) console.error("portal-alta: push-send respondió", res.status, await res.text());
-        } catch (e) { console.error("portal-alta: no se pudo avisar al equipo", e); }
-      }
-      return json(200, { ok: true });
-    }
-
-    return json(400, { error: "Acción no reconocida." });
+    return json(200, r);
   } catch (e) {
     console.error("portal-alta: fallo inesperado", e);
     return json(500, { error: "No se ha podido completar. Vuelve a intentarlo." });

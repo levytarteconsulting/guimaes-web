@@ -102,26 +102,9 @@ export async function subir(empresaId, file, onPaso) {
   return funcion("portal-subir", { accion: "confirmar", empresa_id: empresaId, documento_id: sol.documento_id, nombre: file.name });
 }
 
-// ---------- Alta autónoma (cuenta pendiente; crm/supabase-portal-fase32.sql) ----------
-export async function alta() { return (await rpc("portal_alta"))[0] || null; }
-export async function guardarAlta(f) {
-  return (await rpc("portal_alta_guardar", {
-    p_razon_social: f.razon_social, p_cif: f.cif, p_direccion: f.direccion, p_ciudad: f.ciudad, p_provincia: f.provincia,
-    p_nombre_contacto: f.nombre_contacto, p_telefono: f.telefono, p_servicio: f.servicio, p_mensaje: f.mensaje,
-  }))[0];
-}
-export const altaDocumentos = () => rpc("portal_alta_documentos");
-export const MAX_ALTA_DOCS = 10, MAX_ALTA_BYTES = 50 * 1024 * 1024;
-export async function subirAlta(file, onPaso) {
-  const v = validar(file);
-  if (!v.ok) throw new Error(v.error);
-  onPaso && onPaso("preparando");
-  const sol = await funcion("portal-alta", { accion: "solicitar_subida", nombre: file.name, tamano: file.size, tipo: file.type });
-  onPaso && onPaso("subiendo");
-  const up = await supabase.storage.from("documentos").uploadToSignedUrl(sol.ruta, sol.token, file, { contentType: file.type || v.mime });
-  if (up.error) throw new Error("No se ha podido subir el fichero. Comprueba tu conexión y vuelve a probar.");
-  onPaso && onPaso("comprobando");
-  return funcion("portal-alta", { accion: "confirmar_subida", documento_id: sol.documento_id, nombre: file.name });
-}
-export const quitarAltaDocumento = (id) => funcion("portal-alta", { accion: "borrar_documento", documento_id: id });
-export const enviarAlta = () => funcion("portal-alta", { accion: "enviar" });
+// ---------- Alta inmediata (cuenta pendiente; crm/supabase-portal-fase33.sql) ----------
+// Crea la empresa y el contacto (pendientes de validar) y vincula la cuenta.
+export const crearAlta = (f) => funcion("portal-alta", {
+  accion: "crear", razon_social: f.razon_social, cif: f.cif, direccion: f.direccion, ciudad: f.ciudad,
+  provincia: f.provincia, nombre_contacto: f.nombre_contacto, telefono: f.telefono,
+});
