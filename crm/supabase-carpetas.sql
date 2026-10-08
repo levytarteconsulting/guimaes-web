@@ -8,11 +8,10 @@
 -- Contratos) y una carpeta de sistema "WhatsApp" por empresa, que se crea
 -- sola con el primer adjunto que llega de cualquiera de sus contactos.
 --
--- documentos.contact_id ya NO es el dueño del documento: es quién lo
--- aportó (el contacto que lo mandó por WhatsApp; NULL si lo subió un
--- admin). El dueño es documentos.empresa_id. Se renombrará a
--- aportado_por_contact_id en un paso posterior, cuando el webhook ya no lo
--- escriba.
+-- documentos.aportado_por_contact_id NO es el dueño del documento: es
+-- quién lo aportó (el contacto que lo mandó por WhatsApp o lo subió desde
+-- el área cliente; NULL si lo subió un admin). El dueño es
+-- documentos.empresa_id. Antes se llamaba contact_id (crm/supabase-pasoB.sql).
 --
 -- Requiere que supabase-contactos.sql (set_updated_at()), supabase-admins.sql
 -- (is_admin()), supabase-empresas.sql, supabase-whatsapp.sql y
@@ -191,8 +190,8 @@ create policy "admins borran carpetas"
 -- SIMPLE: con folder_id NULL no se comprueba nada. "on delete set null
 -- (folder_id)" (PG15+) anula solo folder_id.
 --
--- contact_id (de supabase-documentos.sql): quién lo aportó. Ya no forma
--- parte de ninguna regla de pertenencia.
+-- aportado_por_contact_id (de supabase-documentos.sql): quién lo aportó.
+-- No forma parte de ninguna regla de pertenencia.
 -- ============================================================
 alter table public.documentos add column if not exists folder_id uuid;
 alter table public.documentos add column if not exists empresa_id uuid;
@@ -210,11 +209,11 @@ create index if not exists documentos_empresa_folder_idx
   on public.documentos (empresa_id, folder_id);
 create index if not exists documentos_folder_id_idx
   on public.documentos (folder_id);
-create index if not exists documentos_contact_idx
-  on public.documentos (contact_id);
+create index if not exists documentos_aportado_por_idx
+  on public.documentos (aportado_por_contact_id);
 
-comment on column public.documentos.contact_id is
-  'Quién aportó el documento (contacto que lo mandó por WhatsApp). NO es el dueño: el dueño es empresa_id.';
+comment on column public.documentos.aportado_por_contact_id is
+  'Quién aportó el documento (contacto que lo mandó por WhatsApp o lo subió desde el área cliente). NO es el dueño: el dueño es empresa_id.';
 
 -- Borrar una conversación o un mensaje no borra la fila de documentos.
 alter table public.documentos drop constraint if exists documentos_whatsapp_conversation_id_fkey;
@@ -441,12 +440,12 @@ set search_path = public
 as $$
 begin
   if tg_op = 'INSERT' and new.source = 'whatsapp' then
-    if new.contact_id is null and new.whatsapp_conversation_id is not null then
-      select contact_id into new.contact_id
+    if new.aportado_por_contact_id is null and new.whatsapp_conversation_id is not null then
+      select contact_id into new.aportado_por_contact_id
       from public.whatsapp_conversations where id = new.whatsapp_conversation_id;
     end if;
-    if new.empresa_id is null and new.contact_id is not null then
-      new.empresa_id := public.empresa_principal_de(new.contact_id);
+    if new.empresa_id is null and new.aportado_por_contact_id is not null then
+      new.empresa_id := public.empresa_principal_de(new.aportado_por_contact_id);
     end if;
   end if;
 
@@ -548,15 +547,15 @@ begin
   end if;
 
   if p_contact_id is null then
-    update public.documentos set contact_id = null, empresa_id = null
+    update public.documentos set aportado_por_contact_id = null, empresa_id = null
     where whatsapp_conversation_id = p_conversation_id
-      and (contact_id is not null or empresa_id is not null);
+      and (aportado_por_contact_id is not null or empresa_id is not null);
     return;
   end if;
 
-  update public.documentos set contact_id = p_contact_id
+  update public.documentos set aportado_por_contact_id = p_contact_id
   where whatsapp_conversation_id = p_conversation_id
-    and contact_id is distinct from p_contact_id;
+    and aportado_por_contact_id is distinct from p_contact_id;
 
   v_empresa := public.empresa_principal_de(p_contact_id);
   if v_empresa is null then

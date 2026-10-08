@@ -552,7 +552,7 @@ begin
     begin
       insert into public.documentos
         (id, storage_path, mime_type, size_bytes, original_filename, status,
-         empresa_id, folder_id, source, contact_id, uploaded_by, visible)
+         empresa_id, folder_id, source, aportado_por_contact_id, uploaded_by, visible)
       values
         (p_documento_id, v_objeto.name, v_mime, v_tamano, v_nombre, 'stored',
          p_empresa_id, public.carpeta_cliente(p_empresa_id), 'cliente', v_contacto, null, false);
@@ -693,7 +693,7 @@ begin
     -- Documentos: empresa, carpeta, quién y ruta a la que mover el fichero.
     update public.documentos d
     set empresa_id = p_destino_id,
-        contact_id = case when d.contact_id = v_prov.id then v_dest_c else d.contact_id end,
+        aportado_por_contact_id = case when d.aportado_por_contact_id = v_prov.id then v_dest_c else d.aportado_por_contact_id end,
         folder_id = case when d.source = 'cliente' then public.carpeta_cliente(p_destino_id)
                          when d.source = 'whatsapp' then null
                          else public.alta_carpeta_destino(d.folder_id, p_destino_id) end,
@@ -981,7 +981,7 @@ begin
 
     insert into public.documentos
       (id, storage_path, mime_type, size_bytes, original_filename, status, empresa_id, folder_id,
-       source, contact_id, uploaded_by, visible, created_at, mover_a)
+       source, aportado_por_contact_id, uploaded_by, visible, created_at, mover_a)
     select a.id, a.storage_path, a.mime_type, a.size_bytes, a.original_filename, 'stored', v_empresa,
            public.carpeta_cliente(v_empresa), 'cliente', v_contact, null, false, a.created_at,
            'cliente/' || v_empresa || '/' || a.id || '/' || regexp_replace(a.storage_path, '^.*/', '')
@@ -1007,7 +1007,7 @@ begin
   -- pasan a documentos de su empresa con el mismo destino.
   insert into public.documentos
     (id, storage_path, mime_type, size_bytes, original_filename, status, empresa_id, folder_id,
-     source, contact_id, uploaded_by, visible, created_at, mover_a)
+     source, aportado_por_contact_id, uploaded_by, visible, created_at, mover_a)
   select a.id, a.storage_path, a.mime_type, a.size_bytes, a.original_filename, 'stored', a.empresa_destino,
          public.carpeta_cliente(a.empresa_destino), 'cliente', a.contacto_destino, null, false, a.created_at, a.destino_path
   from public.alta_documentos a

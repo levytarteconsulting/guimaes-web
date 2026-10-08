@@ -1016,10 +1016,9 @@
       status: row.status,
       // Dueño: la empresa. aportado_por_contact_id es quién lo aportó (el
       // contacto que lo mandó por WhatsApp o lo subió desde el área cliente;
-      // null si lo subió un admin). Mientras convivan las dos columnas
-      // (crm/supabase-pasoB.sql) se lee la nueva y, si no viene, la vieja.
+      // null si lo subió un admin).
       empresa_id: row.empresa_id || null,
-      aportado_por: (row.aportado_por_contact_id !== undefined ? row.aportado_por_contact_id : row.contact_id) || null,
+      aportado_por: row.aportado_por_contact_id || null,
       folder_id: row.folder_id || null,
       folder_name: carpeta ? carpeta.nombre : "",
       folder_is_whatsapp: !!(carpeta && carpeta.system_key==="whatsapp"),

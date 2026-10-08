@@ -87,8 +87,9 @@ create table if not exists public.documentos (
   original_filename         text,
   status                    text not null default 'pending', -- 'pending' / 'stored' / 'failed' / 'too_large'
 
-  -- Quién lo aportó (NO el dueño: empresa_id/folder_id los añade crm/supabase-carpetas.sql)
-  contact_id                uuid references public.contactos(id) on delete set null,
+  -- Quién lo aportó (NO el dueño: empresa_id/folder_id los añade crm/supabase-carpetas.sql).
+  -- Antes se llamaba contact_id (renombrada en crm/supabase-pasoB.sql).
+  aportado_por_contact_id   uuid references public.contactos(id) on delete set null,
 
   -- Origen
   source                    text not null default 'manual',   -- 'manual' / 'whatsapp'

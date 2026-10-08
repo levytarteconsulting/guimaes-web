@@ -20,7 +20,7 @@ create table if not exists public.deals (
 
   -- Contenido del deal
   title         text,
-  contact_id    uuid references public.contactos(id) on delete cascade,
+  contact_id    uuid references public.contactos(id) on delete set null,  -- borrar el contacto deja el deal (de su empresa) sin interlocutor
   service       text,        -- id del catálogo de servicios (en código)
   stage         text not null default 'reunion',  -- id del catálogo de etapas
   owner         text,        -- asesor responsable

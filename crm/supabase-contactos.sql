@@ -28,7 +28,8 @@ create table if not exists public.contactos (
 
   -- Marcadores
   kyc           boolean not null default false,  -- documentación KYC completada
-  registered    boolean not null default false,  -- tiene acceso al área de cliente
+  -- (registered se quitó en crm/supabase-pasoB.sql: el acceso al área
+  -- cliente es auth_user_id)
 
   -- Enlace con el login del área de cliente (se usa en la fase 2). El
   -- índice único parcial y la FK a auth.users (on delete set null) los
@@ -63,3 +64,41 @@ drop trigger if exists contactos_set_updated_at on public.contactos;
 create trigger contactos_set_updated_at
   before update on public.contactos
   for each row execute function public.set_updated_at();
+
+-- ============================================================
+-- Borrar un contacto desde el CRM (crm/supabase-pasoB.sql), en una
+-- transacción: los deals de su empresa se quedan sin interlocutor
+-- (deals.contact_id es ON DELETE SET NULL), los que no tienen empresa se
+-- borran, y las notas y tareas de los deals que quedan siguen con su deal.
+-- Usa is_admin() (supabase-admins.sql), deals, notas y tareas: se resuelven
+-- al llamarla, no al crearla.
+-- ============================================================
+create or replace function public.admin_borrar_contacto(p_contact_id uuid)
+returns table(deals_conservados integer, deals_borrados integer)
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $f$
+declare
+  v_borrados integer;
+  v_quedan   integer;
+begin
+  if not public.is_admin() then
+    raise exception 'No autorizado' using errcode = '42501';
+  end if;
+  perform 1 from public.contactos c where c.id = p_contact_id for update;
+  if not found then
+    raise exception 'El contacto no existe' using errcode = 'GU010';
+  end if;
+  delete from public.deals d where d.contact_id = p_contact_id and d.empresa_id is null;
+  get diagnostics v_borrados = row_count;
+  select count(*) into v_quedan from public.deals d where d.contact_id = p_contact_id;
+  update public.notas n set contact_id = null where n.contact_id = p_contact_id and n.deal_id is not null;
+  update public.tareas t set contact_id = null where t.contact_id = p_contact_id and t.deal_id is not null;
+  delete from public.contactos c where c.id = p_contact_id;
+  return query select v_quedan, v_borrados;
+end;
+$f$;
+revoke all on function public.admin_borrar_contacto(uuid) from public, anon, authenticated, service_role;
+grant execute on function public.admin_borrar_contacto(uuid) to authenticated;

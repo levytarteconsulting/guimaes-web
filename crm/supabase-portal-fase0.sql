@@ -143,9 +143,14 @@ begin
   if n > 0 then
     raise exception 'Hay % contactos con auth_user_id que no existe en auth.users (ver 3A). No se ha cambiado nada.', n;
   end if;
-  select count(*) into n from public.contactos where registered;
-  if n > 0 then
-    raise exception 'Hay % contactos con registered = true (ver 3A). No se ha cambiado nada.', n;
+  -- (registered ya no existe desde crm/supabase-pasoB.sql: en una
+  -- instalación nueva no hay nada que comprobar.)
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'contactos' and column_name = 'registered') then
+    execute 'select count(*) from public.contactos where registered' into n;
+    if n > 0 then
+      raise exception 'Hay % contactos con registered = true (ver 3A). No se ha cambiado nada.', n;
+    end if;
   end if;
 
   create unique index contactos_auth_user_id_key
