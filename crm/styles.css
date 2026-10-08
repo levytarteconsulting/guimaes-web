@@ -549,3 +549,10 @@ body.no-scroll{overflow:hidden;}
   .doc-preview__stage{padding:4px;}
   .doc-preview__img{max-height:60vh;}
 }
+/* Área cliente: revisar una solicitud de alta */
+.alta-det__h{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 6px;}
+.alta-kv{display:grid;gap:4px;}
+.alta-kv__f{display:grid;grid-template-columns:140px 1fr;gap:10px;font-size:13.5px;}
+.alta-kv__f>span:last-child{overflow-wrap:anywhere;}
+@media (max-width:560px){ .alta-kv__f{grid-template-columns:1fr;gap:0;margin-bottom:6px;} }
+

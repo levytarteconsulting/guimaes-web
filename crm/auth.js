@@ -48,6 +48,7 @@
 
   function friendlyError(msg) {
     if (!msg) return "Ha ocurrido un error. Inténtalo de nuevo.";
+    if (/captcha/i.test(msg)) return "No se ha podido completar la comprobación de seguridad. Vuelve a intentarlo.";
     if (/invalid login credentials/i.test(msg)) return "Correo o contraseña incorrectos.";
     if (/email not confirmed/i.test(msg)) return "Confirma tu correo antes de iniciar sesión.";
     if (/already.*registered|already been registered|email.*exists/i.test(msg)) return "Ya existe una cuenta con ese correo.";
@@ -55,9 +56,11 @@
     return msg;
   }
 
-  async function signInWithPassword(email, password) {
+  // captchaToken: el de Cloudflare Turnstile cuando está activo
+  // (SUPABASE_CONFIG.turnstileSiteKey); si no, undefined y no se envía.
+  async function signInWithPassword(email, password, captchaToken) {
     if (!client) return { error: { message: "El acceso aún no está configurado (Supabase)." } };
-    var res = await client.auth.signInWithPassword({ email: email, password: password });
+    var res = await client.auth.signInWithPassword({ email: email, password: password, options: captchaToken ? { captchaToken: captchaToken } : undefined });
     if (res.error) return { error: { message: friendlyError(res.error.message) } };
     if (!(await isAllowed(res.data.user))) {
       await client.auth.signOut();
@@ -74,13 +77,13 @@
     });
   }
 
-  async function sendPasswordReset(email) {
+  async function sendPasswordReset(email, captchaToken) {
     if (!client) return { error: { message: "El acceso aún no está configurado (Supabase)." } };
     // Fijo (no window.location.href): el Site URL del proyecto de Supabase
     // es la raíz del dominio (no se puede cambiar, la usará el área
     // cliente), así que sin esto el enlace del correo manda siempre a
     // https://guimaes.es y nunca aquí.
-    var res = await client.auth.resetPasswordForEmail(email, { redirectTo: "https://guimaes.es/crm" });
+    var res = await client.auth.resetPasswordForEmail(email, { redirectTo: "https://guimaes.es/crm", captchaToken: captchaToken || undefined });
     if (res.error) return { error: { message: friendlyError(res.error.message) } };
     return {};
   }

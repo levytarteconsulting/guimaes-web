@@ -6,6 +6,14 @@
 //   "vincular": RPC admin_vincular_cuenta (exige email confirmado, que la
 //     cuenta no sea admin ni esté vinculada y que el contacto no tenga
 //     otra) y, si sale bien, email al cliente por Resend.
+//   "alta": da de alta (empresa_id y contact_id nulos: se crean con los
+//     datos del borrador) o vincula a lo existente, con la RPC
+//     admin_alta_resolver (una transacción); después mueve los ficheros del
+//     alta a cliente/{empresa_id}/… con la API de Storage y los registra uno
+//     a uno (admin_alta_registrar_documento). Si algo falla a medias, se
+//     reintenta con "reintentar_documentos". Envía el email de acceso activo.
+//   "rechazar": admin_alta_rechazar (borra borrador y documentos del alta),
+//     borra sus ficheros y elimina la cuenta (nunca un admin ni una vinculada).
 //   "eliminar": borra una cuenta de Auth SOLO si es pendiente: está en
 //     admin_cuentas_pendientes() (no es admin ni está vinculada). Justo
 //     antes de borrar se repite la comprobación con la service role, para
@@ -16,6 +24,10 @@
 //   { accion: "vincular", auth_user_id, contact_id }
 //     → 200 { emails_coinciden, email_cuenta, email_contacto, email_enviado }
 //   { accion: "eliminar", auth_user_id } → 200 { ok: true }
+//   { accion: "alta", auth_user_id, empresa_id?, contact_id? }
+//     → 200 { empresa_id, contact_id, documentos_movidos, documentos_pendientes, email_enviado }
+//   { accion: "reintentar_documentos", auth_user_id } → 200 { documentos_movidos, documentos_pendientes }
+//   { accion: "rechazar", auth_user_id } → 200 { ok: true, ficheros_borrados }
 //   Errores: 400 { error } · 403 (no admin) · 409 (no se puede eliminar) · 401
 //
 // Secrets: RESEND_API_KEY (el mismo que ya usa notify-new-lead).
@@ -71,6 +83,35 @@ async function enviarEmailVinculada(para: string, nombre: string | null): Promis
   return true;
 }
 
+// Mueve los ficheros de un alta resuelta a su destino y los registra. Cada
+// uno por separado: si uno falla, los demás siguen, y el que falló se queda
+// en alta_documentos para reintentarlo. Si el fichero ya está en el destino
+// (un intento anterior lo movió pero no llegó a registrarlo), solo registra.
+// deno-lint-ignore no-explicit-any
+async function moverDocumentosAlta(userClient: any, admin: any, authUserId: string) {
+  const { data, error } = await userClient.rpc("admin_alta_movimientos", { p_auth_user_id: authUserId });
+  if (error) throw error;
+  const movs = (data || []) as { documento_id: string; origen: string; destino: string }[];
+  let movidos = 0;
+  for (const m of movs) {
+    try {
+      const { error: mvErr } = await admin.storage.from("documentos").move(m.origen, m.destino);
+      if (mvErr) {
+        // ¿Ya movido en un intento anterior? Entonces el origen no existe y el destino sí.
+        const carpeta = m.destino.slice(0, m.destino.lastIndexOf("/"));
+        const { data: lista } = await admin.storage.from("documentos").list(carpeta, { limit: 10 });
+        if (!(lista || []).some((o: { name: string }) => `${carpeta}/${o.name}` === m.destino)) throw mvErr;
+      }
+      const { error: regErr } = await userClient.rpc("admin_alta_registrar_documento", { p_documento_id: m.documento_id });
+      if (regErr) throw regErr;
+      movidos++;
+    } catch (e) {
+      console.error("portal-cuentas: no se pudo mover un documento del alta (se reintentará)", m.documento_id, e);
+    }
+  }
+  return { documentos_movidos: movidos, documentos_pendientes: movs.length - movidos };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Método no permitido." });
@@ -117,6 +158,61 @@ Deno.serve(async (req) => {
         email_contacto: r.email_contacto,
         email_enviado,
       });
+    }
+
+    // ---------------- alta (dar de alta o vincular a existente) ----------------
+    if (accion === "alta") {
+      const { empresa_id, contact_id } = body as Record<string, unknown>;
+      if ((empresa_id != null && !esUuid(empresa_id)) || (contact_id != null && !esUuid(contact_id))) return json(400, { error: "Datos no válidos." });
+      const { data, error } = await userClient.rpc("admin_alta_resolver", {
+        p_auth_user_id: auth_user_id, p_empresa_id: empresa_id ?? null, p_contact_id: contact_id ?? null,
+      });
+      if (error) return errorRpc(error);
+      const r = (data as { empresa_id: string; contact_id: string }[])[0];
+      const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      const mov = await moverDocumentosAlta(userClient, admin, auth_user_id);
+
+      const { data: u } = await admin.auth.admin.getUserById(auth_user_id);
+      const { data: ct } = await admin.from("contactos").select("full_name").eq("id", r.contact_id).maybeSingle();
+      let email_enviado = false;
+      try { if (u?.user?.email) email_enviado = await enviarEmailVinculada(u.user.email, ct?.full_name ?? null); }
+      catch (e) { console.error("portal-cuentas: fallo enviando el email", e); }
+      return json(200, { empresa_id: r.empresa_id, contact_id: r.contact_id, ...mov, email_enviado });
+    }
+
+    if (accion === "reintentar_documentos") {
+      const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      try { return json(200, await moverDocumentosAlta(userClient, admin, auth_user_id)); }
+      catch (e) { return errorRpc(e as { code?: string; message: string }); }
+    }
+
+    // ---------------- rechazar (borrar borrador, ficheros y cuenta) ----------------
+    if (accion === "rechazar") {
+      const { data, error } = await userClient.rpc("admin_alta_rechazar", { p_auth_user_id: auth_user_id });
+      if (error) return errorRpc(error);
+      const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      const rutas = ((data || []) as { storage_path: string }[]).map((x) => x.storage_path).filter((x) => x.startsWith(`pendientes/${auth_user_id}/`));
+      let ficheros_borrados = 0;
+      if (rutas.length) {
+        const { data: hechos, error: rmErr } = await admin.storage.from("documentos").remove(rutas);
+        if (rmErr) console.error("portal-cuentas: no se pudieron borrar los ficheros del alta (los recoge portal-limpieza)", rmErr);
+        ficheros_borrados = (hechos || []).length;
+      }
+      // Misma doble comprobación que "eliminar" antes de borrar la cuenta.
+      const [esAdmin, vinculada] = await Promise.all([
+        admin.from("admins").select("id").eq("auth_user_id", auth_user_id).limit(1),
+        admin.from("contactos").select("id").eq("auth_user_id", auth_user_id).limit(1),
+      ]);
+      if (esAdmin.error || vinculada.error) return json(500, { error: "No se pudo comprobar la cuenta." });
+      if ((esAdmin.data || []).length || (vinculada.data || []).length) {
+        return json(409, { error: "Esta cuenta no se puede eliminar: es de un administrador o está vinculada a un contacto." });
+      }
+      const { error: delErr } = await admin.auth.admin.deleteUser(auth_user_id);
+      if (delErr && !/not found/i.test(delErr.message)) {
+        console.error("portal-cuentas: deleteUser", delErr);
+        return json(500, { error: "Se borró la solicitud, pero no la cuenta. Vuelve a intentarlo." });
+      }
+      return json(200, { ok: true, ficheros_borrados });
     }
 
     // ---------------- eliminar ----------------

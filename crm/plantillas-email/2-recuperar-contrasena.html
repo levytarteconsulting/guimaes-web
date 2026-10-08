@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Restablece tu contraseña</title></head>
+<body style="margin:0;padding:0;background:#F3F7FC;font-family:Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F3F7FC;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid #E2EAF3;border-radius:16px;">
+        <tr><td style="padding:28px 28px 8px;">
+          <p style="margin:0 0 24px;font-size:22px;letter-spacing:.06em;color:#0B2238;font-weight:700;">GUIMAES</p>
+          <h1 style="margin:0 0 16px;font-size:22px;line-height:1.25;color:#0B2238;">Restablece tu contraseña</h1>
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#1B3A57;">Hola:</p>
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#1B3A57;">Hemos recibido una solicitud para cambiar la contraseña de tu cuenta de GUIMAES ({{ .Email }}).</p>
+          <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#1B3A57;">Pulsa el botón para elegir una contraseña nueva. El enlace caduca al cabo de un tiempo y solo se puede usar una vez.</p>
+          <p style="margin:24px 0;">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#1F6FEB;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:14px 26px;border-radius:100px;">Elegir contraseña nueva</a>
+          </p>
+          <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#6E8298;">Si el botón no funciona, copia este enlace en tu navegador:<br><a href="{{ .ConfirmationURL }}" style="color:#1F6FEB;word-break:break-all;">{{ .ConfirmationURL }}</a></p>
+        </td></tr>
+        <tr><td style="padding:16px 28px 28px;border-top:1px solid #E2EAF3;">
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#6E8298;">Si no has pedido este cambio, ignora este mensaje: tu contraseña seguirá siendo la misma.</p>
+        </td></tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:12px;color:#6E8298;">GUIMAES · <a href="https://guimaes.es" style="color:#6E8298;">guimaes.es</a></p>
+    </td></tr>
+  </table>
+</body>
+</html>

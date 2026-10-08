@@ -56,6 +56,10 @@ verify_jwt = true
 entrypoint = "../supabase-functions/portal-solicitudes/index.ts"
 verify_jwt = true
 
+[functions.portal-alta]
+entrypoint = "../supabase-functions/portal-alta/index.ts"
+verify_jwt = true
+
 [functions.portal-limpieza]
 entrypoint = "../supabase-functions/portal-limpieza/index.ts"
 verify_jwt = true

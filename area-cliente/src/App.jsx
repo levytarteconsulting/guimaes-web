@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase, alCambiarSesion } from "./supabase.js";
 import * as api from "./api.js";
+import { Captcha, captchaActivo } from "./Captcha.jsx";
 
 const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
 const fecha = (iso) => (iso ? new Date(iso).toLocaleDateString("es-ES") : "");
@@ -36,7 +37,11 @@ function Acceso() {
   const [nombre, setNombre] = useState(""); const [email, setEmail] = useState("");
   const [pass, setPass] = useState(""); const [pass2, setPass2] = useState("");
   const [error, setError] = useState(null); const [ok, setOk] = useState(null); const [busy, setBusy] = useState(false);
-  const cambiar = (m) => { setModo(m); setError(null); setOk(null); };
+  // Turnstile (si está activo): un token por envío; `intento` vuelve a montar
+  // el widget para pedir otro.
+  const [token, setToken] = useState(null); const [intento, setIntento] = useState(0);
+  const nuevoCaptcha = () => { setToken(null); setIntento((n) => n + 1); };
+  const cambiar = (m) => { setModo(m); setError(null); setOk(null); nuevoCaptcha(); };
 
   const enviar = async (e) => {
     e.preventDefault(); setError(null); setOk(null);
@@ -49,22 +54,23 @@ function Acceso() {
       if (pass.length < 8) return setError("La contraseña tiene que tener al menos 8 caracteres.");
       if (pass !== pass2) return setError("Las contraseñas no coinciden.");
     }
+    if (captchaActivo && !token) return setError("Completa la comprobación de seguridad.");
     setBusy(true);
     try {
       if (modo === "entrar") {
-        const { error } = await api.entrar(email, pass);
+        const { error } = await api.entrar(email, pass, token);
         if (error) setError(api.mensajeAuth(error));
       } else if (modo === "registro") {
-        const { data, error } = await api.registrarse(nombre, email, pass);
+        const { data, error } = await api.registrarse(nombre, email, pass, token);
         if (error) setError(api.mensajeAuth(error));
         else if (!data.session) setOk("Te hemos enviado un email para confirmar tu cuenta. Abre el enlace y después inicia sesión aquí.");
       } else {
-        const { error } = await api.recuperar(email);
+        const { error } = await api.recuperar(email, token);
         if (error && /rate limit|too many|security purposes/i.test(error.message || "")) setError(api.mensajeAuth(error));
         else setOk("Si existe una cuenta con ese email, te hemos enviado un enlace para crear una contraseña nueva.");
       }
     } catch (err) { setError(api.mensajeAuth(err)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); if (captchaActivo) nuevoCaptcha(); }
   };
 
   const titulos = { entrar: "Área de cliente", registro: "Crear cuenta", olvide: "Recuperar contraseña" };
@@ -88,6 +94,7 @@ function Acceso() {
         {modo !== "olvide" && <Campo id="pass" label="Contraseña" type="password" value={pass} onChange={(e) => setPass(e.target.value)} required
           minLength={modo === "registro" ? 8 : undefined} autoComplete={modo === "registro" ? "new-password" : "current-password"} />}
         {modo === "registro" && <Campo id="pass2" label="Repite la contraseña" type="password" value={pass2} onChange={(e) => setPass2(e.target.value)} required minLength={8} autoComplete="new-password" />}
+        <Captcha key={modo + intento} onToken={setToken} />
         {modo === "entrar" && <p className="pt-enlace-der"><button type="button" className="pt-enlace" onClick={() => cambiar("olvide")}>¿Has olvidado tu contraseña?</button></p>}
         <button className="btn btn--primary" type="submit" disabled={busy}>
           {busy ? "Un momento…" : modo === "entrar" ? "Entrar" : modo === "registro" ? "Crear cuenta" : "Enviar enlace"}
@@ -136,17 +143,205 @@ function EstadoAdmin() {
     </Tarjeta>
   </>;
 }
-function EstadoPendiente({ estado, onRecargar }) {
-  const [busy, setBusy] = useState(false);
+// ----- cuenta pendiente: asistente de alta (crm/supabase-portal-fase32.sql) -----
+// Todo se guarda en el servidor al pasar de paso; se puede volver y editar
+// mientras la cuenta siga pendiente. Nunca dice si el CIF o el email ya
+// existen en Guimaes: eso lo resuelve el equipo al revisar.
+const PASOS_ALTA = ["Tu empresa", "Documentos", "Servicio", "Revisar y enviar"];
+const VACIO_ALTA = { razon_social: "", cif: "", direccion: "", ciudad: "", provincia: "", nombre_contacto: "", telefono: "", servicio: "", mensaje: "" };
+const deAlta = (a, nombre) => {
+  const f = { ...VACIO_ALTA };
+  Object.keys(f).forEach((k) => { if (a && a[k] != null) f[k] = a[k]; });
+  if (!f.nombre_contacto && nombre) f.nombre_contacto = nombre;
+  return f;
+};
+
+function Pasos({ actual }) {
+  return <ol className="pt-pasos" aria-label="Pasos de la solicitud">
+    {PASOS_ALTA.map((t, i) => <li key={t} className={i === actual ? "on" : i < actual ? "hecho" : ""} aria-current={i === actual ? "step" : undefined}>
+      <span className="pt-pasos__n" aria-hidden="true">{i + 1}</span><span className="pt-pasos__t">{t}</span>
+    </li>)}
+  </ol>;
+}
+
+function AltaDocumentos({ docs, onCambio }) {
+  const input = useRef(null);
+  const [paso, setPaso] = useState(null);
+  const [quitando, setQuitando] = useState(null);
+  const [error, setError] = useState(null); const [ok, setOk] = useState(null);
+  const total = docs.reduce((n, d) => n + Number(d.tamano_bytes || 0), 0);
+  const lleno = docs.length >= api.MAX_ALTA_DOCS;
+  const elegir = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null); setOk(null);
+    const v = api.validar(file);
+    if (!v.ok) return setError(v.error);
+    if (total + file.size > api.MAX_ALTA_BYTES) return setError("Con este fichero pasarías de 50 MB en total. Quita algún documento o sube uno más pequeño.");
+    try {
+      const r = await api.subirAlta(file, setPaso);
+      setOk(`«${r.nombre}» añadido.`);
+      await onCambio();
+    } catch (err) { setError(err.message); }
+    finally { setPaso(null); }
+  };
+  const quitar = async (d) => {
+    setError(null); setOk(null); setQuitando(d.documento_id);
+    try { await api.quitarAltaDocumento(d.documento_id); setOk(`«${d.nombre}» quitado.`); await onCambio(); }
+    catch (err) { setError(err.message); }
+    finally { setQuitando(null); }
+  };
+  const textoPaso = { preparando: "Preparando la subida…", subiendo: "Subiendo el fichero…", comprobando: "Comprobando el fichero…" };
   return <>
-    <Cabecera derecha={<BotonSalir />} />
-    <Tarjeta titulo="Tu cuenta está pendiente de verificación por Guimaes"
-      sub="Estamos comprobando tus datos. Te avisaremos por email en cuanto tu acceso esté activo; no tienes que hacer nada más.">
-      {estado && estado.email && <p className="pt-dato">Cuenta: <b>{estado.email}</b></p>}
-      <button className="btn btn--ghost" disabled={busy} onClick={async () => { setBusy(true); await onRecargar(); setBusy(false); }}>
-        {busy ? "Comprobando…" : "Comprobar de nuevo"}
+    <p className="pt-nota">Opcional: escrituras, CIF, últimos impuestos… lo que nos ayude a preparar tu alta. Formatos: {api.FORMATOS}. Máximo 15 MB por fichero, {api.MAX_ALTA_DOCS} documentos y 50 MB en total.</p>
+    <div className="pt-subida__fila">
+      <p className="pt-dato" id="alta-cupo">{docs.length} de {api.MAX_ALTA_DOCS} documentos · {peso(total)} de 50 MB</p>
+      <input ref={input} id="fichero-alta" type="file" accept={api.ACCEPT} className="pt-oculto" onChange={elegir} disabled={!!paso || lleno} />
+      <button type="button" className="btn btn--primary btn--sm" onClick={() => input.current && input.current.click()} disabled={!!paso || lleno} aria-describedby="alta-cupo">
+        {paso ? textoPaso[paso] : "Añadir documento"}
       </button>
-    </Tarjeta>
+    </div>
+    {paso && <div className="pt-progreso" role="progressbar" aria-label={textoPaso[paso]}><div /></div>}
+    <div aria-live="polite"><Aviso>{error}</Aviso><Aviso tipo="ok">{ok}</Aviso></div>
+    {docs.length > 0 && <ul className="pt-docs">{docs.map((d) => <li key={d.documento_id} className="pt-doc">
+      <div className="pt-doc__info"><span className="pt-doc__nombre">{d.nombre}</span><span className="pt-doc__meta">{peso(d.tamano_bytes)}</span></div>
+      <button type="button" className="btn btn--ghost btn--sm" onClick={() => quitar(d)} disabled={!!quitando || !!paso}
+        aria-label={"Quitar " + d.nombre}>{quitando === d.documento_id ? "Quitando…" : "Quitar"}</button>
+    </li>)}</ul>}
+  </>;
+}
+
+function ResumenAlta({ f, docs, catalogo }) {
+  const servicio = (catalogo || []).find((s) => s.codigo === f.servicio);
+  const fila = (t, v) => <div><dt>{t}</dt><dd>{v || "—"}</dd></div>;
+  return <dl className="pt-mini pt-resumen">
+    {fila("Razón social", f.razon_social)}
+    {fila("CIF o NIF", f.cif)}
+    {fila("Dirección", [f.direccion, f.ciudad, f.provincia].filter(Boolean).join(", "))}
+    {fila("Persona de contacto", f.nombre_contacto)}
+    {fila("Teléfono", f.telefono)}
+    {fila("Documentos", docs.length ? docs.map((d) => d.nombre).join(", ") : "Ninguno")}
+    {fila("Servicio", servicio ? servicio.nombre : f.servicio)}
+    {f.mensaje && fila("Mensaje", f.mensaje)}
+  </dl>;
+}
+
+function EstadoPendiente({ estado, onRecargar }) {
+  const [alta, setAlta] = useState(undefined); // undefined = cargando
+  const [docs, setDocs] = useState([]);
+  const [catalogo, setCatalogo] = useState(null);
+  const [f, setF] = useState(VACIO_ALTA);
+  const [paso, setPaso] = useState(0);
+  const [editando, setEditando] = useState(false);
+  const [error, setError] = useState(null); const [fatal, setFatal] = useState(null);
+  const [busy, setBusy] = useState(false); const [recien, setRecien] = useState(false);
+  const titulo = useRef(null);
+
+  const cargar = async () => {
+    try {
+      const [a, d, c] = await Promise.all([api.alta(), api.altaDocumentos(), api.servicios()]);
+      setAlta(a); setDocs(d); setCatalogo(c); setF(deAlta(a, estado && estado.nombre)); setFatal(null);
+    } catch (err) { setFatal(err.message); setAlta(null); }
+  };
+  useEffect(() => { cargar(); }, []);
+  const recargarDocs = async () => setDocs(await api.altaDocumentos());
+  const irPaso = (n) => { setPaso(n); setError(null); window.scrollTo(0, 0); setTimeout(() => titulo.current && titulo.current.focus(), 0); };
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const guardar = async () => { const a = await api.guardarAlta(f); setAlta(a); setF(deAlta(a)); };
+  const siguiente = async (e) => {
+    e.preventDefault(); setError(null);
+    if (paso === 0) {
+      if (!f.razon_social.trim()) return setError("Escribe la razón social de tu empresa.");
+      if (!f.cif.trim()) return setError("Escribe el CIF o NIF.");
+      if (!f.nombre_contacto.trim()) return setError("Escribe el nombre de la persona de contacto.");
+    }
+    if (paso === 2 && !f.servicio) return setError("Elige un servicio.");
+    setBusy(true);
+    try { if (paso !== 1) await guardar(); irPaso(paso + 1); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const enviar = async () => {
+    setError(null); setBusy(true);
+    try { await guardar(); await api.enviarAlta(); await cargar(); setEditando(false); setRecien(true); window.scrollTo(0, 0); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const cab = <Cabecera derecha={<BotonSalir />} />;
+  if (alta === undefined) return <>{cab}<div className="pt-cargando" aria-busy="true" /></>;
+  if (fatal) return <>{cab}<Tarjeta titulo="Tu cuenta está pendiente de verificación por Guimaes"><Aviso>{fatal}</Aviso>
+    <button className="btn btn--primary" onClick={() => { setAlta(undefined); cargar(); }}>Reintentar</button></Tarjeta></>;
+
+  const enviada = alta && alta.estado === "enviada";
+  if (enviada && !editando) return <>
+    {cab}
+    <main className="wrap pt-app pt-alta">
+      <h1 className="pt-empresa">Solicitud de alta</h1>
+      <section className="pt-card" role="status">
+        <p><b>Hemos recibido tu solicitud; Guimaes la revisará y te avisaremos por email.</b></p>
+        <p className="pt-nota">{recien ? "No tienes que hacer nada más." : "Enviada el " + fecha(alta.enviada_at) + "."} Mientras la revisamos puedes corregir cualquier dato o documento.</p>
+        {estado && estado.email && <p className="pt-dato">Cuenta: <b>{estado.email}</b></p>}
+      </section>
+      <section className="pt-card" aria-labelledby="t-enviado">
+        <div className="pt-card__cab"><h2 id="t-enviado">Lo que nos has enviado</h2>
+          <button className="btn btn--ghost btn--sm" onClick={() => { setEditando(true); setRecien(false); irPaso(0); }}>Editar mi solicitud</button></div>
+        <ResumenAlta f={f} docs={docs} catalogo={catalogo} />
+      </section>
+      <p><button className="btn btn--ghost btn--sm" disabled={busy} onClick={async () => { setBusy(true); await onRecargar(); setBusy(false); }}>
+        {busy ? "Comprobando…" : "Comprobar si ya tengo acceso"}</button></p>
+    </main>
+  </>;
+
+  return <>
+    {cab}
+    <main className="wrap pt-app pt-alta">
+      <h1 className="pt-empresa">{enviada ? "Editar mi solicitud" : "Solicita tu alta en Guimaes"}</h1>
+      {!enviada && paso === 0 && <p className="pt-sub">Cuéntanos quién eres y qué necesitas. Guimaes revisará la solicitud y te avisaremos por email cuando tu acceso esté activo.</p>}
+      <Pasos actual={paso} />
+      <form className="pt-card" onSubmit={paso === 3 ? (e) => { e.preventDefault(); enviar(); } : siguiente} noValidate aria-labelledby="t-paso">
+        <h2 id="t-paso" className="pt-card__titulo" tabIndex={-1} ref={titulo}>{PASOS_ALTA[paso]}</h2>
+        <Aviso>{error}</Aviso>
+        {paso === 0 && <>
+          <Campo id="razon_social" label="Razón social *" value={f.razon_social} onChange={set("razon_social")} maxLength={200} autoComplete="organization" />
+          <Campo id="cif" label="CIF o NIF *" value={f.cif} onChange={set("cif")} maxLength={12} autoCapitalize="characters" />
+          <Campo id="direccion" label="Dirección" value={f.direccion} onChange={set("direccion")} maxLength={200} autoComplete="street-address" />
+          <div className="form-row two">
+            <Campo id="ciudad" label="Ciudad" value={f.ciudad} onChange={set("ciudad")} maxLength={100} autoComplete="address-level2" />
+            <Campo id="provincia" label="Provincia" value={f.provincia} onChange={set("provincia")} maxLength={100} autoComplete="address-level1" />
+          </div>
+          <div className="form-row two">
+            <Campo id="nombre_contacto" label="Persona de contacto *" value={f.nombre_contacto} onChange={set("nombre_contacto")} maxLength={120} autoComplete="name" />
+            <Campo id="telefono" label="Teléfono" type="tel" value={f.telefono} onChange={set("telefono")} maxLength={20} autoComplete="tel" />
+          </div>
+          <p className="pt-nota">* Obligatorio</p>
+        </>}
+        {paso === 1 && <AltaDocumentos docs={docs} onCambio={recargarDocs} />}
+        {paso === 2 && <>
+          <div className="field"><label htmlFor="servicio">Servicio que te interesa *</label>
+            <select id="servicio" value={f.servicio} onChange={set("servicio")}>
+              <option value="">Elige un servicio…</option>
+              {(catalogo || []).map((s) => <option key={s.codigo} value={s.codigo}>{s.nombre}</option>)}
+            </select></div>
+          <div className="field"><label htmlFor="mensaje">Cuéntanos qué necesitas (opcional)</label>
+            <textarea id="mensaje" value={f.mensaje} onChange={set("mensaje")} maxLength={1000} rows={5} aria-describedby="mensaje-n" />
+            <span id="mensaje-n" className="pt-nota">{f.mensaje.length}/1000</span></div>
+        </>}
+        {paso === 3 && <>
+          <p className="pt-nota">Comprueba que todo está bien. Puedes volver a cualquier paso para cambiarlo.</p>
+          <ResumenAlta f={f} docs={docs} catalogo={catalogo} />
+        </>}
+        <div className="pt-acciones">
+          {paso > 0 && <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => irPaso(paso - 1)}>Anterior</button>}
+          {enviada && paso < 3 && <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => { setEditando(false); cargar(); }}>Cancelar</button>}
+          <button className="btn btn--primary" type="submit" disabled={busy}>
+            {busy ? (paso === 3 ? "Enviando…" : "Guardando…") : paso === 3 ? (enviada ? "Guardar y enviar" : "Enviar solicitud") : "Siguiente"}
+          </button>
+        </div>
+      </form>
+    </main>
   </>;
 }
 

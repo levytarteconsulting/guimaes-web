@@ -18,6 +18,7 @@ export function mensajeAuth(error) {
   if (/signups? not allowed|signup is disabled/i.test(m)) return "El registro todavía no está abierto. Inténtalo más adelante o escríbenos.";
   if (/already registered|already been registered|already exists/i.test(m)) return "Ya existe una cuenta con ese email. Inicia sesión o recupera tu contraseña.";
   if (/password.*(at least|characters|short)|weak password/i.test(m)) return "La contraseña es demasiado corta o débil: usa al menos 8 caracteres.";
+  if (/captcha/i.test(m)) return "No se ha podido completar la comprobación de seguridad. Vuelve a intentarlo.";
   if (/rate limit|too many|security purposes/i.test(m)) return "Demasiados intentos seguidos. Espera unos minutos y vuelve a probar.";
   if (/failed to fetch|network/i.test(m)) return "No hay conexión. Comprueba tu red y vuelve a probar.";
   return "No se ha podido completar. Vuelve a intentarlo en unos minutos.";
@@ -26,6 +27,8 @@ export function mensajeAuth(error) {
 // que no es tuyo o ya no existe).
 function errorRpc(error) {
   if (error && error.code === "GU001") return new Error("Este contenido ya no está disponible.");
+  // Mensajes pensados para el cliente: datos no válidos, límites, email sin confirmar.
+  if (error && ["GU003", "GU005", "GU006"].includes(error.code)) return new Error(error.message);
   return new Error(error && /fetch|network/i.test(error.message || "") ? "No hay conexión. Comprueba tu red y vuelve a probar." : "No se han podido cargar los datos. Vuelve a intentarlo.");
 }
 async function rpc(nombre, args) {
@@ -47,10 +50,13 @@ async function funcion(nombre, body) {
 }
 
 // ---------- Auth ----------
-export const entrar = (email, password) => supabase.auth.signInWithPassword({ email: email.trim(), password });
-export const registrarse = (nombre, email, password) =>
-  supabase.auth.signUp({ email: email.trim(), password, options: { data: { name: nombre.trim() }, emailRedirectTo: REDIRECT } });
-export const recuperar = (email) => supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: REDIRECT });
+// captchaToken: el de Turnstile si está activo (ver Captcha.jsx); si no, undefined.
+export const entrar = (email, password, captchaToken) =>
+  supabase.auth.signInWithPassword({ email: email.trim(), password, options: captchaToken ? { captchaToken } : undefined });
+export const registrarse = (nombre, email, password, captchaToken) =>
+  supabase.auth.signUp({ email: email.trim(), password, options: { data: { name: nombre.trim() }, emailRedirectTo: REDIRECT, ...(captchaToken ? { captchaToken } : {}) } });
+export const recuperar = (email, captchaToken) =>
+  supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: REDIRECT, ...(captchaToken ? { captchaToken } : {}) });
 export const nuevaContrasena = (password) => supabase.auth.updateUser({ password });
 export const salir = () => supabase.auth.signOut();
 
@@ -95,3 +101,27 @@ export async function subir(empresaId, file, onPaso) {
   onPaso && onPaso("comprobando");
   return funcion("portal-subir", { accion: "confirmar", empresa_id: empresaId, documento_id: sol.documento_id, nombre: file.name });
 }
+
+// ---------- Alta autónoma (cuenta pendiente; crm/supabase-portal-fase32.sql) ----------
+export async function alta() { return (await rpc("portal_alta"))[0] || null; }
+export async function guardarAlta(f) {
+  return (await rpc("portal_alta_guardar", {
+    p_razon_social: f.razon_social, p_cif: f.cif, p_direccion: f.direccion, p_ciudad: f.ciudad, p_provincia: f.provincia,
+    p_nombre_contacto: f.nombre_contacto, p_telefono: f.telefono, p_servicio: f.servicio, p_mensaje: f.mensaje,
+  }))[0];
+}
+export const altaDocumentos = () => rpc("portal_alta_documentos");
+export const MAX_ALTA_DOCS = 10, MAX_ALTA_BYTES = 50 * 1024 * 1024;
+export async function subirAlta(file, onPaso) {
+  const v = validar(file);
+  if (!v.ok) throw new Error(v.error);
+  onPaso && onPaso("preparando");
+  const sol = await funcion("portal-alta", { accion: "solicitar_subida", nombre: file.name, tamano: file.size, tipo: file.type });
+  onPaso && onPaso("subiendo");
+  const up = await supabase.storage.from("documentos").uploadToSignedUrl(sol.ruta, sol.token, file, { contentType: file.type || v.mime });
+  if (up.error) throw new Error("No se ha podido subir el fichero. Comprueba tu conexión y vuelve a probar.");
+  onPaso && onPaso("comprobando");
+  return funcion("portal-alta", { accion: "confirmar_subida", documento_id: sol.documento_id, nombre: file.name });
+}
+export const quitarAltaDocumento = (id) => funcion("portal-alta", { accion: "borrar_documento", documento_id: id });
+export const enviarAlta = () => funcion("portal-alta", { accion: "enviar" });

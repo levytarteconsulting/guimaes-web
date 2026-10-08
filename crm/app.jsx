@@ -50,15 +50,37 @@ function GoogleG({size=18}){
     <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .94 4.97l3.01 2.33C4.66 5.17 6.65 3.58 9 3.58Z"/>
   </svg>;
 }
+// Cloudflare Turnstile (opcional): solo si config.js trae turnstileSiteKey.
+// Supabase lo exige en el acceso con contraseña y al recuperar la
+// contraseña cuando el captcha está activado. Token de un solo uso: tras
+// cada intento se vuelve a montar (key) para pedir otro. Google no lo usa.
+const TURNSTILE_KEY = (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.turnstileSiteKey) || "";
+let turnstileCarga = null;
+function TurnstileCaptcha({onToken}){
+  const ref = uRef(null);
+  uEffect(()=>{
+    if(!TURNSTILE_KEY) return undefined;
+    let id=null, vivo=true;
+    turnstileCarga = turnstileCarga || new Promise((ok,mal)=>{ if(window.turnstile) return ok(); const sc=document.createElement("script"); sc.src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"; sc.async=true; sc.onload=ok; sc.onerror=mal; document.head.appendChild(sc); });
+    turnstileCarga.then(()=>{ if(!vivo||!ref.current) return; id=window.turnstile.render(ref.current,{sitekey:TURNSTILE_KEY, language:"es", callback:onToken, "expired-callback":()=>onToken(null), "error-callback":()=>onToken(null)}); }).catch(()=>onToken(null));
+    return ()=>{ vivo=false; if(id!==null && window.turnstile) window.turnstile.remove(id); };
+  },[]);
+  if(!TURNSTILE_KEY) return null;
+  return <div ref={ref} style={{margin:"0 0 14px",minHeight:65}}/>;
+}
 function Login({onLogin}){
   const [email,setEmail]=uState(""); const [password,setPassword]=uState("");
   const [err,setErr]=uState(null); const [busy,setBusy]=uState(false); const [resetSent,setResetSent]=uState(false);
+  const [token,setToken]=uState(null); const [intento,setIntento]=uState(0);
+  const nuevoCaptcha=()=>{ if(TURNSTILE_KEY){ setToken(null); setIntento(n=>n+1); } };
+  const faltaCaptcha=()=>{ if(TURNSTILE_KEY && !token){ setErr("Completa la comprobación de seguridad."); return true; } return false; };
 
   const submit=async(e)=>{
     e.preventDefault();
+    if(faltaCaptcha()) return;
     setBusy(true); setErr(null);
-    const {data,error} = await Auth.signInWithPassword(email, password);
-    setBusy(false);
+    const {data,error} = await Auth.signInWithPassword(email, password, token);
+    setBusy(false); nuevoCaptcha();
     if(error){ setErr(error.message); return; }
     onLogin(userFromSession(data));
   };
@@ -70,8 +92,10 @@ function Login({onLogin}){
   const forgot=async(e)=>{
     e.preventDefault();
     if(!email){ setErr("Escribe tu correo arriba primero."); return; }
+    if(faltaCaptcha()) return;
     setErr(null);
-    const {error} = await Auth.sendPasswordReset(email);
+    const {error} = await Auth.sendPasswordReset(email, token);
+    nuevoCaptcha();
     if(error){ setErr(error.message); return; }
     setResetSent(true);
   };
@@ -100,6 +124,7 @@ function Login({onLogin}){
             <form onSubmit={submit}>
               <Field label="Correo electrónico"><input className="inp" type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></Field>
               <Field label="Contraseña"><input className="inp" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>
+              <TurnstileCaptcha key={intento} onToken={setToken}/>
               <div style={{textAlign:"right",margin:"-10px 0 14px"}}><a style={{fontSize:12.5,color:"var(--accent)",cursor:"pointer",fontWeight:600}} onClick={forgot}>¿Olvidaste tu contraseña?</a></div>
               <button className="btn btn--primary" type="submit" style={{width:"100%"}} disabled={busy}>{busy?"Entrando…":"Entrar"}</button>
             </form>
@@ -1438,40 +1463,219 @@ function EliminarCuentaModal({cuenta, onClose, onDone, toast}){
     {err && <p style={{color:"var(--danger)",fontSize:12.5,marginTop:8}}>{err}</p>}
   </Modal>;
 }
+// ---- Alta autónoma: revisar lo que ha enviado una cuenta pendiente ----
+// (crm/supabase-portal-fase32.sql). Dar de alta crea empresa y contacto con
+// lo enviado; Vincular a existente usa los elegidos SIN sobrescribirlos (lo
+// enviado queda como referencia en esta pantalla); Rechazar borra la cuenta,
+// el borrador y los ficheros. Los documentos pasan a «Aportados por el
+// cliente» de la empresa.
+function AltaDocVista({doc, onClose, onDownload}){
+  const kind = CRM.docPreviewKind({status:"stored", mime_type:doc.mime_type});
+  const isMobile = useIsMobile();
+  const [url,setUrl]=uState(null); const [failed,setFailed]=uState(false);
+  uEffect(()=>{ let alive=true; CRM.altaDocSignedUrl(Auth.client, doc).then(u=>{ if(!alive) return; if(u) setUrl(u); else setFailed(true); }); return ()=>{alive=false;}; },[doc.id]);
+  const name = doc.original_filename;
+  let body;
+  if(failed) body = <Empty icon="documents" title="No se pudo cargar la vista previa" sub="Prueba a descargarlo."/>;
+  else if(!url) body = <div className="doc-preview__loading muted"><Icon name="clock" size={16}/>Cargando vista previa…</div>;
+  else if(kind==="image") body = <div className="doc-preview__stage"><img className="doc-preview__img" src={url} alt={name} onError={()=>setFailed(true)}/></div>;
+  else if(!isMobile) body = <iframe className="doc-preview__pdf" src={url} title={name}></iframe>;
+  else body = <div className="doc-preview__mobile"><a className="btn btn--primary" href={url} target="_blank" rel="noopener noreferrer"><Icon name="external" size={15}/>Abrir PDF</a></div>;
+  return <Modal title={name} wide onClose={onClose} footer={<>
+    <button className="btn btn--ghost" onClick={onClose}>Cerrar</button>
+    <button className="btn btn--primary" onClick={()=>onDownload(doc)}><Icon name="download" size={15}/>Descargar</button>
+  </>}><div className="doc-preview">{body}</div></Modal>;
+}
+const altaFila = (t, v)=> <div className="alta-kv__f"><span className="muted">{t}</span><span>{v||"—"}</span></div>;
+function AltaEnviada({cuenta, alta, onPreview, onDownload}){
+  const b = alta.borrador || {};
+  const srv = b.servicio ? CRM.serviceById(b.servicio) : null;
+  return <div className="alta-det">
+    <div className="alta-kv">
+      {altaFila("Cuenta", cuenta.email)}
+      {altaFila("Estado", b.estado==="enviada" ? "Enviada el "+fmtFecha(b.enviada_at) : "Sin enviar (la está rellenando)")}
+    </div>
+    <h4 className="alta-det__h">Empresa</h4>
+    <div className="alta-kv">
+      {altaFila("Razón social", b.razon_social)}{altaFila("CIF / NIF", b.cif)}
+      {altaFila("Dirección", [b.direccion, b.ciudad, b.provincia].filter(Boolean).join(", "))}
+    </div>
+    <h4 className="alta-det__h">Contacto</h4>
+    <div className="alta-kv">{altaFila("Nombre", b.nombre_contacto)}{altaFila("Teléfono", b.telefono)}</div>
+    <h4 className="alta-det__h">Servicio</h4>
+    <div className="alta-kv">{altaFila("Servicio", srv ? srv.name : b.servicio)}{b.mensaje && altaFila("Mensaje", <span style={{whiteSpace:"pre-line"}}>{b.mensaje}</span>)}</div>
+    <h4 className="alta-det__h">Documentos ({alta.docs.length})</h4>
+    {alta.docs.length===0 ? <p className="muted" style={{fontSize:13}}>No ha enviado documentos.</p>
+    : <div className="wrap-gap" style={{gap:6}}>{alta.docs.map(d=><div key={d.id} className="row" style={{gap:8,justifyContent:"space-between"}}>
+        <div style={{minWidth:0}}><div style={{fontWeight:600,fontSize:13.5,overflowWrap:"anywhere"}}>{d.original_filename}</div>
+          <div className="muted" style={{fontSize:12}}>{CRM.fmtBytes(d.size_bytes)}</div></div>
+        <div className="row" style={{gap:4,flex:"none"}}>
+          {CRM.docPreviewKind({status:"stored", mime_type:d.mime_type}) && <button className="btn btn--sm btn--ghost" title="Ver" aria-label={"Ver "+d.original_filename} onClick={()=>onPreview(d)}><Icon name="eye" size={14}/></button>}
+          <button className="btn btn--sm btn--ghost" title="Descargar" aria-label={"Descargar "+d.original_filename} onClick={()=>onDownload(d)}><Icon name="download" size={14}/></button>
+        </div>
+      </div>)}</div>}
+  </div>;
+}
+function AltaCoincidencias({co, nav}){
+  if(!co.empresas.length && !co.contactos.length) return <p className="muted" style={{fontSize:13}}>No hay ninguna empresa con ese CIF ni ningún contacto con ese email.</p>;
+  return <div className="warn-box">
+    {co.empresas.map(e=><div key={e.id}>Ya existe la empresa <a href="#" onClick={(ev)=>{ev.preventDefault(); nav("empresa",e.id);}}><b>{e.razon_social}</b></a> con el CIF {e.cif}.</div>)}
+    {co.contactos.map(c=><div key={c.id}>Ya existe el contacto <a href="#" onClick={(ev)=>{ev.preventDefault(); nav("contact",c.id);}}><b>{c.full_name||c.email}</b></a> con el email {c.email}{c.auth_user_id?" (ya tiene cuenta)":""}.</div>)}
+    <div style={{marginTop:6}}>Si es el mismo cliente, usa <b>Vincular a existente</b>.</div>
+  </div>;
+}
+// Elegir empresa y (opcional) contacto existentes.
+function AltaVincular({cuenta, alta, co, busy, onVolver, onConfirmar}){
+  const [q,setQ]=uState("");
+  const [empresa,setEmpresa]=uState(co.empresas.length===1 ? co.empresas[0] : null);
+  const [contacto,setContacto]=uState(undefined); // undefined = sin elegir; null = crear nuevo
+  if(!empresa){
+    const query = q.trim().toLowerCase();
+    const ids = co.empresas.map(e=>e.id);
+    const lista = CRM.EMPRESAS.filter(e=>!query || [e.razon_social, e.cif].some(v=>(v||"").toLowerCase().includes(query)))
+      .sort((a,b)=>(ids.includes(b.id)-ids.includes(a.id)) || (a.razon_social||"").localeCompare(b.razon_social||"","es")).slice(0,50);
+    return <>
+      <p className="muted" style={{marginBottom:10}}>Elige la empresa de <b>{cuenta.email}</b>. Sus datos no se tocan.</p>
+      <div className="searchbox" style={{marginBottom:12}}><Icon name="search" size={16}/><input placeholder="Buscar empresa por nombre o CIF…" aria-label="Buscar empresa" value={q} onChange={e=>setQ(e.target.value)} autoFocus/></div>
+      <div className="wrap-gap" style={{gap:6,maxHeight:320,overflowY:"auto"}}>{lista.map(e=>
+        <button key={e.id} className="btn btn--ghost" style={{justifyContent:"space-between",width:"100%"}} onClick={()=>setEmpresa(e)}>
+          <span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{e.razon_social}</span>
+          <span className="row" style={{gap:6}}>{e.cif && <span className="muted" style={{fontSize:12}}>{e.cif}</span>}{ids.includes(e.id) && <Badge label="Mismo CIF" color="#1F9D6B"/>}</span>
+        </button>)}
+        {lista.length===0 && <div className="muted" style={{padding:16,textAlign:"center"}}>Sin resultados.</div>}
+      </div>
+      <div className="row" style={{justifyContent:"flex-end",marginTop:12}}><button className="btn btn--ghost" onClick={onVolver}>Volver</button></div>
+    </>;
+  }
+  if(contacto===undefined){
+    const deEmpresa = CRM.CONTACTS.filter(c=>CRM.empresasForContact(c.id).some(x=>x.empresa && x.empresa.id===empresa.id));
+    const em = (cuenta.email||"").trim().toLowerCase();
+    const opciones = [...co.contactos.filter(c=>!deEmpresa.includes(c)), ...deEmpresa]
+      .sort((a,b)=>(((b.email||"").toLowerCase()===em)-((a.email||"").toLowerCase()===em)));
+    return <>
+      <p className="muted" style={{marginBottom:10}}>Empresa: <b style={{color:"var(--ink)"}}>{empresa.razon_social}</b> <button className="btn btn--sm btn--ghost" onClick={()=>setEmpresa(null)}>Cambiar</button></p>
+      <p className="muted" style={{marginBottom:10}}>¿A qué contacto pertenece la cuenta?</p>
+      <div className="wrap-gap" style={{gap:6,maxHeight:320,overflowY:"auto"}}>
+        <button className="btn btn--ghost" style={{justifyContent:"flex-start",width:"100%"}} onClick={()=>setContacto(null)}>+ Crear contacto nuevo: {(alta.borrador && alta.borrador.nombre_contacto) || cuenta.email}</button>
+        {opciones.map(c=>{ const motivo = c.auth_user_id ? "Ya tiene cuenta" : null;
+          return <button key={c.id} className="btn btn--ghost" disabled={!!motivo} style={{justifyContent:"space-between",width:"100%"}} onClick={()=>setContacto(c)}>
+            <span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{c.full_name||c.email} {c.email && <span className="muted" style={{fontSize:12}}>· {c.email}</span>}</span>
+            {motivo ? <span style={{fontSize:12,color:"var(--danger)"}}>{motivo}</span> : (c.email||"").toLowerCase()===em ? <Badge label="Mismo email" color="#1F9D6B"/> : null}
+          </button>; })}
+      </div>
+      <div className="row" style={{justifyContent:"flex-end",marginTop:12}}><button className="btn btn--ghost" onClick={onVolver}>Volver</button></div>
+    </>;
+  }
+  const coinciden = contacto && (contacto.email||"").trim().toLowerCase()===(cuenta.email||"").trim().toLowerCase();
+  return <>
+    <p style={{marginBottom:10}}>Cuenta <b>{cuenta.email}</b> → empresa <b>{empresa.razon_social}</b>, {contacto ? <>contacto <b>{contacto.full_name||contacto.email}</b></> : <>contacto nuevo <b>{(alta.borrador && alta.borrador.nombre_contacto) || cuenta.email}</b></>}.</p>
+    {contacto && !coinciden && <div className="warn-box" role="alert" style={{marginBottom:10}}><b>Los emails no coinciden.</b> Cuenta: <b>{cuenta.email}</b> · Contacto: <b>{contacto.email||"(sin email)"}</b></div>}
+    <p className="muted" style={{fontSize:12.5}}>No se cambia ningún dato de la empresa{contacto?" ni del contacto":""}. Los documentos pasan a «Aportados por el cliente», el servicio pedido crea una oportunidad y se le envía un email de acceso activo.</p>
+    <div className="row" style={{justifyContent:"flex-end",gap:8,marginTop:12}}>
+      <button className="btn btn--ghost" onClick={()=>setContacto(undefined)} disabled={busy}>Cambiar</button>
+      <button className="btn btn--primary" onClick={()=>onConfirmar(empresa.id, contacto ? contacto.id : null)} disabled={busy}>{busy?"Vinculando…":"Vincular y dar acceso"}</button>
+    </div>
+  </>;
+}
+function AltaDetalleModal({cuenta, alta, onClose, onDone, toast, nav}){
+  const [modo,setModo]=uState("ver"); // ver | vincular | rechazar
+  const [busy,setBusy]=uState(false); const [err,setErr]=uState(null);
+  const [vista,setVista]=uState(null);
+  const co = CRM.coincidenciasAlta(alta.borrador, cuenta.email);
+  const b = alta.borrador || {};
+  const descargar = async(d)=>{ const u = await CRM.altaDocSignedUrl(Auth.client, d, {download:d.original_filename}); if(u) window.location.assign(u); else toast("No se pudo descargar"); };
+  const avisoResultado = (r)=>{
+    const partes = ["Acceso activado"];
+    if(r.documentos_movidos) partes.push(r.documentos_movidos+" documento"+(r.documentos_movidos===1?"":"s")+" en «Aportados por el cliente»");
+    if(r.documentos_pendientes) partes.push(r.documentos_pendientes+" sin mover: reinténtalo desde la ficha del contacto");
+    partes.push(r.email_enviado ? "se ha avisado a "+cuenta.email : "no se pudo enviar el email de aviso");
+    toast(partes.join(" · "));
+  };
+  const resolver = async(empresaId, contactId)=>{
+    setBusy(true); setErr(null);
+    try{ const r = await CRM.resolverAlta(Auth.client, cuenta.auth_user_id, empresaId, contactId); avisoResultado(r); onDone(r); }
+    catch(e){ setErr(e.message); setBusy(false); }
+  };
+  const rechazar = async()=>{
+    setBusy(true); setErr(null);
+    try{ await CRM.rechazarAlta(Auth.client, cuenta.auth_user_id); toast("Solicitud rechazada y cuenta eliminada"); onDone(null); }
+    catch(e){ setErr(e.message); setBusy(false); }
+  };
+  const motivoAlta = !cuenta.email_confirmado ? "La cuenta todavía no ha confirmado su email"
+    : !b.razon_social ? "Falta la razón social: usa «Vincular a existente»"
+    : co.empresas.length ? "Ya hay una empresa con ese CIF: usa «Vincular a existente»" : null;
+  const cerrar = ()=>{ if(!busy) onClose(); };
+  const error = err && <p role="alert" style={{color:"var(--danger)",fontSize:12.5,marginTop:10}}>{err}</p>;
+  if(modo==="rechazar") return <Modal title="Rechazar solicitud" onClose={cerrar} footer={<>
+    <button className="btn btn--ghost" onClick={()=>setModo("ver")} disabled={busy}>Volver</button>
+    <button className="btn btn--danger" onClick={rechazar} disabled={busy}>{busy?"Rechazando…":"Rechazar y eliminar cuenta"}</button></>}>
+    <p className="muted">Se eliminarán la cuenta <b>{cuenta.email}</b>, los datos que ha enviado y sus {alta.docs.length} documento{alta.docs.length===1?"":"s"}. No se le envía ningún email. Esta acción no se puede deshacer.</p>
+    {error}
+  </Modal>;
+  if(modo==="vincular") return <Modal title="Vincular a existente" wide onClose={cerrar}>
+    <AltaVincular cuenta={cuenta} alta={alta} co={co} busy={busy} onVolver={()=>{ setModo("ver"); setErr(null); }} onConfirmar={resolver}/>
+    {error}
+  </Modal>;
+  return <>
+    <Modal title={"Solicitud de alta · "+(b.razon_social||cuenta.email)} wide onClose={cerrar} footer={<>
+      <button className="btn btn--ghost" style={{marginRight:"auto",color:"var(--danger)"}} onClick={()=>setModo("rechazar")} disabled={busy}><Icon name="trash" size={14}/>Rechazar</button>
+      <button className="btn btn--ghost" onClick={()=>setModo("vincular")} disabled={busy||!cuenta.email_confirmado}>Vincular a existente</button>
+      <button className="btn btn--primary" onClick={()=>resolver(null,null)} disabled={busy||!!motivoAlta} title={motivoAlta||"Crea la empresa y el contacto con estos datos"}>{busy?"Dando de alta…":"Dar de alta"}</button>
+    </>}>
+      <AltaEnviada cuenta={cuenta} alta={alta} onPreview={setVista} onDownload={descargar}/>
+      <h4 className="alta-det__h">Coincidencias</h4>
+      <AltaCoincidencias co={co} nav={(v,id)=>{ onClose(); nav(v,id); }}/>
+      {motivoAlta && <p className="muted" style={{fontSize:12.5,marginTop:8}}>{motivoAlta}.</p>}
+      {error}
+    </Modal>
+    {vista && <AltaDocVista doc={vista} onClose={()=>setVista(null)} onDownload={descargar}/>}
+  </>;
+}
 // Cuentas registradas en el área cliente que aún no ven nada.
 function CuentasPortal({nav, toast}){
   const [cuentas,setCuentas]=uState(null); // null = cargando
-  const [modal,setModal]=uState(null); // {kind:"vincular"|"eliminar", cuenta}
+  const [modal,setModal]=uState(null); // {kind:"vincular"|"eliminar"|"alta", cuenta}
+  const [altas,setAltas]=uState({}); // auth_user_id → {borrador, docs}
   const isMobile = useIsMobile();
-  const reload=async()=>{ await CRM.loadCuentasPendientes(Auth.client); setCuentas(CRM.CUENTAS_PENDIENTES.slice()); };
+  const reload=async()=>{
+    await CRM.loadCuentasPendientes(Auth.client);
+    try{ setAltas(await CRM.loadAltas(Auth.client)); }catch(e){ toast("No se pudieron cargar las solicitudes de alta: "+e.message); }
+    setCuentas(CRM.CUENTAS_PENDIENTES.slice());
+  };
   uEffect(()=>{ reload(); },[]);
   const done=()=>{ setModal(null); reload(); };
   const confirmada = (c)=> c.email_confirmado ? <Badge label="Confirmada" color="#1F9D6B"/> : <Badge label="Sin confirmar" color="#D9822B"/>;
-  const acciones = (c)=> <div className="row" style={{gap:6,flexWrap:"wrap"}}>
+  const solicitud = (c)=>{ const a = altas[c.auth_user_id]; const b = a && a.borrador;
+    return b && b.estado==="enviada" ? <Badge label="Alta enviada" color="#1F6FEB"/> : a ? <Badge label="Rellenando el alta" color="#6E8298"/> : null; };
+  const acciones = (c)=> altas[c.auth_user_id] ? <div className="row" style={{gap:6,flexWrap:"wrap"}}>
+    <button className="btn btn--sm btn--primary" onClick={()=>setModal({kind:"alta", cuenta:c})}><Icon name="eye" size={14}/>Revisar</button>
+  </div> : <div className="row" style={{gap:6,flexWrap:"wrap"}}>
     <button className="btn btn--sm btn--primary" disabled={!c.email_confirmado} title={c.email_confirmado ? "Vincular a un contacto" : "No se puede vincular: la cuenta todavía no ha confirmado su email"}
       onClick={()=>setModal({kind:"vincular", cuenta:c})}><Icon name="user" size={14}/>Vincular</button>
     <button className="btn btn--sm btn--ghost" title="Eliminar cuenta" onClick={()=>setModal({kind:"eliminar", cuenta:c})}><Icon name="trash" size={14}/>{isMobile?null:"Eliminar"}</button>
   </div>;
   return <div className="content">
-    <p className="muted" style={{marginBottom:16,maxWidth:720}}>Cuentas registradas en el área cliente que todavía no ven nada. Vincula cada una a su contacto para que vea los datos, servicios y documentos compartidos de sus empresas, o elimínala si no corresponde a un cliente.</p>
+    <p className="muted" style={{marginBottom:16,maxWidth:720}}>Cuentas registradas en el área cliente que todavía no ven nada. Si han rellenado la solicitud de alta, revísala para darla de alta, vincularla a un cliente existente o rechazarla. Si no, vincula cada una a su contacto para que vea los datos, servicios y documentos compartidos de sus empresas, o elimínala si no corresponde a un cliente.</p>
     {!cuentas ? <div className="muted" style={{padding:16}}>Cargando…</div>
     : cuentas.length===0 ? <div className="card"><div className="card__body"><Empty icon="users" title="No hay solicitudes pendientes" sub="Cuando alguien se registre en el área cliente, aparecerá aquí."/></div></div>
     : isMobile ? <div className="wrap-gap">{cuentas.map(c=><div key={c.auth_user_id} className="card"><div className="card__body">
         <div style={{fontWeight:600,overflowWrap:"anywhere"}}>{c.email}</div>
         <div className="muted" style={{fontSize:12.5,margin:"2px 0 8px"}}>{[c.nombre, "alta "+fmtFecha(c.alta)].filter(Boolean).join(" · ")}</div>
-        <div className="row" style={{justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>{confirmada(c)}{acciones(c)}</div>
+        <div className="row" style={{justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><span className="row" style={{gap:6}}>{confirmada(c)}{solicitud(c)}</span>{acciones(c)}</div>
         {!c.email_confirmado && <div className="muted" style={{fontSize:12,marginTop:6}}>Hasta que confirme su email no se puede vincular.</div>}
       </div></div>)}</div>
-    : <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Email</th><th>Nombre</th><th>Alta</th><th>Email</th><th></th></tr></thead><tbody>
+    : <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Email</th><th>Nombre</th><th>Alta</th><th>Email</th><th>Solicitud</th><th></th></tr></thead><tbody>
         {cuentas.map(c=><tr key={c.auth_user_id}>
           <td className="tbl__name">{c.email}</td>
           <td className="tbl__sub">{c.nombre||"—"}</td>
           <td className="tbl__sub">{fmtFecha(c.alta)}</td>
           <td>{confirmada(c)}</td>
+          <td>{solicitud(c)||<span className="muted">—</span>}</td>
           <td>{acciones(c)}</td>
         </tr>)}
       </tbody></table></div>}
     {modal && modal.kind==="vincular" && <VincularCuentaModal cuenta={modal.cuenta} toast={toast} onClose={()=>setModal(null)} onDone={done}/>}
+    {modal && modal.kind==="alta" && altas[modal.cuenta.auth_user_id] && <AltaDetalleModal cuenta={modal.cuenta} alta={altas[modal.cuenta.auth_user_id]} toast={toast} nav={nav} onClose={()=>setModal(null)} onDone={done}/>}
     {modal && modal.kind==="eliminar" && <EliminarCuentaModal cuenta={modal.cuenta} toast={toast} onClose={()=>setModal(null)} onDone={done}/>}
   </div>;
 }
@@ -1480,6 +1684,19 @@ function ContactPortalAccess({contact, toast, nav}){
   const [cuenta,setCuenta]=uState(undefined); // undefined = cargando; null = sin cuenta
   const [confirmar,setConfirmar]=uState(false); const [busy,setBusy]=uState(false);
   const [vinculado,setVinculado]=uState(!!contact.auth_user_id);
+  const [porMover,setPorMover]=uState(0); const [moviendo,setMoviendo]=uState(false);
+  uEffect(()=>{
+    let alive=true; setPorMover(0);
+    if(contact.auth_user_id) CRM.altaDocsPorMover(Auth.client, contact.auth_user_id).then(n=>{ if(alive) setPorMover(n); }).catch(()=>{});
+    return ()=>{alive=false;};
+  },[contact.auth_user_id]);
+  const reintentar=async()=>{
+    setMoviendo(true);
+    try{ const r = await CRM.reintentarDocsAlta(Auth.client, contact.auth_user_id); setPorMover(r.documentos_pendientes||0);
+      toast(r.documentos_pendientes ? "Quedan "+r.documentos_pendientes+" documentos sin mover" : "Documentos del alta movidos a «Aportados por el cliente»"); }
+    catch(e){ toast("No se pudieron mover: "+e.message); }
+    finally{ setMoviendo(false); }
+  };
   uEffect(()=>{
     let alive=true;
     setVinculado(!!contact.auth_user_id);
@@ -1507,6 +1724,10 @@ function ContactPortalAccess({contact, toast, nav}){
         </div>
         <button className="btn btn--sm btn--ghost" onClick={()=>setConfirmar(true)}><Icon name="x" size={14}/>Desvincular</button>
       </div>}
+    {vinculado && porMover>0 && <div className="warn-box" style={{marginTop:10,display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+      <span>{porMover} documento{porMover===1?"":"s"} de su solicitud de alta no se pudo mover a «Aportados por el cliente».</span>
+      <button className="btn btn--sm btn--primary" onClick={reintentar} disabled={moviendo}>{moviendo?"Moviendo…":"Reintentar"}</button>
+    </div>}
     {confirmar && <Modal title="Quitar acceso al área cliente" onClose={()=>{ if(!busy) setConfirmar(false); }} footer={<><button className="btn btn--ghost" onClick={()=>setConfirmar(false)} disabled={busy}>Cancelar</button><button className="btn btn--danger" onClick={desvincular} disabled={busy}>{busy?"Quitando…":"Desvincular"}</button></>}>
       <p className="muted">La cuenta <b>{cuenta ? cuenta.email : ""}</b> dejará de ver los datos de {contact.full_name||contact.company} en el área cliente desde ya. La cuenta no se borra: volverá a la lista de solicitudes pendientes.</p>
     </Modal>}

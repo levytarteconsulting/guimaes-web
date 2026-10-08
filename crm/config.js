@@ -6,7 +6,13 @@
       auto-registrarse, ver crm/SETUP-SUPABASE.md) */
 window.SUPABASE_CONFIG = {
   url: "https://zuktsotrcolqdowpbnrx.supabase.co",
-  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1a3Rzb3RyY29scWRvd3BibnJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzMDY5MjksImV4cCI6MjA5ODg4MjkyOX0.BmOBBZbnTWvuUgy74gyKKHz5mPnyOI1d0gzf_UjQcwQ"
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp1a3Rzb3RyY29scWRvd3BibnJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzMDY5MjksImV4cCI6MjA5ODg4MjkyOX0.BmOBBZbnTWvuUgy74gyKKHz5mPnyOI1d0gzf_UjQcwQ",
+  // Cloudflare Turnstile (captcha) para el registro, el acceso y la
+  // recuperación de contraseña, en el área cliente y en el CRM. Vacío =
+  // desactivado y todo funciona como siempre. La clave de SITIO es pública;
+  // la SECRETA va solo en Supabase (Authentication → Attack Protection).
+  // Rellenarla y desplegar ANTES de activar el captcha en Supabase.
+  turnstileSiteKey: ""
 };
 
 /* Notificaciones push (Web Push + VAPID)

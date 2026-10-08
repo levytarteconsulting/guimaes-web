@@ -1454,6 +1454,70 @@
     return res.data;
   }
 
+  // ---- Alta autónoma (crm/supabase-portal-fase32.sql) ----
+  // Borradores y documentos que mandan las cuentas pendientes. Lectura
+  // directa (RLS: solo admins); las acciones van por portal-cuentas.
+  // Devuelve {auth_user_id: {borrador, docs[]}} (docs aún sin mover).
+  async function loadAltas(client){
+    var b = await client.from("alta_borradores").select("*");
+    if(b.error) throw b.error;
+    var d = await client.from("alta_documentos").select("*").is("destino_path", null).order("created_at", {ascending:true});
+    if(d.error) throw d.error;
+    var r = {};
+    (b.data||[]).forEach(function(x){ r[x.auth_user_id] = {borrador:x, docs:[]}; });
+    (d.data||[]).forEach(function(x){ (r[x.auth_user_id] = r[x.auth_user_id] || {borrador:null, docs:[]}).docs.push(x); });
+    return r;
+  }
+  // URL firmada de un fichero del alta (pendientes/…): los admins leen todo
+  // el bucket. opts {download: nombre} fuerza la descarga.
+  async function altaDocSignedUrl(client, doc, opts){
+    var s = await client.storage.from("documentos").createSignedUrl(doc.storage_path, 600, opts||{});
+    if(s.error) return null;
+    return s.data.signedUrl;
+  }
+  // Coincidencias para revisar un alta: empresas con el mismo CIF y
+  // contactos con el mismo email (de la cuenta o, si lo hubiera, otro).
+  function normCifAlta(s){ return String(s||"").replace(/[\s.\-]/g,"").toUpperCase(); }
+  function coincidenciasAlta(borrador, email){
+    var cif = normCifAlta(borrador && borrador.cif);
+    var em = String(email||"").trim().toLowerCase();
+    return {
+      empresas: cif ? EMPRESAS.filter(function(e){ return normCifAlta(e.cif)===cif; }) : [],
+      contactos: em ? CONTACTS.filter(function(c){ return c.id.indexOf("lead-")!==0 && String(c.email||"").trim().toLowerCase()===em; }) : [],
+    };
+  }
+  async function recargarTrasAlta(client){
+    await Promise.all([loadEmpresas(client), loadContactos(client)]);
+    await Promise.all([loadContactoEmpresa(client), loadDeals(client), loadCuentasPendientes(client)]);
+  }
+  // Dar de alta (sin empresa ni contacto: se crean con lo enviado) o
+  // vincular a existentes (empresaId obligatorio; contactId opcional: sin él
+  // se crea el contacto en esa empresa). Devuelve lo de portal-cuentas:
+  // {empresa_id, contact_id, documentos_movidos, documentos_pendientes, email_enviado}.
+  async function resolverAlta(client, authUserId, empresaId, contactId){
+    var r = await invokePortalCuentas(client, {accion:"alta", auth_user_id:authUserId, empresa_id:empresaId||null, contact_id:contactId||null});
+    await recargarTrasAlta(client);
+    return r;
+  }
+  // Rechazar: borra la cuenta, su borrador y sus ficheros.
+  async function rechazarAlta(client, authUserId){
+    var r = await invokePortalCuentas(client, {accion:"rechazar", auth_user_id:authUserId});
+    var i = CUENTAS_PENDIENTES.findIndex(function(x){ return x.auth_user_id===authUserId; });
+    if(i>-1) CUENTAS_PENDIENTES.splice(i,1);
+    return r;
+  }
+  // Documentos de un alta ya resuelta que no se pudieron mover (fallo de
+  // Storage): se reintentan desde la ficha del contacto.
+  async function altaDocsPorMover(client, authUserId){
+    var res = await client.from("alta_documentos").select("id", {count:"exact", head:true})
+      .eq("auth_user_id", authUserId).not("destino_path", "is", null);
+    if(res.error) throw res.error;
+    return res.count||0;
+  }
+  async function reintentarDocsAlta(client, authUserId){
+    return invokePortalCuentas(client, {accion:"reintentar_documentos", auth_user_id:authUserId});
+  }
+
   // ---- Área cliente: lo que el cliente cambia o pide sobre su empresa ----
   // (crm/supabase-portal-fase31.sql). Lectura directa: las dos tablas son de
   // solo lectura para admins (RLS is_admin()).
@@ -2001,6 +2065,8 @@
     updateDeal:updateDeal, WA_TEMPLATES:WA_TEMPLATES, setArchived:setArchived,
     setDocumentoVisible:setDocumentoVisible,
     CUENTAS_PENDIENTES:CUENTAS_PENDIENTES, loadCuentasPendientes:loadCuentasPendientes,
+    loadAltas:loadAltas, altaDocSignedUrl:altaDocSignedUrl, coincidenciasAlta:coincidenciasAlta, resolverAlta:resolverAlta,
+    rechazarAlta:rechazarAlta, altaDocsPorMover:altaDocsPorMover, reintentarDocsAlta:reintentarDocsAlta,
     vincularCuentaPortal:vincularCuentaPortal, eliminarCuentaPortal:eliminarCuentaPortal,
     cuentaDeContacto:cuentaDeContacto, desvincularCuentaPortal:desvincularCuentaPortal,
     loadSolicitudesEmpresa:loadSolicitudesEmpresa, loadCambiosEmpresa:loadCambiosEmpresa,

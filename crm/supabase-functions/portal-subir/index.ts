@@ -32,9 +32,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { esUuid, validarSolicitud } from "./validacion.ts";
 
-// TEMPORAL (fase 3): localhost:4174 para probar el área cliente en local.
-// Se quita en la fase 4, antes de abrir el registro.
-const ORIGENES = ["https://guimaes.es", "http://localhost:4174"];
+// Solo la web (www.guimaes.es redirige a guimaes.es y no sirve contenido).
+const ORIGENES = ["https://guimaes.es"];
 const cabecerasCors = (req: Request) => {
   const origen = req.headers.get("Origin") || "";
   return {
