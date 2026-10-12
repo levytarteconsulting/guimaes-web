@@ -2514,6 +2514,40 @@ function EditDeal({deal, onClose, onSave}){
 }
 
 /* ============ WHATSAPP ============ */
+// Día actual en Madrid ("2026-10-12"). Solo cambia de estado al cambiar el
+// día, y eso basta para volver a pintar las fechas relativas ("Hoy" pasa a
+// "Ayer") sin recargar. Se comprueba cada 30 s en vez de programar un único
+// timeout a medianoche: un portátil que se suspende y despierta al día
+// siguiente se pone al día en el siguiente tick. También al volver a la
+// pestaña, porque los navegadores frenan los timers en segundo plano.
+function useWaToday(){
+  const [today,setToday]=uState(()=>CRM.waDayKey(new Date()));
+  uEffect(()=>{
+    const check=()=>setToday(CRM.waDayKey(new Date()));
+    const id=setInterval(check, 30000);
+    document.addEventListener("visibilitychange", check);
+    return ()=>{ clearInterval(id); document.removeEventListener("visibilitychange", check); };
+  },[]);
+  return today;
+}
+// Mensajes del hilo con un separador de día ("Hoy", "Ayer", "lunes 5 de
+// octubre") delante del primero de cada día. useWaToday solo está para que
+// los separadores se vuelvan a pintar al cambiar el día.
+function WaMessages({messages, toast}){
+  useWaToday();
+  const now = new Date();
+  const out = [];
+  let prevDay = null;
+  messages.forEach((m,i)=>{
+    const day = CRM.waDayKey(m.at);
+    if(day && day!==prevDay){
+      out.push(<div key={"d"+day} className="wa__day"><span>{CRM.fmtWaDayLabel(m.at, now)}</span></div>);
+      prevDay = day;
+    }
+    out.push(<div key={m.id||i} className={"bubble "+m.dir}><WaMessageContent m={m} toast={toast}/><div className="bubble__t">{m.t}</div></div>);
+  });
+  return <div className="wa__msgs">{out}</div>;
+}
 // Nombre de persona de un contacto como dato principal y su empresa como
 // secundario (dos contactos pueden compartir empresa). Las fichas antiguas
 // sin full_name — de cuando company era el título — caen a company, y
@@ -2773,8 +2807,9 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
       if(res.error){ toast(res.error.message || "No se pudo enviar el mensaje."); return; }
       if(res.data && res.data.error){ toast(res.data.message || res.data.error); return; }
       const saved = res.data && res.data.message;
-      const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", t:"Ahora", body};
-      onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,msg], updated:msg.t});
+      const nowIso = new Date().toISOString();
+      const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", at:nowIso, t:CRM.fmtWaTime(nowIso), body};
+      onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,msg]});
       setTxt("");
     }catch(e){
       toast("No se pudo enviar el mensaje: "+(e && e.message ? e.message : String(e)));
@@ -2800,7 +2835,7 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
       }
       if(row.direction!=="in") return;
       const msg = CRM.rowToWhatsappMessage(row);
-      onConvChangeRef.current({...prev, messages:[...prev.messages,msg], updated:msg.t, last_customer_message_at: row.created_at});
+      onConvChangeRef.current({...prev, messages:[...prev.messages,msg], last_customer_message_at: row.created_at});
     });
     return ()=>{ if(channel) Auth.client.removeChannel(channel); };
   },[live, conv.id]);
@@ -2821,7 +2856,7 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
             : <button className="btn btn--sm btn--ghost" onClick={()=>setShowLink(true)}><Icon name="tag" size={13}/>Vincular a contacto</button>}
         </div>
       </div>
-      <div className="wa__msgs">{conv.messages.map((m,i)=><div key={i} className={"bubble "+m.dir}><WaMessageContent m={m} toast={toast}/><div className="bubble__t">{m.t}</div></div>)}</div>
+      <WaMessages messages={conv.messages} toast={toast}/>
       {windowOpen ? (
         <div className="wa__compose"><button className="btn btn--ghost btn--icon" title="Enviar plantilla" onClick={()=>setShowTpl(true)}><Icon name="documents" size={17}/></button><input placeholder="Escribe un mensaje…" value={txt} onChange={e=>setTxt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")send();}} disabled={sending}/><button className="btn btn--primary btn--icon" onClick={send} disabled={sending}><Icon name="send" size={18}/></button></div>
       ) : (
@@ -2830,7 +2865,7 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
           <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
         </div>
       )}
-      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message], updated:message.t}); }} toast={toast}/>}
+      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message]}); }} toast={toast}/>}
       {showLink && <LinkWhatsapp conv={conv} onClose={()=>setShowLink(false)} onSave={linkTo}/>}
     </div>
   );
@@ -2871,7 +2906,12 @@ function WhatsApp({nav, toast, focusId}){
   const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
   const [showStart,setShowStart]=uState(false);
   const isMobile = useIsMobile();
-  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived);
+  useWaToday(); // vuelve a pintar las fechas del listado al cambiar el día
+  const now = new Date();
+  // Más reciente arriba, por el último mensaje de cualquiera de los dos lados
+  // (la consulta ordena por last_customer_message_at, que no ve los nuestros).
+  const lastMs = w=>{ const t=Date.parse(CRM.waLastAt(w)); return isNaN(t) ? 0 : t; };
+  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived).sort((a,b)=>lastMs(b)-lastMs(a));
   const conv = convs.find(w=>w.id===active);
   // Maestro-detalle en móvil: en desktop se pintan siempre los dos paneles
   // (como hoy); en móvil solo uno, según haya o no conversación activa. No es
@@ -2920,7 +2960,7 @@ function WhatsApp({nav, toast, focusId}){
   // abajo), pero igualmente actualizamos aquí su vista previa/hora en la
   // lista; solo el contador de no leídos distingue abierta vs. no abierta.
   // UPDATE (adjunto pending→stored, delivery_status...) solo refresca el
-  // mensaje ya presente — nunca cuenta como no leído ni toca "updated".
+  // mensaje ya presente — nunca cuenta como no leído ni mueve la fecha.
   uEffect(()=>{
     if(!Auth.client || !CRM.subscribeWhatsapp) return;
     const channel = CRM.subscribeWhatsapp(Auth.client, (row, eventType)=>{
@@ -2933,7 +2973,7 @@ function WhatsApp({nav, toast, focusId}){
         }
         if(row.direction!=="in") return cs; // los salientes ya se añaden al enviar
         const isOpen = activeRef.current===row.conversation_id;
-        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], updated:msg.t, last_customer_message_at: row.created_at, unread: isOpen ? w.unread : w.unread+1});
+        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], last_customer_message_at: row.created_at, unread: isOpen ? w.unread : w.unread+1});
       });
     });
     return ()=>{ if(channel) Auth.client.removeChannel(channel); };
@@ -2949,9 +2989,13 @@ function WhatsApp({nav, toast, focusId}){
           <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
         </div>
         {visible.map(w=>{ const ident=waIdentity(w); const last=w.messages[w.messages.length-1];
+          // Último mensaje del cliente sin contestar: fecha destacada con un
+          // punto. Si el último es nuestro, la fecha normal.
+          const pending = !!last && last.dir==="in";
+          const time = <span className={"wa__conv__time"+(pending?" wa__conv__time--pending":"")} title={pending?"Último mensaje del cliente, sin contestar":undefined}>{CRM.fmtWaListDate(CRM.waLastAt(w), now)}</span>;
           return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);nav("whatsapp",w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
             <WaAvatar ident={ident}/>
-            <div className="wa__conv__main"><div className="wa__conv__name"><span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ident.name}{ident.company && <span className="muted" style={{fontWeight:400,fontSize:12}}> · {ident.company}</span>}</span><span className="wa__conv__time">{w.updated}</span></div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
+            <div className="wa__conv__main"><div className="wa__conv__name"><span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ident.name}{ident.company && <span className="muted" style={{fontWeight:400,fontSize:12}}> · {ident.company}</span>}</span>{time}</div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
             {w.unread>0 && <span className="wa__unread">{w.unread}</span>}
             <button className="wa__archive" title={w.archived?"Restaurar":"Archivar"} onClick={e=>toggleArchive(w.id,e)}><Icon name={w.archived?"refresh":"archive"} size={15}/></button>
           </div>;

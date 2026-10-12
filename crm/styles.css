@@ -310,7 +310,15 @@ textarea.inp{resize:vertical;min-height:80px;}
 .wa__conv.active{background:var(--accent-soft);}
 .wa__conv__main{flex:1;min-width:0;}
 .wa__conv__name{font-weight:600;font-size:14px;display:flex;justify-content:space-between;gap:8px;}
-.wa__conv__time{font-size:11px;color:var(--muted);font-weight:400;}
+.wa__conv__time{font-size:11px;color:var(--muted);font-weight:400;flex:none;white-space:nowrap;}
+/* Último mensaje del cliente sin contestar: fecha en negrita, en verde y con
+   un punto delante. */
+.wa__conv__time--pending{color:var(--ok);font-weight:700;display:inline-flex;align-items:center;gap:5px;}
+.wa__conv__time--pending::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);}
+/* Separador de día dentro del hilo ("Hoy", "Ayer", "lunes 5 de octubre"). */
+.wa__day{align-self:center;margin:6px 0 2px;}
+.wa__day span{display:inline-block;background:var(--paper);color:var(--slate);font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:8px;box-shadow:var(--shadow-sm);}
+.wa__day:first-child{margin-top:0;}
 .wa__conv__last{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .wa__unread{background:var(--accent-2);color:#fff;font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:20px;display:grid;place-items:center;padding:0 5px;}
 .wa__thread{display:flex;flex-direction:column;min-height:0;background:#EAEFF5;background-image:radial-gradient(rgba(11,34,56,.04) 1px,transparent 1px);background-size:18px 18px;}

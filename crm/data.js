@@ -161,16 +161,66 @@
   // ---- WhatsApp (datos reales desde Supabase, ver loadWhatsapp) ----
   var WHATSAPP = [];
 
+  // Fechas de WhatsApp siempre en hora de Madrid, sea cual sea la zona
+  // horaria del ordenador. Los días se comparan por fecha de calendario en
+  // Madrid (no por diferencia de 24h): "Ayer" es el día anterior aunque el
+  // mensaje sea de hace 5 minutos y acabe de dar la medianoche.
+  var WA_TZ = "Europe/Madrid";
+  var waPartsFmt = new Intl.DateTimeFormat("es-ES", {timeZone:WA_TZ, year:"numeric", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit", hourCycle:"h23"});
+  var WA_WEEKDAYS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+  var WA_MONTHS = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+  function waParts(value){
+    if(value==null || value==="") return null;
+    var d = value instanceof Date ? value : new Date(value);
+    if(isNaN(d.getTime())) return null;
+    var p = {};
+    waPartsFmt.formatToParts(d).forEach(function(x){ p[x.type] = x.value; });
+    var y = +p.year, m = +p.month, day = +p.day;
+    return {y:y, m:m, d:day, hh:p.hour, mm:p.minute, dayNum: Date.UTC(y, m-1, day)/86400000};
+  }
+  function pad2(n){ return (n<10?"0":"")+n; }
   function fmtWaTime(iso){
-    if(!iso) return "";
-    var d = new Date(iso);
-    if(isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString("es-ES", {hour:"2-digit", minute:"2-digit"});
+    var p = waParts(iso);
+    return p ? p.hh+":"+p.mm : "";
+  }
+  // Clave del día en Madrid ("2026-10-12"): para agrupar mensajes por día y
+  // para saber cuándo ha cambiado el día (useWaToday en app.jsx).
+  function waDayKey(value){
+    var p = waParts(value);
+    return p ? p.y+"-"+pad2(p.m)+"-"+pad2(p.d) : "";
+  }
+  // Fecha corta del listado, como WhatsApp: "14:32" hoy, "Ayer", el día de la
+  // semana dentro de los últimos 7 días y "dd/mm/aa" si es anterior.
+  function fmtWaListDate(iso, now){
+    var p = waParts(iso), n = waParts(now || new Date());
+    if(!p || !n) return "";
+    var diff = n.dayNum - p.dayNum;
+    if(diff<=0) return p.hh+":"+p.mm;
+    if(diff===1) return "Ayer";
+    if(diff<7) return WA_WEEKDAYS[new Date(p.dayNum*86400000).getUTCDay()];
+    return pad2(p.d)+"/"+pad2(p.m)+"/"+String(p.y).slice(-2);
+  }
+  // Separador de día dentro de la conversación: "Hoy", "Ayer", "lunes 5 de
+  // octubre" (con año si no es el actual).
+  function fmtWaDayLabel(iso, now){
+    var p = waParts(iso), n = waParts(now || new Date());
+    if(!p || !n) return "";
+    var diff = n.dayNum - p.dayNum;
+    if(diff<=0) return "Hoy";
+    if(diff===1) return "Ayer";
+    return WA_WEEKDAYS[new Date(p.dayNum*86400000).getUTCDay()]+" "+p.d+" de "+WA_MONTHS[p.m-1]+(p.y!==n.y ? " de "+p.y : "");
+  }
+  // Momento del último mensaje de la conversación (el de cualquiera de los
+  // dos lados); sin mensajes cargados, lo más parecido que traiga la fila.
+  function waLastAt(conv){
+    var last = conv.messages && conv.messages[conv.messages.length-1];
+    return (last && last.at) || conv.last_customer_message_at || conv.updated_at || conv.created_at || null;
   }
   function rowToWhatsappMessage(row){
     return {
       id: row.id,
       dir: row.direction==="out" ? "out" : "in",
+      at: row.created_at || null,
       t: fmtWaTime(row.created_at),
       body: row.body || "",
       type: row.type || "text",
@@ -189,7 +239,8 @@
       archived: !!row.archived,
       unread: 0, // no persistido en el esquema; solo sube en sesión vía Realtime (ver subscribeWhatsapp)
       last_customer_message_at: row.last_customer_message_at || null, // crudo, para calcular la ventana de 24h en la UI
-      updated: fmtWaTime(row.last_customer_message_at || row.updated_at || row.created_at),
+      updated_at: row.updated_at || null,
+      created_at: row.created_at || null,
       messages: []
     };
   }
@@ -2078,6 +2129,7 @@
     DEALS:DEALS, TASKS:TASKS, NOTES:NOTES, CALLS:CALLS,
     WHATSAPP:WHATSAPP, DOCUMENTS:DOCUMENTS, AUTOMATIONS:AUTOMATIONS, ACTIVITY:ACTIVITY,
     linkWhatsappConversation:linkWhatsappConversation, getAttachmentSignedUrl:getAttachmentSignedUrl,
+    fmtWaTime:fmtWaTime, fmtWaListDate:fmtWaListDate, fmtWaDayLabel:fmtWaDayLabel, waDayKey:waDayKey, waLastAt:waLastAt,
     fmtEUR:fmtEUR, fmtBytes:fmtBytes, initials:initials, colorFor:colorFor, computeKpis:computeKpis, loadWebLeads:loadWebLeads, loadContactos:loadContactos, addContact:addContact, loadDeals:loadDeals, addDeal:addDeal, convertLeadToContact:convertLeadToContact,
     // Función, no valor estático — LEAD_ERROR_COUNT es un número que
     // loadWebLeads reasigna en cada login; exponerlo como valor lo habría
