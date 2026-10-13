@@ -565,4 +565,22 @@
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/constituir-sociedad-antes-de-2027"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/constituir-sociedad-antes-de-2027"/>
   </url>
+  <url>
+    <loc>https://guimaes.es/blog/cierre-tercer-trimestre-octubre</loc>
+    <lastmod>2026-10-13</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/cierre-tercer-trimestre-octubre"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/cierre-tercer-trimestre-octubre"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/cierre-tercer-trimestre-octubre"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/cierre-tercer-trimestre-octubre</loc>
+    <lastmod>2026-10-13</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/cierre-tercer-trimestre-octubre"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/cierre-tercer-trimestre-octubre"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/cierre-tercer-trimestre-octubre"/>
+  </url>
 </urlset>
