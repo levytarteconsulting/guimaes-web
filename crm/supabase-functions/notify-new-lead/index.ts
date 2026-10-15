@@ -1,6 +1,8 @@
 // Supabase Edge Function: notify-new-lead
 // Envía un email de aviso (vía Resend) y una notificación push a todo el
-// equipo cuando se crea un nuevo lead en public.leads. Pensada para
+// equipo cuando se crea un nuevo lead en public.leads (de la web o de Meta
+// Lead Ads; los importados con aviso=false no llegan aquí, ver
+// crm/supabase-meta-leads.sql). Pensada para
 // invocarse desde un trigger de Postgres (net.http_post) que envía el nuevo
 // registro como { record: NEW }.
 //
@@ -69,15 +71,29 @@ Deno.serve(async (req) => {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const notifyTo = Deno.env.get("NOTIFY_TO");
 
-    const subject = "Nuevo lead web: " + (servicio || "sin especificar") + " — " + (nombre || "sin nombre");
+    // Leads de Meta Lead Ads (crm/supabase-functions/meta-leads): origen
+    // (formulario, campaña, anuncio), el resto de respuestas del formulario
+    // y, si el email/teléfono ya era de un contacto, que se ha vinculado a
+    // él (status 'linked') en vez de crear otro.
+    const esMeta = record?.source === "Meta Lead Ads";
+    const origen = (record?.meta_origen ?? {}) as Record<string, string>;
+    const respuestas: { pregunta?: string; respuesta?: string }[] = Array.isArray(record?.respuestas) ? record.respuestas : [];
+    const vinculado = record?.status === "linked";
+
+    const subject = (esMeta ? "Nuevo lead de Meta: " : "Nuevo lead web: ") + (servicio || "sin especificar") + " — " + (nombre || "sin nombre")
+      + (vinculado ? " (ya era contacto)" : "");
+    const fila = (k: string, v: unknown) => `<tr><td><b>${escapeHtml(k)}</b></td><td>${escapeHtml(v || "—")}</td></tr>`;
     const html = `
+      ${vinculado ? `<p><b>Este email o teléfono ya era de un contacto del CRM:</b> el lead se ha vinculado a ese contacto (con una nota) en vez de crear otro.</p>` : ""}
       <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:14px">
-        <tr><td><b>Empresa</b></td><td>${escapeHtml(empresa || "—")}</td></tr>
-        <tr><td><b>Nombre</b></td><td>${escapeHtml(nombre || "—")}</td></tr>
-        <tr><td><b>Email</b></td><td>${escapeHtml(email || "—")}</td></tr>
-        <tr><td><b>Teléfono</b></td><td>${escapeHtml(telefono || "—")}</td></tr>
-        <tr><td><b>Servicio</b></td><td>${escapeHtml(servicio || "—")}</td></tr>
-        <tr><td><b>Mensaje</b></td><td>${escapeHtml(mensaje || "—")}</td></tr>
+        ${fila("Empresa", empresa)}
+        ${fila("Nombre", nombre)}
+        ${fila("Email", email)}
+        ${fila("Teléfono", telefono)}
+        ${fila(esMeta ? "Formulario" : "Servicio", esMeta ? origen.form_name || servicio : servicio)}
+        ${esMeta ? fila("Campaña", origen.campaign_name || origen.campaign_id) + fila("Anuncio", origen.ad_name || origen.ad_id) : ""}
+        ${respuestas.map((r) => fila(r?.pregunta ?? "", r?.respuesta)).join("")}
+        ${mensaje || !esMeta ? fila("Mensaje", mensaje) : ""}
       </table>
       <p><a href="${CRM_URL}">Abrir en el CRM</a></p>
     `;
@@ -102,8 +118,8 @@ Deno.serve(async (req) => {
     // "return" del email que viene justo debajo.
     try {
       await notifyTeamPush(
-        "Nuevo lead — " + (servicio || "Formulario web"),
-        [nombre, empresa, telefono].filter(Boolean).join(" · ") || "Sin datos de contacto",
+        (esMeta ? "Nuevo lead de Meta — " + (origen.form_name || servicio || "Lead Ads") : "Nuevo lead — " + (servicio || "Formulario web")),
+        ([nombre, empresa, telefono].filter(Boolean).join(" · ") || "Sin datos de contacto") + (vinculado ? " · ya era contacto" : ""),
       );
     } catch (e) {
       console.error("notify-new-lead: push falló (no bloquea el email)", e);

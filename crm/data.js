@@ -1879,6 +1879,19 @@
   // recalcula en cada loadWebLeads, lo lee CRM.LEAD_ERROR_COUNT desde
   // app.jsx (aviso de sesión) y el banner de la vista de Contactos.
   var LEAD_ERROR_COUNT = 0;
+  // Todas las filas de leads de la última carga: la ficha de un contacto
+  // enseña de qué formulario vino (origen de Meta y respuestas, ver
+  // crm/supabase-meta-leads.sql) con leadsForContact.
+  var LEAD_ROWS = [];
+  // Leads de un contacto: el propio lead si aún no está convertido
+  // ("lead-<uuid>"), o los que apuntan a él (leads.contact_id: el que se
+  // convirtió en él y los de Meta que se vincularon por email/teléfono).
+  function leadsForContact(id){
+    id = String(id||"");
+    if(id.indexOf("lead-")===0){ var u=id.slice(5); return LEAD_ROWS.filter(function(r){ return r.id===u; }); }
+    var c = contactById[id];
+    return LEAD_ROWS.filter(function(r){ return r.contact_id===id || (c && c.lead_id && r.id===c.lead_id); });
+  }
 
   // Carga los leads de Supabase. Cada lead con status 'new' se intenta
   // convertir en contacto real + deal (reutiliza convertLeadToContact y
@@ -1890,12 +1903,19 @@
   // abierta para ver el toast (ver crm/supabase-leads-dedupe.sql y el
   // punto 4/5 de esta conversación).
   async function loadWebLeads(client){
-    var empty = {converted:0, contactFailures:[], dealFailures:[]};
+    var empty = {converted:0, contactFailures:[], dealFailures:[], linked:[]};
     if(!client) return empty;
     try{
       var res = await client.from("leads").select("*").order("created_at",{ascending:false});
       if(res.error || !res.data) return empty;
+      LEAD_ROWS = res.data;
       var n = 0, contactFailures = [], dealFailures = [];
+      // Leads de Meta que entraron vinculados a un contacto que ya existía
+      // (mismo email o teléfono; ver meta-leads): se avisa en la sesión
+      // durante su primer día — la nota en el contacto queda para siempre.
+      var dayAgo = Date.now() - 24*3600*1000;
+      var linked = res.data.filter(function(r){ return r.status==="linked" && new Date(r.created_at).getTime() > dayAgo; })
+        .map(function(r){ var c = r.contact_id && contactById[r.contact_id]; return (c && (c.full_name || c.company)) || r.nombre || r.email || r.id; });
       for(var i=0;i<res.data.length;i++){
         var row = res.data[i];
         if(row.status!=="new") continue; // solo leads sin convertir
@@ -1910,7 +1930,7 @@
           if(c._mensaje){
             NOTES.push({id:"n-"+row.id, contact:c.id, deal:null, author:null, created:at, body:c._mensaje});
           }
-          ACTIVITY.unshift({contact:c.id, type:"contact", at:at, who:null, text:"Contacto creado desde el formulario web"});
+          ACTIVITY.unshift({contact:c.id, type:"contact", at:at, who:null, text:row.source && row.source!=="Formulario web" ? "Contacto creado desde "+row.source : "Contacto creado desde el formulario web"});
 
           // 2) convierte a contacto real en public.contactos y marca el lead como 'converted'
           //    (convertLeadToContact ya relinca NOTES/ACTIVITY al nuevo id real)
@@ -1954,7 +1974,7 @@
         var errRes = await client.from("leads").select("id",{count:"exact", head:true}).not("error_message","is",null);
         LEAD_ERROR_COUNT = errRes.error ? 0 : (errRes.count||0);
       }catch(e3){ LEAD_ERROR_COUNT = 0; }
-      return {converted:n, contactFailures:contactFailures, dealFailures:dealFailures};
+      return {converted:n, contactFailures:contactFailures, dealFailures:dealFailures, linked:linked};
     }catch(e){ if(window.console) console.error("loadWebLeads:", e); return empty; }
   }
   // Convierte un lead (id sintético "lead-<uuid>") en un contacto real de
@@ -1988,7 +2008,7 @@
       full_name: lead.full_name || "",
       email: lead.email || "",
       phone: lead.phone || "",
-      source: "Formulario web",
+      source: lead.source || "Formulario web", // "Meta Lead Ads" para los de Meta
       lifecycle: LIFECYCLE[0].id, // ver nota en rowToContact: "lead" no está en el catálogo
       lead_id: leadUuid
     };
@@ -2039,9 +2059,10 @@
     // la saltará, y solo reintentará marcar 'converted' — nunca se pierde
     // ni se duplica nada.
     var statusRes = await client.from("leads")
-      .update({status:"converted", error_message:null})
+      .update({status:"converted", error_message:null, contact_id:contactRow.id})
       .eq("id", leadUuid).select();
     if(statusRes.error) throw statusRes.error;
+    LEAD_ROWS.forEach(function(r){ if(r.id===leadUuid){ r.status="converted"; r.contact_id=contactRow.id; } });
 
     var idx = CONTACTS.findIndex(function(c){return c.id===leadId;});
     if(idx>-1) CONTACTS.splice(idx,1);
@@ -2136,6 +2157,7 @@
     // congelado en 0 (el que tenía al construirse este objeto CRM, al
     // cargar el script, antes de que nadie hubiera iniciado sesión nunca).
     leadErrorCount:function(){ return LEAD_ERROR_COUNT; },
+    leadsForContact:leadsForContact,
     loadTasks:loadTasks, addTask:addTask, updateTask:updateTask, removeTask:removeTask, toggleTaskDone:toggleTaskDone,
     isoToMadridDatetimeLocal:isoToMadridDatetimeLocal,
     loadNotes:loadNotes, addNote:addNote, removeNote:removeNote,

@@ -40,6 +40,7 @@ function reportLeadIssues(fireToast, result){
   const msgs = [];
   if(result.contactFailures && result.contactFailures.length) msgs.push(result.contactFailures.length+" lead(s) no se pudieron convertir: "+result.contactFailures.join(", "));
   if(result.dealFailures && result.dealFailures.length) msgs.push(result.dealFailures.length+" contacto(s) creado(s) sin deal: "+result.dealFailures.join(", "));
+  if(result.linked && result.linked.length) msgs.push(result.linked.length+" lead(s) de Meta vinculado(s) a contactos que ya existían (ver su nota): "+result.linked.join(", "));
   if(msgs.length) fireToast(msgs.join(" · "));
 }
 function GoogleG({size=18}){
@@ -1717,6 +1718,29 @@ function ContactPortalAccess({contact, toast, nav}){
   </div></div>;
 }
 
+// Formularios de Meta Lead Ads de los que vino (o con los que se vinculó)
+// este contacto: origen y el resto de respuestas (leads.meta_origen y
+// leads.respuestas, ver crm/supabase-meta-leads.sql). Los leads de la web
+// no tienen nada de eso y no se muestran aquí.
+function LeadFormsCard({contactId}){
+  const rows = (CRM.leadsForContact ? CRM.leadsForContact(contactId) : []).filter(r=>r.meta_origen || (r.respuestas && r.respuestas.length));
+  if(!rows.length) return null;
+  return <div className="card"><div className="card__head"><h3>Formularios de Meta</h3></div><div className="card__body" style={{paddingTop:4}}>
+    {rows.map((r,i)=>{ const o=r.meta_origen||{}; return <div key={r.id} style={{marginTop:i?16:0}}>
+      <div className="row" style={{gap:8,flexWrap:"wrap",marginBottom:6}}>
+        <b style={{fontSize:13}}>{o.form_name || "Formulario "+(o.form_id||"")}</b>
+        <span className="muted" style={{fontSize:12}}>{String(r.created_at||"").replace("T"," ").slice(0,16)}</span>
+        {r.status==="linked" && <Badge label="Vinculado: el contacto ya existía" color="#7C5CFC"/>}
+      </div>
+      {(o.campaign_name||o.campaign_id) && <KV k="Campaña">{o.campaign_name||o.campaign_id}</KV>}
+      {(o.adset_name||o.adset_id) && <KV k="Conjunto">{o.adset_name||o.adset_id}</KV>}
+      {(o.ad_name||o.ad_id) && <KV k="Anuncio">{o.ad_name||o.ad_id}</KV>}
+      {o.platform && <KV k="Plataforma">{o.platform==="ig"?"Instagram":o.platform==="fb"?"Facebook":o.platform}</KV>}
+      {r.status==="linked" && [["Nombre",r.nombre],["Email",r.email],["Teléfono",r.telefono],["Empresa",r.empresa]].filter(x=>x[1]).map(([k,v])=><KV key={k} k={k}>{v}</KV>)}
+      {(r.respuestas||[]).map((x,j)=><KV key={j} k={x.pregunta||x.campo}>{x.respuesta}</KV>)}
+    </div>; })}
+  </div></div>;
+}
 function ContactDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const c = CRM.contactById[id];
@@ -1807,7 +1831,7 @@ function ContactDetail({id, nav, toast, user}){
             <div className="profile__top">
               <Avatar name={c.company} size="lg" color={CRM.colorFor(c.company)}/>
               <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div>{c.provisional_at && <div style={{marginTop:6}}><PendienteBadge/></div>}</div>
-              <div className="row" style={{gap:6,flexWrap:"wrap",justifyContent:"center"}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label="Lead del formulario web — sin convertir" color="#D9822B"/>}</div>
+              <div className="row" style={{gap:6,flexWrap:"wrap",justifyContent:"center"}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label={(c.source && c.source!=="Formulario web" ? "Lead de "+c.source : "Lead del formulario web")+" — sin convertir"} color="#D9822B"/>}</div>
             </div>
             {empresas.length>0 && <div style={{marginTop:14}}>
               <div className="fld__l" style={{marginBottom:6}}>Empresas</div>
@@ -1843,6 +1867,7 @@ function ContactDetail({id, nav, toast, user}){
         <div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="resumen" && <div className="wrap-gap">
+            <LeadFormsCard contactId={id}/>
             {!isLead && <ContactPortalAccess contact={c} toast={toast} nav={nav}/>}
             <div className="card"><div className="card__head"><h3>Deals activos</h3>{isLead ? <span className="right muted" style={{fontSize:12}}>Convierte el lead en contacto para poder crear deals</span> : <button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewDeal(true)}><Icon name="plus" size={14}/>Nuevo deal</button>}</div><div className="card__body" style={{paddingTop:4}}>
               {deals.map(d=><div key={d.id} className="lrow" style={{cursor:"pointer"}} onClick={()=>nav("deal",d.id)}><div className="lrow__ico" style={{background:(CRM.serviceById(d.service)?.color || "#888")+"1A",color:CRM.serviceById(d.service)?.color || "#888"}}><Icon name="briefcase" size={17}/></div><div className="lrow__main"><div className="lrow__title">{d.title}</div><div className="lrow__sub">{CRM.serviceById(d.service)?.name || "—"}</div></div><div style={{textAlign:"right"}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{CRM.fmtEUR(d.amount)}</div><div className="muted" style={{fontSize:11}}>{d.frequency}</div></div><StageBadge id={d.stage}/><button className="btn btn--sm btn--ghost" title="Eliminar deal" onClick={e=>{e.stopPropagation();deleteDeal(d.id,d.title);}}><Icon name="trash" size={14}/></button></div>)}

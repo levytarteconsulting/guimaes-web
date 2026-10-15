@@ -63,3 +63,10 @@ verify_jwt = true
 [functions.portal-limpieza]
 entrypoint = "../supabase-functions/portal-limpieza/index.ts"
 verify_jwt = true
+
+# Meta Lead Ads (crm/supabase-meta-leads.sql): webhook de Meta, igual que
+# whatsapp-webhook — Meta no manda JWT; valida X-Hub-Signature-256 con
+# APP_SECRET. Las acciones de operación exigen x-ops-key.
+[functions.meta-leads]
+entrypoint = "../supabase-functions/meta-leads/index.ts"
+verify_jwt = false
