@@ -583,4 +583,40 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/cierre-tercer-trimestre-octubre"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/cierre-tercer-trimestre-octubre"/>
   </url>
+  <url>
+    <loc>https://guimaes.es/blog/verifactu-aplazado-2028</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/verifactu-aplazado-2028"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/verifactu-aplazado-2028"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/verifactu-aplazado-2028"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/verifactu-aplazado-2028</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/verifactu-aplazado-2028"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/verifactu-aplazado-2028"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/verifactu-aplazado-2028"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/blog/finanzas-digitales-holded-asesoria</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/finanzas-digitales-holded-asesoria"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/finanzas-digitales-holded-asesoria"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/finanzas-digitales-holded-asesoria"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/finanzas-digitales-holded-asesoria</loc>
+    <lastmod>2026-10-16</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/finanzas-digitales-holded-asesoria"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/finanzas-digitales-holded-asesoria"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/finanzas-digitales-holded-asesoria"/>
+  </url>
 </urlset>
