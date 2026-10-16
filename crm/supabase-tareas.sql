@@ -16,11 +16,13 @@ create table if not exists public.tareas (
   status       text not null default 'pending', -- 'pending' / 'done' (catálogo en código)
   archived     boolean not null default false,
 
-  -- Sin FK explícita: el esquema verificado en producción no la tenía: si se
-  -- quiere añadir cascade on delete más adelante, revisar antes que no haya
-  -- filas huérfanas.
-  contact_id   uuid,
-  deal_id      uuid
+  -- En producción (comprobado el 2026-10-16) tienen FK con ON DELETE
+  -- CASCADE, añadidas a mano: tareas_contact_id_fkey → contactos(id) y
+  -- tareas_deal_id_fkey → deals(id). Borrar un contacto o un deal borra sus
+  -- tareas; admin_borrar_contacto y admin_borrar_empresa las desvinculan
+  -- antes cuando deben quedarse.
+  contact_id   uuid references public.contactos(id) on delete cascade,
+  deal_id      uuid references public.deals(id) on delete cascade
 );
 
 create index if not exists tareas_contact_idx  on public.tareas (contact_id);
