@@ -779,6 +779,7 @@
       city: row.city || "",
       province: row.province || "",
       provisional_at: row.provisional_at || null,
+      archived_at: row.archived_at || null,
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -791,6 +792,8 @@
       var res = await client.from("empresas").select("*").order("razon_social",{ascending:true});
       if(res.error || !res.data) return 0;
       EMPRESAS.length = 0;
+      // Sin esto, una empresa eliminada seguiría encontrándose por id.
+      Object.keys(empresaById).forEach(function(k){ delete empresaById[k]; });
       res.data.forEach(function(row){
         var e = rowToEmpresa(row);
         EMPRESAS.push(e);
@@ -1549,6 +1552,61 @@
     await sincronizar(client, "deals", DEALS, null, rowToDeal, function(){ return true; });
     await Promise.all([loadContactoEmpresa(client), loadCuentasPendientes(client), loadAltasProvisionales(client)]);
   }
+  // ---- Eliminar y archivar empresas (crm/supabase-empresas-borrar.sql) ----
+  // Archivada: fuera de listados, pipeline y KPIs (y del área de cliente,
+  // eso lo hace mis_empresas() en la BD). No se borra nada.
+  function empresaArchivada(id){ var e = empresaById[id]; return !!(e && e.archived_at); }
+  // Deals que cuentan en pipeline y KPIs: los que no son de una empresa archivada.
+  function dealsVisibles(){ return DEALS.filter(function(d){ return !d.empresa || !empresaArchivada(d.empresa); }); }
+  async function archivarEmpresa(client, empresaId, archivar){
+    var res = await client.rpc("admin_archivar_empresa", {p_empresa_id: empresaId, p_archivar: !!archivar});
+    if(res.error) throw res.error;
+    var e = empresaById[empresaId]; if(e) e.archived_at = res.data || null;
+    return e;
+  }
+  // Todo lo que enseña el diálogo de eliminar, con la huella que exige el borrado.
+  async function resumenBorradoEmpresa(client, empresaId){
+    var res = await client.rpc("admin_empresa_borrado_resumen", {p_empresa_id: empresaId});
+    if(res.error) throw res.error;
+    return res.data;
+  }
+  async function invokeEmpresasFicheros(client, body){
+    var res = await client.functions.invoke("empresas-ficheros", { body: body });
+    if(res.error){
+      var msg = res.error.message || "Error al llamar a empresas-ficheros";
+      try{
+        var ctx = res.error.context;
+        if(ctx && typeof ctx.json==="function"){ var j = await ctx.json(); if(j && j.error) msg = j.error; }
+      }catch(e){ /* sin cuerpo JSON */ }
+      throw new Error(msg);
+    }
+    return res.data;
+  }
+  // decisiones: {contact_id: "borrar" | empresa_id destino} para cada
+  // contacto que solo está en esta empresa. La base de datos lo borra todo en
+  // una transacción; después se borran los ficheros. Si eso falla, quedan
+  // pendientes (ficherosPorBorrar) y se puede reintentar.
+  async function borrarEmpresa(client, empresaId, huella, decisiones, confirmacion){
+    var res = await client.rpc("admin_borrar_empresa", {p_empresa_id: empresaId, p_huella: huella, p_decisiones: decisiones || {}, p_confirmacion: confirmacion || null});
+    if(res.error) throw res.error;
+    var r = res.data || {};
+    var ficheros = null, ficherosError = null;
+    if(r.ficheros > 0){
+      try{ ficheros = await invokeEmpresasFicheros(client, {lote: r.lote}); }
+      catch(e){ ficherosError = e.message || String(e); }
+    }
+    await recargarTrasAlta(client);
+    await sincronizar(client, "notas", NOTES, null, rowToNote, function(n){ return isUuidLike(n.id); });
+    await sincronizar(client, "tareas", TASKS, null, rowToTask, function(t){ return isUuidLike(t.id); });
+    return {resultado: r, ficheros: ficheros, ficherosError: ficherosError};
+  }
+  async function ficherosPorBorrar(client){
+    var res = await client.rpc("admin_ficheros_por_borrar");
+    if(res.error) throw res.error;
+    return res.data || [];
+  }
+  async function reintentarFicheros(client){ return invokeEmpresasFicheros(client, {}); }
+
   // Coincidencias para revisar un alta: empresas validadas con el mismo CIF
   // y contactos validados con el mismo email.
   function normCifAlta(s){ return String(s||"").replace(/[\s.\-]/g,"").toUpperCase(); }
@@ -2166,6 +2224,8 @@
     setDocumentoVisible:setDocumentoVisible,
     CUENTAS_PENDIENTES:CUENTAS_PENDIENTES, loadCuentasPendientes:loadCuentasPendientes,
     ALTAS_PROVISIONALES:ALTAS_PROVISIONALES, loadAltasProvisionales:loadAltasProvisionales, coincidenciasAlta:coincidenciasAlta,
+    empresaArchivada:empresaArchivada, dealsVisibles:dealsVisibles, archivarEmpresa:archivarEmpresa,
+    resumenBorradoEmpresa:resumenBorradoEmpresa, borrarEmpresa:borrarEmpresa, ficherosPorBorrar:ficherosPorBorrar, reintentarFicheros:reintentarFicheros,
     confirmarAlta:confirmarAlta, fusionarAlta:fusionarAlta, rechazarAlta:rechazarAlta, documentosPorMover:documentosPorMover,
     moverDocumentosPendientes:moverDocumentosPendientes, documentosDeEmpresa:documentosDeEmpresa, recargarTrasAlta:recargarTrasAlta,
     vincularCuentaPortal:vincularCuentaPortal, eliminarCuentaPortal:eliminarCuentaPortal,

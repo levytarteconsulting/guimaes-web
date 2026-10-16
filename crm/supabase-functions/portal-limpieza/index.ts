@@ -14,7 +14,11 @@
 // 3) Cuentas sin vincular, que no son admin, creadas hace más de 30 días
 // (portal_altas_caducadas): se elimina la cuenta.
 // Justo antes de borrar una cuenta se vuelve a comprobar que no es admin ni
-// está vinculada.
+// está vinculada (y portal_altas_caducadas ya excluye las que el equipo
+// desvinculó a propósito, crm/supabase-empresas-borrar.sql).
+// 4) Ficheros de empresas eliminadas que no se pudieron borrar en el
+// momento (public.storage_borrados): se reintentan. Mismo bucle que
+// empresas-ficheros (cada función es autocontenida).
 //
 // La lanza pg_cron una vez al día (crm/supabase-portal-fase1.sql, bloque
 // 3B) con la anon key como Authorization —para pasar verify_jwt— y el
@@ -64,6 +68,23 @@ Deno.serve(async (req) => {
       const { data: hechos, error: rmErr } = await admin.storage.from("documentos").remove(lote);
       if (rmErr) { errores += lote.length; console.error("portal-limpieza: remove", rmErr); continue; }
       borrados += (hechos || []).length;
+    }
+
+    // ---- 4) ficheros de empresas eliminadas pendientes de borrar ----
+    let pendBorrados = 0, pendError = 0;
+    const { data: pend, error: pendErr } = await admin.rpc("storage_borrados_pendientes", { p_lote: null, p_limite: LIMITE });
+    if (pendErr) console.error("portal-limpieza: storage_borrados_pendientes", pendErr);
+    const rutasPend = ((pend || []) as { ruta: string }[]).map((r) => r.ruta).filter((r) => typeof r === "string" && r.length > 0);
+    for (let i = 0; i < rutasPend.length; i += LOTE) {
+      const parte = rutasPend.slice(i, i + LOTE);
+      let fallo: string | null = null;
+      try {
+        const { error: rmErr } = await admin.storage.from("documentos").remove(parte);
+        if (rmErr) fallo = rmErr.message || "Error de Storage";
+      } catch (e) { fallo = e instanceof Error ? e.message : String(e); }
+      const { error: resErr } = await admin.rpc("storage_borrados_resultado", { p_rutas: parte, p_error: fallo });
+      if (resErr) console.error("portal-limpieza: storage_borrados_resultado", resErr);
+      if (fallo) pendError += parte.length; else pendBorrados += parte.length;
     }
 
     // ---- 2) altas provisionales caducadas ----
@@ -122,8 +143,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`portal-limpieza: huérfanos ${rutas.length}/${borrados} (errores ${errores}); provisionales caducadas ${provBorradas} (errores ${provError}); cuentas caducadas ${cuentasBorradas} (errores ${cuentasError})`);
-    return json(200, { encontrados: rutas.length, borrados, errores, provisionales_caducadas: provBorradas, provisionales_error: provError, altas_caducadas: cuentasBorradas, altas_error: cuentasError });
+    console.log(`portal-limpieza: huérfanos ${rutas.length}/${borrados} (errores ${errores}); provisionales caducadas ${provBorradas} (errores ${provError}); cuentas caducadas ${cuentasBorradas} (errores ${cuentasError}); ficheros de empresas eliminadas ${pendBorrados} (errores ${pendError})`);
+    return json(200, { encontrados: rutas.length, borrados, errores, provisionales_caducadas: provBorradas, provisionales_error: provError, altas_caducadas: cuentasBorradas, altas_error: cuentasError, ficheros_empresas: pendBorrados, ficheros_empresas_error: pendError });
   } catch (e) {
     console.error("portal-limpieza: fallo inesperado", e);
     return json(500, { error: "Error interno." });

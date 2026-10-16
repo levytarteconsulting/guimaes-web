@@ -70,3 +70,9 @@ verify_jwt = true
 [functions.meta-leads]
 entrypoint = "../supabase-functions/meta-leads/index.ts"
 verify_jwt = false
+
+# Eliminar empresas (crm/supabase-empresas-borrar.sql): borra de Storage los
+# ficheros de las empresas eliminadas. La llama el CRM con el JWT del admin.
+[functions.empresas-ficheros]
+entrypoint = "../supabase-functions/empresas-ficheros/index.ts"
+verify_jwt = true

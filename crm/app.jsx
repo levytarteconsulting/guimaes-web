@@ -176,7 +176,7 @@ function PasswordRecovery({onDone}){
 /* ============ SHELL ============ */
 const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
-  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.EMPRESAS.length},
+  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.EMPRESAS.filter(e=>!e.archived_at).length},
   {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.CONTACTS.length},
   {id:"cuentas", label:"Área cliente", icon:"users", badge:()=>CRM.CUENTAS_PENDIENTES.length + CRM.ALTAS_PROVISIONALES.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
@@ -247,7 +247,8 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
 
 /* ============ HOME ============ */
 function Home({user, nav}){
-  const k = CRM.computeKpis(CRM.DEALS);
+  // Sin los deals de empresas archivadas (CRM.dealsVisibles).
+  const k = CRM.computeKpis(CRM.dealsVisibles());
   const myTasks = CRM.TASKS.filter(t=>t.owner===user.id && t.status!=="done");
   const recent = CRM.CONTACTS.slice().sort((a,b)=>b.created.localeCompare(a.created)).slice(0,5);
   const kpis = [
@@ -256,7 +257,7 @@ function Home({user, nav}){
     {label:"Deals abiertos", icon:"pipeline", val:k.openDeals, delta:"+3", up:true},
     {label:"Valor pipeline", icon:"target", val:CRM.fmtEUR(k.pipeline), delta:"-2,1%", up:false}
   ];
-  const byStage = CRM.STAGES.filter(s=>s.id!=="perdido").map(s=>({s, n:CRM.DEALS.filter(d=>d.stage===s.id).length}));
+  const byStage = CRM.STAGES.filter(s=>s.id!=="perdido").map(s=>({s, n:CRM.dealsVisibles().filter(d=>d.stage===s.id).length}));
   const maxN = Math.max(...byStage.map(x=>x.n),1);
   return (
     <div className="content">
@@ -320,15 +321,22 @@ function Home({user, nav}){
 function Empresas({nav, toast}){
   const [q,setQ]=uState("");
   const [showNew,setShowNew]=uState(false);
+  const [verArchivadas,setVerArchivadas]=uState(false);
+  const [borrar,setBorrar]=uState(null); // empresa del diálogo de eliminar
+  const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const isMobile = useIsMobile();
-  const list = CRM.EMPRESAS.filter(e=>q===""||(e.razon_social+" "+e.cif).toLowerCase().includes(q.toLowerCase()));
+  const nArchivadas = CRM.EMPRESAS.filter(e=>e.archived_at).length;
+  const list = CRM.EMPRESAS.filter(e=>(verArchivadas || !e.archived_at) && (q===""||(e.razon_social+" "+e.cif).toLowerCase().includes(q.toLowerCase())));
+  const pedirBorrar=(ev,e)=>{ ev.stopPropagation(); setBorrar(e); };
   return (
     <div className="content">
       <div className="toolbar">
         <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar por razón social o CIF…" value={q} onChange={e=>setQ(e.target.value)}/></div>
+        {nArchivadas>0 && <button className={"chip"+(verArchivadas?" active":"")} onClick={()=>setVerArchivadas(v=>!v)}><Icon name="archive" size={14}/>Mostrar archivadas ({nArchivadas})</button>}
         <div className="toolbar__spacer"></div>
         <button className="btn btn--primary" onClick={()=>setShowNew(true)}><Icon name="plus" size={16}/>Nueva empresa</button>
       </div>
+      <FicherosPendientesAviso toast={toast}/>
       {isMobile ? (
         <div className="wrap-gap">
           {list.map(e=>(
@@ -339,8 +347,10 @@ function Empresas({nav, toast}){
                   <div style={{fontWeight:600,fontSize:14}}>{e.razon_social}</div>
                   <div className="muted" style={{fontSize:12.5,marginTop:2}}>{e.cif || "Sin CIF"}</div>
                   {e.provisional_at && <div style={{marginTop:4}}><PendienteBadge/></div>}
+                  {e.archived_at && <div style={{marginTop:4}}><ArchivadaBadge/></div>}
                   <div className="muted" style={{fontSize:12.5,marginTop:4}}>{CRM.contactsForEmpresa(e.id).length} contacto(s)</div>
                 </div>
+                <button className="btn btn--sm btn--ghost" title="Eliminar empresa" aria-label={"Eliminar "+e.razon_social} onClick={ev=>pedirBorrar(ev,e)}><Icon name="trash" size={14}/></button>
               </div>
             </div>
           ))}
@@ -349,13 +359,14 @@ function Empresas({nav, toast}){
       ) : (
         <div className="tbl-wrap">
           <table className="tbl">
-            <thead><tr><th>Razón social</th><th>CIF</th><th>Contactos</th></tr></thead>
+            <thead><tr><th>Razón social</th><th>CIF</th><th>Contactos</th><th></th></tr></thead>
             <tbody>
               {list.map(e=>(
                 <tr key={e.id} onClick={()=>nav("empresa",e.id)}>
-                  <td><div className="row"><Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/><div className="tbl__name">{e.razon_social}</div>{e.provisional_at && <PendienteBadge/>}</div></td>
+                  <td><div className="row"><Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/><div className="tbl__name">{e.razon_social}</div>{e.provisional_at && <PendienteBadge/>}{e.archived_at && <ArchivadaBadge/>}</div></td>
                   <td className="tbl__sub">{e.cif || "—"}</td>
                   <td>{CRM.contactsForEmpresa(e.id).length}</td>
+                  <td style={{textAlign:"right"}}><button className="btn btn--sm btn--ghost" title="Eliminar empresa" aria-label={"Eliminar "+e.razon_social} onClick={ev=>pedirBorrar(ev,e)}><Icon name="trash" size={14}/></button></td>
                 </tr>
               ))}
             </tbody>
@@ -363,6 +374,7 @@ function Empresas({nav, toast}){
           {list.length===0 && <Empty icon="building" title="Sin resultados" sub="Prueba con otro filtro o búsqueda."/>}
         </div>
       )}
+      {borrar && <BorrarEmpresaModal empresa={borrar} toast={toast} onClose={()=>setBorrar(null)} onDone={()=>{ setBorrar(null); bump(); }} onArchivada={()=>{ setBorrar(null); bump(); }}/>}
       {showNew && <NewEmpresa nav={nav} onClose={()=>setShowNew(false)} onSave={async(payload)=>{
         try{
           const r = await CRM.createEmpresaConContacto(Auth.client, payload);
@@ -1022,6 +1034,9 @@ function EmpresaDetail({id, nav, toast, user}){
   const e = CRM.empresaById[id];
   const [tab,setTab]=uState("contactos");
   const [showEdit,setShowEdit]=uState(false);
+  const [showBorrar,setShowBorrar]=uState(false);
+  const [showArchivar,setShowArchivar]=uState(false);
+  const [restaurando,setRestaurando]=uState(false);
   // Total para el contador de la pestaña: lo informa EmpresaDocs al cargar
   // (null hasta entonces).
   const [docCount,setDocCount]=uState(null);
@@ -1042,9 +1057,20 @@ function EmpresaDetail({id, nav, toast, user}){
   const pendientesPortal = portal ? portal.solicitudes.filter(x=>x.estado==="pendiente").length : null;
   if(!e) return <div className="content"><Empty icon="building" title="Empresa no encontrada" sub="Puede que haya sido eliminada." action={<button className="btn btn--sm btn--primary" onClick={()=>nav("empresas")}>Volver a empresas</button>}/></div>;
   const tabs=[{id:"contactos",label:"Contactos",n:contactos.length},{id:"deals",label:"Deals",n:deals.length},{id:"docs",label:"Documentos",n:docCount},{id:"portal",label:"Área cliente",n:pendientesPortal||null}];
+  const restaurar=async()=>{
+    setRestaurando(true);
+    try{ await CRM.archivarEmpresa(Auth.client, id, false); toast("Empresa restaurada"); bump(); }
+    catch(err){ toast("No se pudo restaurar: "+CRM.docErrorMessage(err)); }
+    finally{ setRestaurando(false); }
+  };
   return (
     <div className="content">
       <div className="row" style={{marginBottom:16}}><button className="btn btn--sm btn--ghost" onClick={()=>nav("empresas")}><Icon name="chevronR" size={15} style={{transform:"rotate(180deg)"}}/>Empresas</button></div>
+      {e.archived_at && <div className="row" style={{gap:10,background:"var(--warn-soft)",color:"var(--warn)",padding:"10px 14px",borderRadius:9,marginBottom:14,fontSize:13,flexWrap:"wrap"}}>
+        <Icon name="archive" size={15}/>
+        <span style={{flex:1,minWidth:200}}>Empresa archivada el {new Date(e.archived_at).toLocaleDateString("es-ES",{timeZone:"Europe/Madrid"})}. No aparece en listados, pipeline ni KPIs, y sus contactos no la ven en el área de cliente.</span>
+        <button className="btn btn--sm btn--ghost" onClick={restaurar} disabled={restaurando}><Icon name="refresh" size={14}/>{restaurando?"Restaurando…":"Restaurar"}</button>
+      </div>}
       <div className="detail">
         <div className="detail__aside">
           <div className="profile">
@@ -1059,6 +1085,11 @@ function EmpresaDetail({id, nav, toast, user}){
               <KV k="Contactos">{contactos.length}</KV>
             </div>
             <button className="btn btn--sm btn--ghost" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar empresa</button>
+            <div className="row" style={{gap:8,marginTop:8}}>
+              {!e.provisional_at && !e.archived_at && <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>setShowArchivar(true)}><Icon name="archive" size={15}/>Archivar</button>}
+              {e.archived_at && <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={restaurar} disabled={restaurando}><Icon name="refresh" size={15}/>Restaurar</button>}
+              <button className="btn btn--sm btn--danger" style={{flex:1}} onClick={()=>setShowBorrar(true)}><Icon name="trash" size={15}/>Eliminar</button>
+            </div>
           </div>
         </div>
         <div>
@@ -1091,6 +1122,8 @@ function EmpresaDetail({id, nav, toast, user}){
           {tab==="portal" && <EmpresaPortalTab empresa={e} portal={portal} toast={toast} onCambio={()=>{ cargarPortal(); bump(); }}/>}
         </div>
       </div>
+      {showArchivar && <ArchivarEmpresaModal empresa={e} toast={toast} onClose={()=>setShowArchivar(false)} onDone={()=>{ setShowArchivar(false); bump(); }}/>}
+      {showBorrar && <BorrarEmpresaModal empresa={e} toast={toast} onClose={()=>setShowBorrar(false)} onDone={()=>{ setShowBorrar(false); nav("empresas"); }} onArchivada={()=>{ setShowBorrar(false); bump(); }}/>}
       {showEdit && <EditEmpresa empresa={e} onClose={()=>setShowEdit(false)} onSave={async(patch)=>{
         try{
           await CRM.updateEmpresa(Auth.client, id, patch);
@@ -1104,6 +1137,144 @@ function EmpresaDetail({id, nav, toast, user}){
     </div>
   );
 }
+function ArchivadaBadge(){ return <Badge label="Archivada" color="#6E8298"/>; }
+
+// Archivar: alternativa a eliminar para los clientes que se van. No borra
+// nada (crm/supabase-empresas-borrar.sql, admin_archivar_empresa).
+function ArchivarEmpresaModal({empresa, toast, onClose, onDone}){
+  const [busy,setBusy]=uState(false);
+  const archivar=async()=>{
+    setBusy(true);
+    try{ await CRM.archivarEmpresa(Auth.client, empresa.id, true); toast("Empresa archivada"); onDone(); }
+    catch(err){ toast("No se pudo archivar: "+CRM.docErrorMessage(err)); setBusy(false); }
+  };
+  return <Modal title={"Archivar "+empresa.razon_social} onClose={onClose} footer={<><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--primary" onClick={archivar} disabled={busy}>{busy?"Archivando…":"Archivar empresa"}</button></>}>
+    <p className="muted">La empresa deja de aparecer en listados, pipeline y KPIs, y sus contactos con cuenta dejan de verla en el área de cliente.</p>
+    <p className="muted" style={{marginTop:8}}><b>No se borra nada.</b> Puedes verla con «Mostrar archivadas» y restaurarla cuando quieras.</p>
+  </Modal>;
+}
+
+// Ficheros de empresas eliminadas que no se pudieron borrar de Storage.
+function FicherosPendientesAviso({toast}){
+  const [pend,setPend]=uState(null);
+  const [busy,setBusy]=uState(false);
+  const cargar=()=>CRM.ficherosPorBorrar(Auth.client).then(setPend).catch(()=>setPend(null));
+  uEffect(()=>{ cargar(); },[]);
+  if(!pend || !pend.length) return null;
+  const reintentar=async()=>{
+    setBusy(true);
+    try{ const r = await CRM.reintentarFicheros(Auth.client); toast(r.pendientes ? r.pendientes+" fichero(s) siguen sin poder borrarse" : "Ficheros borrados"); }
+    catch(err){ toast("No se pudieron borrar: "+err.message); }
+    finally{ setBusy(false); cargar(); }
+  };
+  const empresas = Array.from(new Set(pend.map(p=>p.razon_social).filter(Boolean)));
+  return <div className="row" style={{gap:10,background:"var(--warn-soft)",color:"var(--warn)",padding:"10px 14px",borderRadius:9,marginBottom:14,fontSize:13,flexWrap:"wrap"}}>
+    <Icon name="bell" size={15}/>
+    <span style={{flex:1,minWidth:200}}>{pend.length} fichero(s) de empresas eliminadas ({empresas.join(", ")}) siguen en el almacenamiento.{pend[0].ultimo_error ? " Último error: "+pend[0].ultimo_error : ""} Se reintenta cada noche.</span>
+    <button className="btn btn--sm btn--ghost" onClick={reintentar} disabled={busy}><Icon name="refresh" size={14}/>{busy?"Reintentando…":"Reintentar ahora"}</button>
+  </div>;
+}
+
+// Eliminar empresa: enseña exactamente qué se borra (resumen de la BD, con
+// su huella), pide decidir qué pasa con los contactos que solo están en
+// esta empresa y, si hay documentos o deals contratados, escribir la razón
+// social. Todo lo de la BD va en una transacción (admin_borrar_empresa); los
+// ficheros, después (CRM.borrarEmpresa).
+const normNombre = (s)=>String(s||"").trim().replace(/\s+/g," ").toLowerCase();
+function BorrarEmpresaModal({empresa, toast, onClose, onDone, onArchivada}){
+  const [r,setR]=uState(null);          // resumen
+  const [loadErr,setLoadErr]=uState(null);
+  const [dec,setDec]=uState({});        // contact_id → "borrar" | "mover"
+  const [dest,setDest]=uState({});      // contact_id → empresa_id destino
+  const [nombre,setNombre]=uState("");
+  const [busy,setBusy]=uState(false);
+  const [err,setErr]=uState(null);
+  const [archivar,setArchivar]=uState(false);
+  const cargar=()=>{ setR(null); setLoadErr(null); CRM.resumenBorradoEmpresa(Auth.client, empresa.id).then(setR).catch(e=>setLoadErr(CRM.docErrorMessage(e))); };
+  uEffect(()=>{ cargar(); },[empresa.id]);
+  const destinos = CRM.EMPRESAS.filter(x=>x.id!==empresa.id && !x.provisional_at && !x.archived_at).sort((a,b)=>a.razon_social.localeCompare(b.razon_social));
+  const solo = r ? r.contactos_solo : [];
+  const decisiones = {};
+  solo.forEach(c=>{ if(dec[c.id]==="borrar") decisiones[c.id]="borrar"; else if(dec[c.id]==="mover" && dest[c.id]) decisiones[c.id]=dest[c.id]; });
+  const faltan = solo.filter(c=>!decisiones[c.id]).length;
+  const nombreOk = !r || !r.requiere_nombre || normNombre(nombre)===normNombre(r.empresa.razon_social);
+  const puede = r && !busy && faltan===0 && nombreOk;
+  const todos=(v)=>{ const d={}; solo.forEach(c=>d[c.id]=v); setDec(d); };
+  const eliminar=async()=>{
+    if(!puede) return;
+    setBusy(true); setErr(null);
+    try{
+      const out = await CRM.borrarEmpresa(Auth.client, empresa.id, r.huella, decisiones, nombre);
+      const f = out.ficheros, quedan = out.ficherosError ? out.resultado.ficheros : (f ? f.errores : 0);
+      toast("Empresa eliminada"+(quedan ? " · "+quedan+" fichero(s) no se pudieron borrar todavía: se reintentará (ver aviso en Empresas)" : ""));
+      onDone();
+    }catch(e){
+      const msg = CRM.docErrorMessage(e);
+      setErr(msg); setBusy(false);
+      if(/ha cambiado/.test(msg)) cargar();
+    }
+  };
+  const dealsActivos = r ? r.deals.cliente_activo : 0;
+  const footer = <><button className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancelar</button><button className="btn btn--danger" onClick={eliminar} disabled={!puede}>{busy?"Eliminando…":"Eliminar definitivamente"}</button></>;
+  if(archivar) return <ArchivarEmpresaModal empresa={empresa} toast={toast} onClose={()=>setArchivar(false)} onDone={onArchivada}/>;
+  return <Modal title={"Eliminar "+empresa.razon_social} wide onClose={onClose} footer={footer}>
+    {loadErr && <div className="login__err">{loadErr} <button className="btn btn--sm btn--ghost" onClick={cargar}>Reintentar</button></div>}
+    {!r && !loadErr && <p className="muted">Calculando qué se borraría…</p>}
+    {r && <>
+      <p className="muted" style={{marginBottom:12}}><b style={{color:"var(--danger)"}}>No se puede deshacer y no hay copia de seguridad.</b> Esto es exactamente lo que se borra:</p>
+      {r.sugerir_archivar && <div className="row" style={{gap:10,background:"var(--warn-soft)",color:"var(--warn)",padding:"10px 14px",borderRadius:9,marginBottom:14,fontSize:13,flexWrap:"wrap"}}>
+        <Icon name="archive" size={15}/>
+        <span style={{flex:1,minWidth:200}}>Tiene {r.documentos.total ? r.documentos.total+" documento(s)" : ""}{r.documentos.total && dealsActivos ? " y " : ""}{dealsActivos ? dealsActivos+" deal(s) contratado(s)" : ""}. Si es un cliente que se va, <b>archívala</b>: se oculta y no se borra nada.</span>
+        <button className="btn btn--sm btn--primary" onClick={()=>setArchivar(true)}>Archivar en su lugar</button>
+      </div>}
+
+      <div className="fld__l" style={{marginBottom:6}}>Contactos solo de esta empresa ({solo.length})</div>
+      {solo.length===0 ? <p className="muted" style={{fontSize:13,marginBottom:14}}>Ninguno.</p> : <>
+        <div className="row" style={{gap:6,marginBottom:8,flexWrap:"wrap"}}><span className="muted" style={{fontSize:12.5}}>Elige para cada uno:</span><button className="chip" onClick={()=>todos("borrar")}>Borrar todos</button><button className="chip" onClick={()=>todos("mover")}>Mover todos</button></div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+          {solo.map(c=>{
+            const destino = dest[c.id] && CRM.empresaById[dest[c.id]];
+            return <div key={c.id} className="card"><div className="card__body" style={{padding:"10px 12px"}}>
+              <div className="row" style={{gap:8,flexWrap:"wrap"}}>
+                <b style={{fontSize:13.5}}>{c.nombre}</b>{c.email && <span className="muted" style={{fontSize:12.5}}>{c.email}</span>}
+                {c.cuenta && <Badge label={"Cuenta área cliente"+(c.cuenta_email?" · "+c.cuenta_email:"")} color="#7C5CFC"/>}
+              </div>
+              <div className="row" style={{gap:8,marginTop:8,flexWrap:"wrap"}}>
+                <select className="inp" style={{maxWidth:200}} value={dec[c.id]||""} onChange={ev=>setDec({...dec,[c.id]:ev.target.value})}>
+                  <option value="">— Elige —</option><option value="borrar">Borrar el contacto</option><option value="mover">Moverlo a otra empresa</option>
+                </select>
+                {dec[c.id]==="mover" && <select className="inp" style={{flex:1,minWidth:180}} value={dest[c.id]||""} onChange={ev=>setDest({...dest,[c.id]:ev.target.value})}>
+                  <option value="">— Empresa de destino —</option>{destinos.map(x=><option key={x.id} value={x.id}>{x.razon_social}</option>)}
+                </select>}
+              </div>
+              {dec[c.id]==="borrar" && <div className="muted" style={{fontSize:12.5,marginTop:6}}>Se borra con sus notas{c.notas?" ("+c.notas+")":""}{c.deals_sin_empresa?" y "+c.deals_sin_empresa+" deal(s) sin empresa":""}.{c.cuenta?" Su cuenta del área de cliente no se borra: queda pendiente de vincular.":""}</div>}
+              {dec[c.id]==="mover" && c.cuenta && destino && <div style={{fontSize:12.5,marginTop:6,color:"var(--warn)"}}>Con su cuenta verá en el área de cliente lo que esté compartido de <b>{destino.razon_social}</b>.</div>}
+            </div></div>;
+          })}
+        </div>
+      </>}
+
+      {r.contactos_otras.length>0 && <>
+        <div className="fld__l" style={{marginBottom:6}}>Contactos que también están en otras empresas ({r.contactos_otras.length}) — solo pierden el vínculo</div>
+        <ul className="muted" style={{fontSize:13,margin:"0 0 14px 18px"}}>{r.contactos_otras.map(c=><li key={c.id}>{c.nombre} <span style={{fontSize:12}}>(sigue en {(c.otras||[]).join(", ")}{c.principal_aqui && c.nueva_principal ? "; su principal pasa a ser "+c.nueva_principal : ""}{c.cuenta ? "; mantiene su cuenta" : ""})</span></li>)}</ul>
+      </>}
+
+      <div className="fld__l" style={{marginBottom:6}}>Además se borra</div>
+      <ul style={{fontSize:13.5,margin:"0 0 14px 18px",display:"grid",gap:4}}>
+        <li><b>{r.deals.total}</b> deal(s){dealsActivos ? <> — <b style={{color:"var(--danger)"}}>{dealsActivos} en cliente activo</b></> : ""}{r.deals.notas ? " y sus "+r.deals.notas+" nota(s)" : ""}{r.deals.lista.length ? <span className="muted" style={{fontSize:12.5}}>: {r.deals.lista.map(d=>d.titulo).join(", ")}</span> : ""}</li>
+        <li><b>{r.documentos.total}</b> documento(s){r.documentos.total ? " · "+CRM.fmtBytes(r.documentos.bytes) : ""}{r.documentos.compartidos ? " · "+r.documentos.compartidos+" compartido(s) con el cliente" : ""}{r.documentos.del_cliente ? " · "+r.documentos.del_cliente+" aportado(s) por el cliente" : ""}</li>
+        <li><b>{r.carpetas}</b> carpeta(s)</li>
+        <li><b>{r.solicitudes.total}</b> solicitud(es) del área de cliente{r.solicitudes.pendientes ? " ("+r.solicitudes.pendientes+" pendiente(s))" : ""} y <b>{r.solicitudes.cambios}</b> cambio(s) registrados</li>
+      </ul>
+      <p className="muted" style={{fontSize:12.5,marginBottom:14}}>Las tareas no se borran: pierden el deal o el contacto.</p>
+
+      {r.requiere_nombre && <Field label={<>Para confirmar, escribe <b>{r.empresa.razon_social}</b></>}><input className="inp" value={nombre} onChange={ev=>setNombre(ev.target.value)} autoComplete="off"/></Field>}
+      {faltan>0 && <p className="muted" style={{fontSize:12.5}}>Falta decidir qué pasa con {faltan} contacto(s).</p>}
+      {err && <div className="login__err" style={{marginTop:10}}>{err}</div>}
+    </>}
+  </Modal>;
+}
+
 // Ficha de empresa → "Área cliente": solicitudes de cambio de razón social o
 // CIF (aplicar / rechazar) y el historial de lo que el cliente cambia
 // directamente (dirección, ciudad, provincia).
@@ -2270,7 +2441,7 @@ function NewDeal({contactId, onClose, onSave}){
 
 /* ============ PIPELINE ============ */
 function Pipeline({nav, toast}){
-  const [deals,setDeals]=uState(CRM.DEALS.map(d=>({...d})));
+  const [deals,setDeals]=uState(CRM.dealsVisibles().map(d=>({...d})));
   const [drag,setDrag]=uState(null); const [over,setOver]=uState(null); const [loss,setLoss]=uState(null);
   const [showNewDeal,setShowNewDeal]=uState(false);
   const cols = CRM.STAGES;
