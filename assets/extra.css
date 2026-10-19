@@ -208,6 +208,7 @@
 .prose { color: var(--ink-2); font-size: 1.1rem; line-height: 1.75; }
 .prose > * + * { margin-top: 1.25em; }
 .prose h2 { font-size: clamp(1.5rem,2.4vw,2rem); margin-top: 1.8em; }
+.prose > :first-child { margin-top: 0; }
 .prose h3 { font-size: 1.3rem; margin-top: 1.6em; }
 .prose ul, .prose ol { padding-left: 1.3em; display: grid; gap: .5em; }
 .prose li { list-style: disc; }
