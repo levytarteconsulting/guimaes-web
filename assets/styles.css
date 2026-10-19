@@ -609,3 +609,4 @@ html[lang="en"] [data-lang-es]{ display: none !important; }
 .svc-wide-card__body p { color: #A7BCD3; margin: 0; line-height: 1.6; }
 .svc-wide-card__body .btn { margin-top: 6px; }
 @media (max-width: 800px) { .svc-wide-card { grid-template-columns: 1fr; } .svc-wide-card__img { min-height: 180px; } }
+.vhero__tagline { color: #BFD4FF; margin: 18px auto 0; font-family: var(--display); font-weight: 600; font-size: clamp(1rem,1.4vw,1.2rem); letter-spacing: .01em; }

@@ -3,8 +3,8 @@
   "redirects": [
     { "source": "/home{/}?", "destination": "/", "statusCode": 301 },
     { "source": "/equipo{/}?", "destination": "/nosotros", "statusCode": 301 },
-    { "source": "/category/asesoria-empresarial{/}?", "destination": "/blog", "statusCode": 301 },
-    { "source": "/guiames-asesoria-empresarial{/}?", "destination": "/blog/gestoria-vs-asesoria-estrategica", "statusCode": 301 },
+    { "source": "/category/asesoria-empresarial{/}?", "destination": "/", "statusCode": 301 },
+    { "source": "/guiames-asesoria-empresarial{/}?", "destination": "/", "statusCode": 301 },
 
     { "source": "/verifactu-2025-todo-lo-que-tu-empresa-debe-saber{/}?", "destination": "/blog/verifactu-2026", "statusCode": 301 },
     { "source": "/verifactu-se-aplaza-a-2027{/}?", "destination": "/blog/verifactu-aplazado-2028", "statusCode": 301 },
@@ -26,7 +26,7 @@
     { "source": "/category/direccion-financiera{/}?", "destination": "/blog", "statusCode": 301 },
     { "source": "/category/planificacion-fiscal{/}?", "destination": "/blog", "statusCode": 301 },
     { "source": "/category/tributario{/}?", "destination": "/blog", "statusCode": 301 },
-    { "source": "/tag/asesoria-empresarial{/}?", "destination": "/blog", "statusCode": 301 },
+    { "source": "/tag/asesoria-empresarial{/}?", "destination": "/", "statusCode": 301 },
     { "source": "/tag/holding{/}?", "destination": "/blog/reestructuracion-empresarial", "statusCode": 301 },
 
     { "source": "/cuando-externalizar-la-direccion-financiera-en-una-pyme{/}?", "destination": "/blog/cuando-necesitas-cfo-externo", "statusCode": 301 },
