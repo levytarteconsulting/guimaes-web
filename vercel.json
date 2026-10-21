@@ -27,7 +27,7 @@
     { "source": "/category/planificacion-fiscal{/}?", "destination": "/blog", "statusCode": 301 },
     { "source": "/category/tributario{/}?", "destination": "/blog", "statusCode": 301 },
     { "source": "/tag/asesoria-empresarial{/}?", "destination": "/", "statusCode": 301 },
-    { "source": "/tag/holding{/}?", "destination": "/blog/reestructuracion-empresarial", "statusCode": 301 },
+    { "source": "/tag/holding{/}?", "destination": "/blog/holding-ventajas-riesgos", "statusCode": 301 },
 
     { "source": "/cuando-externalizar-la-direccion-financiera-en-una-pyme{/}?", "destination": "/blog/cuando-necesitas-cfo-externo", "statusCode": 301 },
     { "source": "/la-diferencia-entre-tener-un-asesor-y-tener-un-cfo-externo{/}?", "destination": "/blog/gestoria-vs-asesoria-estrategica", "statusCode": 301 },
@@ -35,7 +35,7 @@
     { "source": "/optimizacion-fiscal-para-empresas-por-que-pagas-mas-impuestos-de-los-necesarios-y-como-evitarlo{/}?", "destination": "/blog/planificacion-fiscal-pymes", "statusCode": 301 },
     { "source": "/incentivos-fiscales-para-emprendedores-en-espana-como-integrarlos-en-una-estrategia-fiscal-y-societaria-solida{/}?", "destination": "/blog/planificacion-fiscal-pymes", "statusCode": 301 },
 
-    { "source": "/por-que-constituir-un-holding-ventajas-riesgos-y-cuando-conviene-hacerlo{/}?", "destination": "/blog/reestructuracion-empresarial", "statusCode": 301 },
+    { "source": "/por-que-constituir-un-holding-ventajas-riesgos-y-cuando-conviene-hacerlo{/}?", "destination": "/blog/holding-ventajas-riesgos", "statusCode": 301 },
     { "source": "/errores-legales-al-crear-una-empresa-y-como-evitarlos{/}?", "destination": "/blog/constituir-sociedad-antes-de-2027", "statusCode": 301 },
     { "source": "/como-afecta-tu-estructura-societaria-a-tu-declaracion-de-la-renta{/}?", "destination": "/blog/autonomo-o-sociedad-limitada", "statusCode": 301 },
     { "source": "/declaracion-de-la-renta-para-empresarios-decisiones-clave-antes-de-presentar-el-irpf{/}?", "destination": "/servicios/planificacion-fiscal", "statusCode": 301 },
