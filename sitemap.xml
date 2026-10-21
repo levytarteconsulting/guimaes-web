@@ -637,4 +637,22 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/holding-ventajas-riesgos"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/holding-ventajas-riesgos"/>
   </url>
+  <url>
+    <loc>https://guimaes.es/blog/errores-legales-crear-empresa</loc>
+    <lastmod>2026-10-21</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/errores-legales-crear-empresa"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/errores-legales-crear-empresa"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/errores-legales-crear-empresa"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/errores-legales-crear-empresa</loc>
+    <lastmod>2026-10-21</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/errores-legales-crear-empresa"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/errores-legales-crear-empresa"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/errores-legales-crear-empresa"/>
+  </url>
 </urlset>
