@@ -13,7 +13,7 @@
     { "source": "/inspeccion-de-la-agencia-tributaria-senales-de-riesgo-y-como-anticiparse{/}?", "destination": "/blog/inspeccion-hacienda-senales-riesgo", "statusCode": 301 },
     { "source": "/nuevas-posibilidades-de-financiacion-de-las-empresas-claves-para-optimizar-tu-estructura-financiera{/}?", "destination": "/blog/ronda-financiacion-inversores", "statusCode": 301 },
     { "source": "/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos{/}?", "destination": "/blog/baliza-v16-obligatoria-en-2026-que-deben-saber-empresas-y-autonomos", "statusCode": 301 },
-    { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial{/}?", "destination": "/blog/autonomo-o-sociedad-limitada", "statusCode": 301 },
+    { "source": "/como-separar-tus-finanzas-personales-y-empresariales-para-lograr-una-buena-proteccion-patrimonial{/}?", "destination": "/blog/separar-finanzas-personales-empresariales", "statusCode": 301 },
 
     { "source": "/internacionalizacion-de-empresas{/}?", "destination": "/servicios/expansion-latam", "statusCode": 301 },
     { "source": "/planificacion-fiscal{/}?", "destination": "/servicios/planificacion-fiscal", "statusCode": 301 },
