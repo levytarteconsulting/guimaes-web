@@ -715,4 +715,22 @@
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
+  <url>
+    <loc>https://guimaes.es/blog/modelo-232-operaciones-vinculadas</loc>
+    <lastmod>2026-11-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/modelo-232-operaciones-vinculadas"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/modelo-232-operaciones-vinculadas"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/modelo-232-operaciones-vinculadas"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/modelo-232-operaciones-vinculadas</loc>
+    <lastmod>2026-11-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/modelo-232-operaciones-vinculadas"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/modelo-232-operaciones-vinculadas"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/modelo-232-operaciones-vinculadas"/>
+  </url>
 </urlset>
