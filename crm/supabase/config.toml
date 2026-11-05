@@ -76,3 +76,10 @@ verify_jwt = false
 [functions.empresas-ficheros]
 entrypoint = "../supabase-functions/empresas-ficheros/index.ts"
 verify_jwt = true
+
+# Instagram (crm/supabase-instagram.sql): la llama pg_cron con x-hook-secret
+# (sin JWT) y el CRM con el JWT del usuario; la autorización (secreto de
+# cron, service role o usuario del CRM con su rol) la hace el propio código.
+[functions.instagram]
+entrypoint = "../supabase-functions/instagram/index.ts"
+verify_jwt = false

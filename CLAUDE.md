@@ -44,7 +44,14 @@ desplegados en Vercel desde `main`. Proyecto Supabase `zuktsotrcolqdowpbnrx`.
   cambio concreto (cada 30 s, 5 min como máximo). No fiarse del estado del commit en GitHub.
 
 ## Git, GitHub y Vercel
-- Una rama y un PR por cambio.
+- Una rama y un PR por cambio, sacada de `main` actualizado (`git checkout main && git pull`).
+- Los PR los fusiona Claude sin esperar al usuario:
+  1. `gh pr checks <n> --watch` hasta que pasen todas las comprobaciones, incluida la de Vercel.
+     Si alguna falla, no fusionar: arreglarlo o explicar qué pasa.
+  2. `gh pr merge <n> --squash --delete-branch`.
+  3. `git checkout main && git pull`, y la siguiente rama sale de ahí.
+  4. Si el PR cambia el CRM en producción, avisar al usuario con un resumen nada más
+     fusionarlo, para que lo pruebe en una ventana de incógnito.
 - Vercel exige que el autor del commit sea del equipo: si lo rechaza, el PR debe llevar un
   solo commit del usuario (`git commit --amend --reset-author`, o
   `git reset --soft origin/main` + commit) y `git push --force-with-lease`.
