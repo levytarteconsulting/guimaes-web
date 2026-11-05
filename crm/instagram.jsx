@@ -223,12 +223,12 @@ function Calendario({ posts, mes, setMes, onOpen }) {
   const hoy = madridDia(new Date());
   const sinFecha = posts.filter((p) => !fechaDe(p));
   return <div className="card">
-    <div className="card__head" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div className="card__head ig-cal-head">
       <button className="btn btn--sm btn--ghost btn--icon" onClick={() => setMes(mesSiguiente(mes, -1))} aria-label="Mes anterior"><Icon name="up" size={14} style={{ transform: "rotate(-90deg)" }} /></button>
-      <h3 style={{ minWidth: 150, textAlign: "center", textTransform: "capitalize" }}>{MESES[mes.m - 1]} {mes.y}</h3>
+      <h3 className="ig-cal-head__mes">{MESES[mes.m - 1]} {mes.y}</h3>
       <button className="btn btn--sm btn--ghost btn--icon" onClick={() => setMes(mesSiguiente(mes, 1))} aria-label="Mes siguiente"><Icon name="up" size={14} style={{ transform: "rotate(90deg)" }} /></button>
       <button className="btn btn--sm btn--subtle" onClick={() => { const a = madridPartes(new Date()); setMes({ y: a.y, m: a.m }); }}>Hoy</button>
-      <span className="muted" style={{ fontSize: 12.5, marginLeft: "auto" }}>Hora de Madrid</span>
+      <span className="muted ig-cal-head__tz">Hora de Madrid</span>
     </div>
     <div className="ig-cal">
       {DIAS.map((d) => <div key={d} className="ig-cal__dow">{d}</div>)}

@@ -87,10 +87,16 @@ function PriorityDot({id, showLabel}){ const p=CRM.priorityById(id); if(!p)retur
 function ServiceBadge({id}){ const s=CRM.serviceById(id); return s? <Badge label={s.name} color={s.color} /> : null; }
 
 /* ---------------- Modal ---------------- */
+// Pila de modales abiertos: Escape cierra solo el de arriba (un diálogo de
+// confirmar abierto encima de otro modal no cierra los dos).
+const modalStack = [];
 function Modal({title, onClose, children, footer, wide}){
   useEffect(()=>{
-    const h = e=>{ if(e.key==='Escape') onClose(); };
-    window.addEventListener('keydown', h); return ()=>window.removeEventListener('keydown', h);
+    const me = {};
+    modalStack.push(me);
+    const h = e=>{ if(e.key==='Escape' && modalStack[modalStack.length-1]===me) onClose(); };
+    window.addEventListener('keydown', h);
+    return ()=>{ window.removeEventListener('keydown', h); const i = modalStack.indexOf(me); if(i>=0) modalStack.splice(i,1); };
   },[]);
   return (
     <div className="overlay" onMouseDown={e=>{ if(e.target===e.currentTarget) onClose(); }}>
