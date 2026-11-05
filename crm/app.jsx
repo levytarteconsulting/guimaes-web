@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { Instagram } from "./instagram.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
 
@@ -184,6 +185,7 @@ const NAV = [
   {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.WHATSAPP.reduce((a,w)=>a+w.unread,0)},
   {id:"inbox", label:"Bandeja de entrada", icon:"mail", badge:()=>CRM.EMAILS.filter(e=>!e.archived&&CRM.unreadOf(e)).length},
   {id:"documents", label:"Documentos", icon:"documents"},
+  {id:"instagram", label:"Instagram", icon:"instagram"},
   {id:"automations", label:"Automatizaciones", icon:"automations"},
   {id:"config", label:"Configuración", icon:"settings"}
 ];
@@ -3954,7 +3956,7 @@ function InstallPrompt(){
 //   la URL para el login con Google y para los enlaces de recuperación de
 //   contraseña (#access_token=...). Dos usos del hash a la vez es fuente
 //   garantizada de bugs.
-const ROUTABLE_VIEWS = ["home","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","documents","automations","config"];
+const ROUTABLE_VIEWS = ["home","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","documents","instagram","automations","config"];
 function viewToSearch(name, id){
   const params = new URLSearchParams();
   params.set("view", name);
@@ -4062,7 +4064,7 @@ function App(){
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user) return <><Login onLogin={u=>setUser(u)}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
@@ -4077,6 +4079,7 @@ function App(){
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast}/>;
   else if(view.name==="documents") screen=<Documents nav={nav} toast={fireToast}/>;
+  else if(view.name==="instagram") screen=<Instagram user={user} toast={fireToast}/>;
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
   else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp";
