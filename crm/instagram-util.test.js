@@ -95,7 +95,7 @@ test("agrupar ficheros: sueltas, carruseles y problemas", () => {
   assert.match(p["6"].avisos[0], /imagen suelta/);
   assert.deepEqual(r.ignorados, ["notas.txt", "foto.jpg"]);
   const once = agruparFicheros(Array.from({ length: 11 }, (_, i) => `07-${i + 1}.jpg`));
-  assert.match(once.piezas[0].errores[0], /10 como máximo/);
+  assert.equal(once.piezas[0].ficheros.length, 11); // el límite de 10 se comprueba en el resumen (erroresLaminas)
   assert.equal(clavePieza("007"), "7");
 });
 
@@ -129,4 +129,103 @@ test("repartirFechas: días elegidos, hora de Madrid y días ocupados", () => {
 test("medidas finales", () => {
   assert.deepEqual(medidasFinales(2160, 2700), { w: 1440, h: 1800 });
   assert.deepEqual(medidasFinales(1080, 1350), { w: 1080, h: 1350 });
+});
+
+import { erroresLaminas, esOculto, leerCaption, ordenNatural, organizarLote } from "./instagram-util.js";
+
+test("orden natural y ficheros ocultos", () => {
+  assert.deepEqual(["10.jpg", "2.jpg", "1.jpg", "Lámina 11.png", "lamina 3.png"].sort(ordenNatural), ["1.jpg", "2.jpg", "10.jpg", "lamina 3.png", "Lámina 11.png"]);
+  assert.equal(esOculto("Lote/.DS_Store"), true);
+  assert.equal(esOculto("Lote/01/._1.jpg"), true);
+  assert.equal(esOculto("__MACOSX/01/1.jpg"), true);
+  assert.equal(esOculto("Lote/01/Thumbs.db"), true);
+  assert.equal(esOculto("Lote/01/1.jpg"), false);
+  assert.deepEqual(erroresLaminas(10), []);
+  assert.match(erroresLaminas(11)[0], /10 como máximo/);
+  assert.match(erroresLaminas(0)[0], /No quedan/);
+});
+
+test("leerCaption: UTF-8 con y sin BOM, CRLF y no UTF-8", () => {
+  const enc = new TextEncoder();
+  assert.deepEqual(leerCaption(enc.encode("﻿Renta 2026\r\nLínea dos\r\n\r\n")), { texto: "Renta 2026\nLínea dos", utf8: true });
+  assert.deepEqual(leerCaption(enc.encode("Sin BOM ñ")), { texto: "Sin BOM ñ", utf8: true });
+  assert.equal(leerCaption(new Uint8Array([0x41, 0xf1, 0x6f])).utf8, false); // «Año» en Latin-1
+  assert.equal(leerCaption("﻿hola\r").texto, "hola");
+});
+
+test("organizarLote: carpeta con subcarpetas", () => {
+  const r = organizarLote([
+    "Noviembre/.DS_Store", "Noviembre/textos.csv", "Noviembre/notas.pdf",
+    "Noviembre/10 cierre/1.png",
+    "Noviembre/2 iva/10.png", "Noviembre/2 iva/2.png", "Noviembre/2 iva/1.png", "Noviembre/2 iva/caption.txt", "Noviembre/2 iva/otro.txt",
+    "Noviembre/1 renta/b.jpg", "Noviembre/1 renta/a.jpg", "Noviembre/1 renta/texto.txt",
+    "Noviembre/3 sin texto/portada.webp", "Noviembre/3 sin texto/._portada.webp",
+    "Noviembre/4 dos txt/1.jpg", "Noviembre/4 dos txt/a.txt", "Noviembre/4 dos txt/b.txt",
+    "Noviembre/suelta.jpg",
+  ]);
+  assert.equal(r.tipo, "carpetas");
+  assert.equal(r.raiz, "Noviembre");
+  assert.equal(r.csv, "Noviembre/textos.csv");
+  assert.equal(r.pideModo, false);
+  assert.deepEqual(r.piezas.map((p) => p.nombre), ["1 renta", "2 iva", "3 sin texto", "4 dos txt", "10 cierre"]);
+  const [renta, iva, sin, dos] = r.piezas;
+  assert.deepEqual(iva.ficheros, ["Noviembre/2 iva/1.png", "Noviembre/2 iva/2.png", "Noviembre/2 iva/10.png"]);
+  assert.equal(iva.texto, "Noviembre/2 iva/caption.txt");
+  assert.equal(renta.texto, "Noviembre/1 renta/texto.txt"); // único .txt
+  assert.deepEqual(renta.ficheros, ["Noviembre/1 renta/a.jpg", "Noviembre/1 renta/b.jpg"]);
+  assert.equal(sin.texto, null);
+  assert.deepEqual(sin.ficheros, ["Noviembre/3 sin texto/portada.webp"]);
+  assert.equal(dos.texto, null);
+  assert.match(dos.avisos[0], /ninguno se llama caption.txt/);
+  assert.deepEqual(renta.clavesCsv, ["1 renta", "1"]);
+  assert.deepEqual(r.piezas.map((p) => p.slug), ["01", "02", "03", "04", "05"]);
+  assert.ok(r.avisos.some((a) => /notas\.pdf/.test(a)));
+  assert.ok(r.avisos.some((a) => /suelta\.jpg/.test(a)));
+  assert.ok(!r.avisos.some((a) => /DS_Store|\._portada/.test(a)));
+});
+
+test("organizarLote: varias carpetas soltadas a la vez (sin carpeta principal)", () => {
+  const r = organizarLote(["01/1.jpg", "01/2.jpg", "02/1.jpg"]);
+  assert.equal(r.tipo, "carpetas");
+  assert.equal(r.raiz, null);
+  assert.deepEqual(r.piezas.map((p) => [p.nombre, p.ficheros.length]), [["01", 2], ["02", 1]]);
+  assert.deepEqual(r.piezas[0].clavesCsv, ["1"]);
+});
+
+test("organizarLote: la convención NN-M.jpg se mantiene", () => {
+  const r = organizarLote(["01.jpg", "02-2.jpg", "02-1.jpg", "textos.csv"]);
+  assert.equal(r.tipo, "convencion");
+  assert.deepEqual(r.piezas.map((p) => [p.nombre, p.ficheros]), [["01", ["01.jpg"]], ["02", ["02-1.jpg", "02-2.jpg"]]]);
+  // NN.jpg sueltas con textos.csv: también convención
+  assert.equal(organizarLote(["1.jpg", "2.jpg", "textos.csv"]).tipo, "convencion");
+});
+
+test("organizarLote: imágenes sueltas → selector carrusel / una por imagen", () => {
+  const conCaption = ["Carrusel IVA/10.png", "Carrusel IVA/2.png", "Carrusel IVA/1.png", "Carrusel IVA/caption.txt", "Carrusel IVA/.DS_Store"];
+  const c = organizarLote(conCaption);
+  assert.equal(c.tipo, "sueltas");
+  assert.equal(c.raiz, "Carrusel IVA");
+  assert.equal(c.pideModo, true);
+  assert.equal(c.modo, "carrusel");             // por defecto con caption.txt
+  assert.equal(c.piezas.length, 1);
+  assert.deepEqual(c.piezas[0].ficheros, ["Carrusel IVA/1.png", "Carrusel IVA/2.png", "Carrusel IVA/10.png"]);
+  assert.equal(c.piezas[0].texto, "Carrusel IVA/caption.txt");
+  assert.equal(c.piezas[0].nombre, "Carrusel IVA");
+
+  const s = organizarLote(conCaption, { modo: "sueltas" });
+  assert.equal(s.modo, "sueltas");
+  assert.deepEqual(s.piezas.map((p) => p.ficheros[0]), ["Carrusel IVA/1.png", "Carrusel IVA/2.png", "Carrusel IVA/10.png"]);
+  assert.ok(s.piezas.every((p) => p.texto === null));
+  assert.match(s.avisos.at(-1), /No se usan: caption\.txt/);
+
+  // Sin caption.txt: por defecto, una publicación por imagen; un .txt con el mismo nombre es su texto.
+  const f = organizarLote(["foto b.jpg", "foto a.jpg", "foto a.txt"]);
+  assert.equal(f.modo, "sueltas");
+  assert.equal(f.piezas[0].texto, "foto a.txt");
+  // NN.jpg sin guion ni textos.csv: también pregunta.
+  assert.equal(organizarLote(["1.jpg", "2.jpg", "caption.txt"]).modo, "carrusel");
+  // Una sola imagen: no hay nada que elegir.
+  const una = organizarLote(["portada.jpg", "caption.txt"]);
+  assert.equal(una.pideModo, false);
+  assert.equal(una.piezas[0].texto, "caption.txt");
 });

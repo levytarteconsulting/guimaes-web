@@ -212,7 +212,6 @@ export function agruparFicheros(nombres) {
       const orden = [...p.laminas].sort((a, b) => a.n - b.n);
       const repetidas = orden.filter((l, i) => i > 0 && l.n === orden[i - 1].n);
       if (repetidas.length) errores.push(`Lámina repetida: ${repetidas.map((l) => l.nombre).join(", ")}.`);
-      if (orden.length > MAX_LAMINAS) errores.push(`Tiene ${orden.length} láminas: un carrusel admite ${MAX_LAMINAS} como máximo.`);
       if (!repetidas.length && orden.some((l, i) => l.n !== i + 1)) avisos.push(`Las láminas no van seguidas (${orden.map((l) => l.n).join(", ")}): se publican en ese orden.`);
       if (orden.length === 1) avisos.push(`Solo hay una lámina (${orden[0].nombre}): se publicará como imagen suelta.`);
       ficheros = orden.map((l) => l.nombre);
@@ -311,4 +310,154 @@ export const ANCHO_MAX = 1440;
 export function medidasFinales(w, h) {
   if (w <= ANCHO_MAX) return { w, h };
   return { w: ANCHO_MAX, h: Math.round((h * ANCHO_MAX) / w) };
+}
+
+// Número de láminas de una pieza (después de quitar o reordenar en el resumen).
+export function erroresLaminas(n) {
+  if (n === 0) return ["No quedan láminas."];
+  if (n > MAX_LAMINAS) return [`Tiene ${n} láminas: un carrusel admite ${MAX_LAMINAS} como máximo.`];
+  return [];
+}
+
+// ---------------------------------------------------------------- lotes por carpetas
+// Orden natural: «2» antes que «10», sin distinguir mayúsculas ni tildes.
+const colador = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+export const ordenNatural = (a, b) => colador.compare(a, b);
+
+const baseRuta = (r) => r.split("/").pop();
+const dirRuta = (r) => r.split("/").slice(0, -1).join("/");
+const dosCifras = (n) => String(n).padStart(2, "0");
+const EXT_TXT = /\.txt$/i;
+const EXT_CSV = /\.csv$/i;
+const ES_CAPTION = /^caption\.txt$/i;
+const CONVENCION = /^(\d+)(?:-(\d+))?\.(jpe?g|png|webp)$/i;
+
+// Ficheros que el sistema crea solo (.DS_Store, ._foto.jpg, __MACOSX, Thumbs.db…).
+export function esOculto(ruta) {
+  const partes = String(ruta).split("/");
+  return partes.some((s) => s.startsWith(".") || s === "__MACOSX") || /^(thumbs\.db|desktop\.ini)$/i.test(partes.at(-1));
+}
+
+// Texto de un caption.txt: UTF-8 con o sin BOM; saltos de línea normalizados.
+// Acepta bytes (Uint8Array/ArrayBuffer) o texto ya leído.
+export function leerCaption(contenido) {
+  let texto, utf8 = true;
+  if (typeof contenido === "string") texto = contenido;
+  else {
+    try { texto = new TextDecoder("utf-8", { fatal: true }).decode(contenido); }
+    catch { utf8 = false; texto = new TextDecoder("utf-8").decode(contenido); }
+  }
+  return { texto: texto.replace(/^﻿/, "").replace(/\r\n?/g, "\n").trim(), utf8 };
+}
+
+// Qué .txt de una carpeta es el texto: caption.txt; si no hay, el único .txt.
+function textoDeCarpeta(txts) {
+  const cap = txts.find((t) => ES_CAPTION.test(baseRuta(t.rel)));
+  if (cap) return { ruta: cap.ruta };
+  if (txts.length === 1) return { ruta: txts[0].ruta };
+  if (txts.length > 1) return { ruta: null, aviso: `Hay ${txts.length} ficheros .txt y ninguno se llama caption.txt: no se usa ninguno.` };
+  return { ruta: null };
+}
+
+// Organiza lo soltado en piezas. «rutas» son rutas relativas con «/»
+// (p. ej. «Lote nov/01 renta/1.png») o solo nombres si se eligieron ficheros.
+//  - Con subcarpetas: cada carpeta con imágenes es una pieza (tipo «carpetas»).
+//  - Sin subcarpetas y con la convención NN-M.jpg (o NN.jpg con textos.csv):
+//    tipo «convencion», como antes.
+//  - Si no: tipo «sueltas»; «modo» decide si son un carrusel o una
+//    publicación por imagen (por defecto, carrusel si hay un caption.txt).
+// Devuelve {tipo, raiz, piezas, csv, avisos, pideModo, modo}; cada pieza:
+// {clave, nombre, slug, ficheros (rutas), texto (ruta del .txt o null),
+//  errores, avisos, clavesCsv}.
+export function organizarLote(entrada, { modo = null } = {}) {
+  let items = entrada.map((r) => String(r).replace(/\\/g, "/").replace(/^\/+/, ""))
+    .filter((r) => r && !esOculto(r)).map((ruta) => ({ ruta, rel: ruta }));
+  // Carpeta principal: si todo cuelga de la misma, es el nombre del lote.
+  let raiz = null;
+  const primeros = new Set(items.map((f) => f.rel.split("/")[0]));
+  if (items.length && primeros.size === 1 && items.every((f) => f.rel.includes("/"))) {
+    raiz = [...primeros][0];
+    items = items.map((f) => ({ ...f, rel: f.rel.slice(raiz.length + 1) }));
+  }
+  const imagenes = [], txts = [], csvs = [], otros = [];
+  for (const f of items) {
+    if (EXT_IMAGEN.test(f.rel)) imagenes.push(f);
+    else if (EXT_TXT.test(f.rel)) txts.push(f);
+    else if (EXT_CSV.test(f.rel) && !f.rel.includes("/")) csvs.push(f);
+    else otros.push(f);
+  }
+  const avisos = [];
+  if (otros.length) avisos.push(`Se ignoran (no son imagen ni .txt): ${otros.map((f) => f.rel).join(", ")}.`);
+  csvs.sort((a, b) => Number(/^textos\.csv$/i.test(b.rel)) - Number(/^textos\.csv$/i.test(a.rel)) || ordenNatural(a.rel, b.rel));
+  const csv = csvs.length ? csvs[0].ruta : null;
+  if (csvs.length > 1) avisos.push(`Hay ${csvs.length} ficheros CSV; se usa «${csvs[0].rel}».`);
+  if (csvs.length && !/^textos\.csv$/i.test(csvs[0].rel)) avisos.push(`El CSV se llama «${csvs[0].rel}» (lo esperado es textos.csv); se usa igualmente.`);
+  const porRuta = (a, b) => ordenNatural(a.rel, b.rel);
+  const res = (tipo, piezas, extra = {}) => ({ tipo, raiz, piezas, csv, avisos, pideModo: false, modo: null, ...extra });
+
+  // 1) Subcarpetas: una pieza por carpeta con imágenes.
+  if (imagenes.some((f) => f.rel.includes("/"))) {
+    const porDir = new Map();
+    for (const f of imagenes) {
+      const d = dirRuta(f.rel);
+      if (!d) continue;
+      if (!porDir.has(d)) porDir.set(d, []);
+      porDir.get(d).push(f);
+    }
+    const fuera = imagenes.filter((f) => !f.rel.includes("/"));
+    if (fuera.length) avisos.push(`Se ignoran las imágenes que no están dentro de una subcarpeta: ${fuera.map((f) => f.rel).join(", ")}.`);
+    const txtSobrantes = txts.filter((t) => !porDir.has(dirRuta(t.rel)));
+    if (txtSobrantes.length) avisos.push(`Se ignoran (no están en una carpeta con imágenes): ${txtSobrantes.map((t) => t.rel).join(", ")}.`);
+    const dirs = [...porDir.keys()].sort(ordenNatural);
+    // Para textos.csv: la pieza es el nombre de la carpeta o, si empieza por un
+    // número que no se repite («01 renta»), ese número.
+    const numeros = new Map();
+    const numDe = (d) => { const m = baseRuta(d).match(/^(\d+)(?=\D|$)/); return m ? clavePieza(m[1]) : null; };
+    for (const d of dirs) { const n = numDe(d); if (n) numeros.set(n, (numeros.get(n) || 0) + 1); }
+    const piezas = dirs.map((d, i) => {
+      const t = textoDeCarpeta(txts.filter((x) => dirRuta(x.rel) === d));
+      const clavesCsv = [clavePieza(baseRuta(d))];
+      const n = numDe(d);
+      if (n && numeros.get(n) === 1 && !clavesCsv.includes(n)) clavesCsv.push(n);
+      return { clave: d, nombre: d, slug: dosCifras(i + 1), ficheros: porDir.get(d).sort(porRuta).map((f) => f.ruta),
+        texto: t.ruta, errores: [], avisos: t.aviso ? [t.aviso] : [], clavesCsv };
+    });
+    return res("carpetas", piezas);
+  }
+
+  // 2) Convención NN-M.jpg / NN.jpg.
+  const nombres = imagenes.map((f) => f.rel);
+  const conv = nombres.length > 0 && nombres.every((n) => CONVENCION.test(n));
+  const conGuion = nombres.some((n) => /^\d+-\d+\./.test(n));
+  if (conv && (conGuion || (csv && !txts.length))) {
+    if (txts.length) avisos.push(`Con nombres NN-M.jpg los textos van en textos.csv; se ignoran: ${txts.map((t) => t.rel).join(", ")}.`);
+    const mapa = new Map(imagenes.map((f) => [f.rel, f.ruta]));
+    const g = agruparFicheros(nombres);
+    const piezas = g.piezas.map((p) => ({ clave: p.clave, nombre: p.prefijo, slug: p.prefijo, ficheros: p.ficheros.map((n) => mapa.get(n)),
+      texto: null, errores: p.errores, avisos: p.avisos, clavesCsv: [p.clave] }));
+    return res("convencion", piezas);
+  }
+
+  // 3) Imágenes sueltas: un carrusel o una publicación por imagen.
+  const imgs = [...imagenes].sort(porRuta);
+  const t = textoDeCarpeta(txts);
+  const modoPorDefecto = txts.some((x) => ES_CAPTION.test(baseRuta(x.rel))) ? "carrusel" : "sueltas";
+  const m = imgs.length <= 1 ? "carrusel" : (modo === "carrusel" || modo === "sueltas" ? modo : modoPorDefecto);
+  let piezas;
+  if (m === "carrusel") {
+    piezas = imgs.length ? [{ clave: "carrusel", nombre: raiz || "Carrusel", slug: "01", ficheros: imgs.map((f) => f.ruta),
+      texto: t.ruta, errores: [], avisos: t.aviso ? [t.aviso] : [], clavesCsv: [raiz ? clavePieza(raiz) : "1"] }] : [];
+  } else {
+    const usados = new Set();
+    piezas = imgs.map((f, i) => {
+      const sin = f.rel.replace(EXT_IMAGEN, "").toLowerCase();
+      const propio = txts.find((x) => x.rel.toLowerCase() === sin + ".txt");
+      if (propio) usados.add(propio.ruta);
+      return { clave: f.rel, nombre: f.rel.replace(EXT_IMAGEN, ""), slug: dosCifras(i + 1), ficheros: [f.ruta],
+        texto: propio ? propio.ruta : null, errores: [], avisos: [], clavesCsv: [clavePieza(sin)] };
+    });
+    const sinUsar = txts.filter((x) => !usados.has(x.ruta));
+    if (sinUsar.length) avisos.push(`Con «Una publicación por imagen», cada imagen toma el texto del .txt con su mismo nombre (foto.jpg → foto.txt). No se usan: ${sinUsar.map((x) => x.rel).join(", ")}.`);
+  }
+  return res("sueltas", piezas, { pideModo: imgs.length > 1, modo: m });
 }
