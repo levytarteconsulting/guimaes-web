@@ -4,6 +4,7 @@ import {
   madridInput, madridPartes, MAX_CAPTION, MAX_HASHTAGS, MAX_MENCIONES, mesCalendario, mesSiguiente,
   METRICAS, proporcion, textoAUtc, tieneAviso,
 } from "./instagram-util.js";
+import { SubirLote } from "./instagram-lotes.jsx";
 /* GUIMAES CRM — Sección Instagram: calendario, listas, edición, aprobación,
    publicación, conexión, métricas y espacio ocupado.
    Esquema y reglas: crm/supabase-instagram.sql (las reglas de verdad las
@@ -104,6 +105,7 @@ export function Instagram({ user, toast }) {
   const [conexion, setConexion] = iState(null);
   const [ocupado, setOcupado] = iState("");
   const [espacio, setEspacio] = iState(null);
+  const [subir, setSubir] = iState(false);
   const admin = esAdmin(user);
 
   const reload = async () => {
@@ -152,6 +154,7 @@ export function Instagram({ user, toast }) {
 
   return <div className="content">
     <div className="toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+      <button className="btn btn--sm btn--primary" onClick={() => setSubir(true)} disabled={!posts}><Icon name="upload" size={14} />Subir lote</button>
       <button className="btn btn--sm btn--ghost" onClick={comprobar} disabled={!!ocupado}><Icon name="shield" size={14} />{ocupado === "comprobar" ? "Comprobando…" : "Comprobar conexión"}</button>
       {admin && <button className="btn btn--sm btn--ghost" onClick={metricas} disabled={!!ocupado}><Icon name="trend" size={14} />{ocupado === "metricas" ? "Actualizando…" : "Actualizar métricas"}</button>}
       <button className="btn btn--sm btn--ghost" onClick={exportar} disabled={!publicadas.length}><Icon name="download" size={14} />Exportar métricas (CSV)</button>
@@ -172,10 +175,11 @@ export function Instagram({ user, toast }) {
     {loadErr ? <div className="card"><div className="card__body"><Empty icon="instagram" title="No se pudieron cargar las publicaciones" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14} />Reintentar</button>} /></div></div>
       : !posts ? <div className="muted" style={{ padding: 16 }}>Cargando…</div>
       : tab === "calendario" ? <Calendario posts={posts.filter((p) => p.status !== "cancelada")} mes={mes} setMes={setMes} onOpen={setEditId} />
-      : tab === "proximas" ? <Lista posts={proximas} vacio="No hay publicaciones pendientes" sub="Las piezas que subas aparecerán aquí como borradores." onOpen={setEditId} />
+      : tab === "proximas" ? <Lista posts={proximas} vacio="No hay publicaciones pendientes" sub="Pulsa «Subir lote» para añadir piezas: entran como borradores." onOpen={setEditId} />
       : tab === "publicadas" ? <ListaPublicadas posts={publicadas} onOpen={setEditId} />
       : <Lista posts={canceladas} vacio="No hay publicaciones canceladas" onOpen={setEditId} />}
 
+    {subir && <SubirLote posts={posts} toast={toast} onClose={() => setSubir(false)} onDone={reload} />}
     {editando && <PiezaEditor key={editando.id + editando.updated_at} post={editando} user={user} toast={toast}
       onClose={() => setEditId(null)} onChanged={reload} onDeleted={() => { setEditId(null); reload(); }} />}
   </div>;
