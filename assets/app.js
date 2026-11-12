@@ -138,7 +138,9 @@
       var field = function (name) { return form.querySelector('[name="' + name + '"]'); };
       var val = function (name) { var el = field(name); return el ? el.value.trim() : ""; };
       var svcEl = form.querySelector('select[name="servicio"]');
-      var svcLabel = svcEl && svcEl.selectedIndex >= 0 ? svcEl.options[svcEl.selectedIndex].text.trim() : "";
+      // Siempre el nombre del catálogo del CRM (data-opt-es), también en la web en inglés.
+      var svcOpt = svcEl && svcEl.selectedIndex >= 0 ? svcEl.options[svcEl.selectedIndex] : null;
+      var svcLabel = svcOpt ? (svcOpt.getAttribute("data-opt-es") || svcOpt.text).trim() : "";
       if (svcEl && !svcEl.value) svcLabel = ""; // opción vacía = sin servicio elegido
       // Páginas de servicio: no hay <select>, el servicio va en un campo oculto
       // con el nombre exacto del catálogo del CRM (crm/data.js, SERVICES).
@@ -245,7 +247,7 @@
   function initCallbar() {
     var bar = document.querySelector("[data-callbar]");
     if (!bar) return;
-    var target = document.querySelector("#cuentanos");
+    var target = document.querySelector(bar.getAttribute("data-callbar-target") || "#cuentanos");
     if (!target || !("IntersectionObserver" in window)) { bar.classList.remove("is-hidden"); return; }
     try {
       new IntersectionObserver(function (entries) {

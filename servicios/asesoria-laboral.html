@@ -45,7 +45,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 <link rel="alternate" hreflang="en" href="https://guimaes.es/en/servicios/asesoria-laboral" />
 <link rel="alternate" hreflang="x-default" href="https://guimaes.es/servicios/asesoria-laboral" />
 </head>
-<body>
+<body class="has-callbar">
 <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-T7TLJHJX"
 height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
@@ -62,6 +62,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <a class="nav__link" href="/blog">Blog</a>
     </nav>
     <div class="nav__right">
+      <a class="nav__tel" href="tel:+34637420068" aria-label="Llamar al 637 420 068"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>637 420 068</span></a>
       <button class="lang-toggle" data-lang-toggle data-lang-alt="/en/servicios/asesoria-laboral" aria-label="Cambiar idioma">
         <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M3 12h18" stroke="currentColor" stroke-width="2"/><path d="M12 3c2.6 2.7 2.6 15.3 0 18M12 3c-2.6 2.7-2.6 15.3 0 18" stroke="currentColor" stroke-width="2"/></svg>
         <span data-lang-current>ES</span>
@@ -81,9 +82,9 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 
 <main>
 <!-- HERO -->
-<section class="svc-hero">
-  <div class="svc-hero__bg"><img src="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=1600&q=80&fm=webp" alt="" /></div>
-  <div class="wrap">
+<section class="svc-hero svc-hero--lead">
+  <div class="svc-hero__bg"><img src="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=1600&q=80&fm=webp" srcset="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=800&q=70&fm=webp 800w, https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=1600&q=80&fm=webp 1600w" sizes="100vw" alt="" /></div>
+  <div class="wrap svc-hero__grid">
     <div class="svc-hero__inner">
       <div class="breadcrumb" data-reveal>
         <a href="/"><span data-lang-es>Inicio</span><span data-lang-en>Home</span></a> ·
@@ -93,9 +94,47 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       <span class="eyebrow" data-reveal><span data-lang-es>Asesoría Laboral</span><span data-lang-en>Labor & Payroll</span></span>
       <h1 data-reveal data-delay="1"><span data-lang-es>Asesoría laboral para empresas: tu equipo, gestionado de principio a fin</span><span data-lang-en>Labor &amp; payroll advisory for companies: your team, managed end to end</span></h1>
       <p data-reveal data-delay="2"><span data-lang-es>Asesoría laboral en Pozuelo de Alarcón para empresas con plantilla: contratos, altas y bajas, nóminas, despidos e inspecciones, para que tú te ocupes del negocio.</span><span data-lang-en>Labor advisory in Pozuelo de Alarcón for companies with staff: contracts, registrations, payroll, dismissals and inspections, so you can focus on the business.</span></p>
-      <div class="svc-hero__cta" data-reveal data-delay="2">
-        <a class="btn btn--primary" href="#consulta"><span data-lang-es>Habla con un experto</span><span data-lang-en>Talk to an expert</span><svg class="arrow" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-      </div>
+      <ul class="hero-perks" data-reveal data-delay="2">
+        <li><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-lang-es>Respuesta en 24 h</span><span data-lang-en>Reply within 24 h</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-lang-es>Sin permanencia</span><span data-lang-en>No lock-in</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-lang-es>Un único interlocutor</span><span data-lang-en>A single point of contact</span></li>
+      </ul>
+    </div>
+
+    <!-- Formulario corto del hero (mismo envío que el del final, ver initForm en assets/app.js) -->
+    <div class="hero-form" id="cuentanos">
+      <form class="form-card hero-form__card" id="hero-form" data-lead-form data-ubicacion="hero" novalidate>
+        <div class="form-fields">
+          <p class="hero-form__title"><span data-lang-es>Cuéntanos tu caso</span><span data-lang-en>Tell us about your case</span></p>
+          <p class="hero-form__sub"><span data-lang-es>Te llamamos y vemos cómo ayudarte. Sin compromiso.</span><span data-lang-en>We'll call you and see how we can help. No commitment.</span></p>
+          <div class="hp-field" aria-hidden="true">
+            <input type="text" name="company_url" id="h-company_url" tabindex="-1" autocomplete="off" />
+          </div>
+          <input type="hidden" name="servicio" value="Asesoría Laboral" />
+          <div class="field"><label for="h-nombre"><span data-lang-es>Nombre</span><span data-lang-en>Name</span></label><input id="h-nombre" name="nombre" type="text" autocomplete="name" required data-ph-es="Tu nombre" data-ph-en="Your name" placeholder="Tu nombre" /></div>
+          <div class="form-row two">
+            <div class="field"><label for="h-telefono"><span data-lang-es>Teléfono</span><span data-lang-en>Phone</span></label><input id="h-telefono" name="telefono" type="tel" autocomplete="tel" inputmode="tel" data-ph-es="600 000 000" data-ph-en="+34 600 000 000" placeholder="600 000 000" /></div>
+            <div class="field"><label for="h-email">Email</label><input id="h-email" name="email" type="email" autocomplete="email" data-ph-es="tu@email.com" data-ph-en="you@email.com" placeholder="tu@email.com" /></div>
+          </div>
+          <div class="field"><label for="h-mensaje"><span data-lang-es>¿En qué te ayudamos?</span><span data-lang-en>How can we help?</span> <span class="field__opt"><span data-lang-es>(opcional)</span><span data-lang-en>(optional)</span></span></label>
+            <textarea id="h-mensaje" name="mensaje" rows="2" data-ph-es="Ej.: vamos a contratar a varias personas y queremos externalizar las nóminas" data-ph-en="E.g. we're hiring several people and want to outsource payroll" placeholder="Ej.: vamos a contratar a varias personas y queremos externalizar las nóminas"></textarea>
+          </div>
+          <label class="form-check">
+            <input type="checkbox" id="h-consent" name="consent" required />
+            <span><span data-lang-es>He leído y acepto la <a href="/politica-privacidad">Política de Privacidad</a>.</span><span data-lang-en>I have read and accept the <a href="/politica-privacidad">Privacy Policy</a>.</span></span>
+          </label>
+          <button type="submit" class="btn btn--primary hero-form__submit"><span data-lang-es>Habla con un experto</span><span data-lang-en>Talk to an expert</span><svg class="arrow" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="hero-form__alt">
+            <a class="hero-form__tel" href="tel:+34637420068"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span><span data-lang-es>¿Prefieres llamar?</span><span data-lang-en>Prefer to call?</span> <b>637 420 068</b></span></a>
+            <a class="hero-form__wa" href="https://wa.me/34637420068?text=Hola%2C%20me%20interesa%20la%20asesor%C3%ADa%20laboral%20de%20GUIMAES." target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.5 14.4c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.87 1.22 3.07.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.23 1.36.2 1.87.12.57-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.07-.13-.27-.2-.57-.35Z"/><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.86 9.86 0 0 0 4.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.18-1.14l-.3-.18-3.11.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.39c0-4.54 3.7-8.24 8.24-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.23 8.23Z"/></svg>WhatsApp</a>
+          </div>
+        </div>
+        <div class="form-ok" role="status">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3><span data-lang-es>¡Mensaje enviado!</span><span data-lang-en>Message sent!</span></h3>
+          <p class="lead" style="margin-top:10px"><span data-lang-es>Gracias por contactar con GUIMAES. Te responderemos en menos de 24 horas laborables.</span><span data-lang-en>Thanks for contacting GUIMAES. We'll get back to you within 24 business hours.</span></p>
+        </div>
+      </form>
     </div>
   </div>
 </section>
@@ -147,6 +186,17 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </div>
 </section>
 
+<!-- CTA INTERMEDIA -->
+<section class="cta-strip">
+  <div class="wrap cta-strip__inner">
+    <p class="cta-strip__txt"><b><span data-lang-es>¿Encaja con tu empresa?</span><span data-lang-en>Sounds like your company?</span></b> <span data-lang-es>Cuéntanos tu caso y te llamamos en menos de 24 h.</span><span data-lang-en>Tell us about your case and we'll call you within 24 h.</span></p>
+    <div class="cta-strip__actions">
+      <a class="btn btn--primary" href="#cuentanos"><span data-lang-es>Habla con un experto</span><span data-lang-en>Talk to an expert</span><svg class="arrow" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <a class="cta-strip__tel" href="tel:+34637420068"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>637 420 068</a>
+    </div>
+  </div>
+</section>
+
 <!-- CONTENIDO -->
 <section class="section" id="detalle">
   <div class="wrap">
@@ -188,7 +238,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
       </ul>
     </div>
     <div class="form-card" data-reveal data-delay="1">
-      <form id="contact-form" novalidate>
+      <form id="contact-form" data-lead-form data-ubicacion="final" novalidate>
         <div class="form-fields">
           <div class="hp-field" aria-hidden="true">
             <input type="text" name="company_url" id="company_url" tabindex="-1" autocomplete="off" />
@@ -307,6 +357,13 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </div>
 </section>
 </main>
+
+<!-- Barra inferior en móvil: se oculta mientras el formulario del hero está en pantalla (initCallbar en assets/app.js) -->
+<nav class="callbar is-hidden" aria-label="Contacto rápido" data-callbar>
+  <a class="callbar__tel" href="tel:+34637420068"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span data-lang-es>Llamar</span><span data-lang-en>Call</span></a>
+  <a class="callbar__wa" href="https://wa.me/34637420068?text=Hola%2C%20me%20interesa%20la%20asesor%C3%ADa%20laboral%20de%20GUIMAES." target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.5 14.4c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.87 1.22 3.07.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.23 1.36.2 1.87.12.57-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.07-.13-.27-.2-.57-.35Z"/><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.86 9.86 0 0 0 4.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.18-1.14l-.3-.18-3.11.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.39c0-4.54 3.7-8.24 8.24-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.23 8.23Z"/></svg>WhatsApp</a>
+  <a class="callbar__form" href="#cuentanos"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><path d="m4 7 8 6 8-6" stroke="currentColor" stroke-width="2"/></svg><span data-lang-es>Pedir información</span><span data-lang-en>Get info</span></a>
+</nav>
 
 <footer class="site-footer">
   <div class="wrap">

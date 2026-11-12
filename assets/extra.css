@@ -397,10 +397,17 @@
 }
 .nav__tel svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
 .nav__tel:hover { color: var(--accent); background: var(--accent-soft); }
+.site-header--overlay:not(.scrolled) .nav__tel { color: #fff; }
+.site-header--overlay:not(.scrolled) .nav__tel svg { color: #fff; }
+.site-header--overlay:not(.scrolled) .nav__tel:hover { background: rgba(255,255,255,.14); }
 @media (max-width: 759px), (min-width: 1000px) and (max-width: 1179px) {
   .nav__tel { width: 40px; padding: 0; border: 1px solid var(--line); background: var(--mist); }
   .nav__tel span { display: none; }
 }
+@media (max-width: 759px), (min-width: 1000px) and (max-width: 1179px) {
+  .site-header--overlay:not(.scrolled) .nav__tel { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.26); }
+}
+.form-card[id] { scroll-margin-top: 92px; }
 
 /* --- Hero con formulario --- */
 .svc-hero--lead .svc-hero__bg { background: var(--ink); } /* mientras carga la foto */
