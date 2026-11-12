@@ -711,6 +711,54 @@ export async function limpiarBorradores(deps: Deps, db: Db): Promise<number> {
   return n;
 }
 
+// ---------------------------------------------------------------- diagnóstico (solo lectura)
+// Carpetas del buzón (nombre, carpeta madre, totalItemCount) y recuento por
+// carpeta y año-mes de los mensajes con info@ en Para o CC ($search). No
+// guarda nada ni escribe en logs; no devuelve ids, asuntos, remitentes ni cuerpos.
+export const DIAG_BUSQUEDA = `"to:${"info@guimaes.es"} OR cc:${"info@guimaes.es"}"`;
+const SEL_CARPETA = "$select=id,displayName,parentFolderId,totalItemCount,childFolderCount&$top=100&includeHiddenFolders=true";
+export async function diagnostico(deps: Deps) {
+  const b = buzon(deps);
+  const limite = (deps.now?.() ?? new Date()).getTime() + PRESUPUESTO_MS;
+  const fuera = () => (deps.now?.() ?? new Date()).getTime() > limite;
+  const carpetas: { id: string; nombre: string; padre: string; total: number }[] = [];
+  const cola = [`${b}/mailFolders?${SEL_CARPETA}`];
+  let cortado = false;
+  while (cola.length && carpetas.length < 1000) {
+    if (fuera()) { cortado = true; break; }
+    let pag = await graph(deps, cola.shift()!);
+    for (let i = 0; i < 50; i++) {
+      for (const f of pag.value ?? []) {
+        carpetas.push({ id: String(f.id), nombre: String(f.displayName ?? ""), padre: String(f.parentFolderId ?? ""), total: Number(f.totalItemCount) || 0 });
+        if (Number(f.childFolderCount) > 0) cola.push(`${b}/mailFolders/${encodeURIComponent(f.id)}/childFolders?${SEL_CARPETA}`);
+      }
+      if (!pag["@odata.nextLink"]) break;
+      pag = await graph(deps, pag["@odata.nextLink"]);
+    }
+  }
+  const nombre = new Map(carpetas.map((c) => [c.id, c.nombre]));
+  const cuenta = new Map<string, number>();
+  let total = 0, paginas = 0;
+  let url = `${b}/messages?$search=${encodeURIComponent(DIAG_BUSQUEDA)}&$select=id,parentFolderId,receivedDateTime&$top=250`;
+  while (url) {
+    if (fuera()) { cortado = true; break; }
+    const pag = await graph(deps, url);
+    paginas++;
+    for (const m of pag.value ?? []) {
+      const k = `${nombre.get(String(m.parentFolderId)) ?? "(carpeta desconocida)"}\u0000${String(m.receivedDateTime ?? "").slice(0, 7) || "(sin fecha)"}`;
+      cuenta.set(k, (cuenta.get(k) ?? 0) + 1);
+      total++;
+    }
+    url = String(pag["@odata.nextLink"] ?? "");
+  }
+  return {
+    carpetas: carpetas.map((c) => ({ nombre: c.nombre, madre: nombre.get(c.padre) ?? "(raíz)", total: c.total })),
+    busqueda: { total, paginas, cortado },
+    recuentos: [...cuenta].map(([k, n]) => { const [carpeta, mes] = k.split("\u0000"); return { carpeta, mes, n }; })
+      .sort((a, b) => a.carpeta.localeCompare(b.carpeta) || a.mes.localeCompare(b.mes)),
+  };
+}
+
 export async function marcarLeido(deps: Deps, db: Db, body: any) {
   const m = await mensajeDe(db, body?.mensaje_id);
   const leido = body?.leido !== false;
@@ -773,6 +821,7 @@ function cors(req: Request): Record<string, string> {
 type Quien = "cron" | "usuario";
 const PERMITIDO: Record<string, Quien[]> = {
   comprobar: ["cron", "usuario"],
+  diagnostico: ["cron", "usuario"],
   sincronizar: ["cron", "usuario"],
   enviar: ["usuario"],
   responder: ["usuario"],
@@ -833,6 +882,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       if (!PERMITIDO[accion].includes(quien)) return json({ error: "No autorizado." }, 403);
 
       if (accion === "comprobar") return json(await comprobar(deps));
+      if (accion === "diagnostico") return json(await diagnostico(deps));
       const db = deps.db();
       if (accion === "sincronizar") return json(await sincronizar(deps, db));
       if (accion === "enviar") return json(await enviar(deps, db, body, adminId));

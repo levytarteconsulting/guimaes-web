@@ -862,3 +862,34 @@ test("nombreFichero: sin rutas ni caracteres de control", () => {
   assert.equal(nombreFichero(""), "adjunto");
   assert.equal(nombreFichero("x".repeat(300)).length, 200);
 });
+
+test("diagnostico: carpetas con su madre y recuento por carpeta y mes; sin ids, asuntos ni remitentes", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const sel = "$select=id,displayName,parentFolderId,totalItemCount,childFolderCount&$top=100&includeHiddenFolders=true";
+  g.paginas[`${U}/mailFolders?${sel}`] = { value: [
+    { id: "f-in", displayName: "Bandeja de entrada", parentFolderId: "raiz", totalItemCount: 40, childFolderCount: 1 },
+    { id: "f-arch", displayName: "Archivo", parentFolderId: "raiz", totalItemCount: 7, childFolderCount: 0 },
+  ], "@odata.nextLink": `${U}/mailFolders?pag2` };
+  g.paginas[`${U}/mailFolders?pag2`] = { value: [{ id: "f-env", displayName: "Elementos enviados", parentFolderId: "raiz", totalItemCount: 3, childFolderCount: 0 }] };
+  g.paginas[`${U}/mailFolders/f-in/childFolders?${sel}`] = { value: [{ id: "f-sub", displayName: "Clientes", parentFolderId: "f-in", totalItemCount: 5, childFolderCount: 0 }] };
+  const busq = `${U}/messages?$search=${encodeURIComponent('"to:info@guimaes.es OR cc:info@guimaes.es"')}&$select=id,parentFolderId,receivedDateTime&$top=250`;
+  g.paginas[busq] = { value: [
+    { id: "m1", parentFolderId: "f-in", receivedDateTime: "2026-10-03T10:00:00Z", subject: SECRETO_ASUNTO },
+    { id: "m2", parentFolderId: "f-sub", receivedDateTime: "2025-01-03T10:00:00Z" },
+  ], "@odata.nextLink": `${U}/messages?skip=2` };
+  g.paginas[`${U}/messages?skip=2`] = { value: [{ id: "m3", parentFolderId: "f-in", receivedDateTime: "2026-10-20T10:00:00Z" }] };
+  const r = await jsonDe(d, { accion: "diagnostico" }, { "x-hook-secret": CRON });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, {
+    carpetas: [
+      { nombre: "Bandeja de entrada", madre: "(raíz)", total: 40 }, { nombre: "Archivo", madre: "(raíz)", total: 7 },
+      { nombre: "Elementos enviados", madre: "(raíz)", total: 3 }, { nombre: "Clientes", madre: "Bandeja de entrada", total: 5 },
+    ],
+    busqueda: { total: 3, paginas: 2, cortado: false },
+    recuentos: [{ carpeta: "Bandeja de entrada", mes: "2026-10", n: 2 }, { carpeta: "Clientes", mes: "2025-01", n: 1 }],
+  });
+  assert.ok(!JSON.stringify(r.body).includes(SECRETO_ASUNTO));
+  assert.ok(!/m1|f-in/.test(JSON.stringify(r.body)), "sin ids");
+  assert.equal(db.mensajes.size, 0); assert.equal(logs.length, 0);
+  assert.ok(g.llamadas.every((c) => c.method === "GET"));
+});
