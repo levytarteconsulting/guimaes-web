@@ -1,6 +1,6 @@
 import React from "react";
 import {
-  agruparConversaciones, ALIAS, asuntoDe, cidsDe, completarToken, contraparte, destinatariosRespuesta, destinatariosTexto,
+  agruparConversaciones, ALIAS, asuntoDe, conversacionesDistintas, cidsDe, completarToken, contraparte, destinatariosRespuesta, destinatariosTexto,
   documentoVisor, emailsInvalidos, filtrarConversaciones, firmaPorDefecto, fmtFechaCorreo, fmtFechaLarga, fmtTamano,
   listaEmails, MAX_DIRECTO, MAX_TOTAL, mensajeParaResponder, sugerirContactos, textoPlano, tieneExternas, tokenActual,
   totalBytes, trozos, urlEnlace,
@@ -48,11 +48,12 @@ export const CORREO = {
     if (error) throw error;
     return count ?? 0;
   },
+  // Conversaciones (no mensajes) con algún recibido sin leer.
   async noLeidos() {
-    const { count, error } = await Auth.client.from("correo_mensajes").select("id", { count: "exact", head: true })
-      .eq("carpeta", "inbox").eq("leido", false).eq("fuera_bandeja", false);
+    const { data, error } = await Auth.client.from("correo_mensajes").select("id, conversation_id")
+      .eq("carpeta", "inbox").eq("leido", false).eq("fuera_bandeja", false).limit(5000);
     if (error) throw error;
-    return count ?? 0;
+    return conversacionesDistintas(data);
   },
   async estado() {
     const { data, error } = await Auth.client.from("correo_sync").select("carpeta, ultimo_ok, ultimo_error");
@@ -689,6 +690,11 @@ export function Inbox({ nav, toast, NewContact }) {
   const [estado, setEstado] = cState([]);
   const [ocupado, setOcupado] = cState(null);
   const [q, setQ] = cState("");
+  const [soloNoLeidos, setSoloNoLeidos] = cState(true);
+  // Abiertas en esta vista: siguen en la lista aunque ya estén leídas, hasta cambiar de vista o recargar.
+  const [retenidas, setRetenidas] = cState(() => new Set());
+  const cambiarVista = (f, solo) => { setFiltro(f); setSoloNoLeidos(solo); setActiva(null); setRetenidas(new Set()); };
+  const abrir = (id) => { setActiva(id); setRetenidas((r) => (r.has(id) ? r : new Set(r).add(id))); };
 
   const cargar = cCallback(async () => {
     try {
@@ -700,7 +706,7 @@ export function Inbox({ nav, toast, NewContact }) {
 
   const convs = msgs ? agruparConversaciones(msgs) : [];
   const qn = q.trim().toLowerCase();
-  const lista = filtrarConversaciones(convs, filtro).filter((c) => !qn || c.mensajes.some((m) =>
+  const lista = filtrarConversaciones(convs, filtro, { soloNoLeidos, retenidas }).filter((c) => !qn || c.mensajes.some((m) =>
     [m.asunto, m.remitente_email, m.remitente_nombre, nombreContacto(m.contact_id)].some((x) => String(x || "").toLowerCase().includes(qn))));
   const cuenta = (f) => filtrarConversaciones(convs, f).filter((c) => c.noLeidos).length;
 
@@ -733,7 +739,7 @@ export function Inbox({ nav, toast, NewContact }) {
         <button className="btn btn--primary inbox__compose" onClick={() => setRedactar(true)}><Icon name="mail" size={16} />Redactar</button>
         {FILTROS.map((f) => {
           const n = f.id === "sentitems" ? 0 : cuenta(f.id);
-          return <div key={f.id} className={"folder-item" + (filtro === f.id ? " active" : "")} onClick={() => { setFiltro(f.id); setActiva(null); }}>
+          return <div key={f.id} className={"folder-item" + (filtro === f.id ? " active" : "")} onClick={() => cambiarVista(f.id, f.id === "inbox" ? true : soloNoLeidos)}>
             <Icon name={f.icon} size={15} />{f.label}{n > 0 && <span className="folder-item__count">{n}</span>}
           </div>;
         })}
@@ -749,17 +755,21 @@ export function Inbox({ nav, toast, NewContact }) {
       <div className="inbox__list">
         <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--line)" }}>
           <input className="inp" placeholder="Buscar por asunto, remitente o contacto" value={q} onChange={(e) => setQ(e.target.value)} />
+          {filtro === "inbox" && <div className="correo-conmutador" role="group" aria-label="Qué conversaciones ver">
+            <button className={soloNoLeidos ? "on" : ""} aria-pressed={soloNoLeidos} onClick={() => !soloNoLeidos && cambiarVista("inbox", true)}>No leídos</button>
+            <button className={!soloNoLeidos ? "on" : ""} aria-pressed={!soloNoLeidos} onClick={() => soloNoLeidos && cambiarVista("inbox", false)}>Todos</button>
+          </div>}
         </div>
         {err && <div className="muted" style={{ padding: 16, fontSize: 13 }}>No se pudo cargar: {err}</div>}
         {!msgs && !err && <div className="muted" style={{ padding: 16, fontSize: 13 }}>Cargando…</div>}
-        {lista.map((c) => <FilaConversacion key={c.id} c={c} activa={activa === c.id} onClick={() => setActiva(c.id)} />)}
-        {msgs && lista.length === 0 && <div className="muted" style={{ padding: "24px 16px", fontSize: 13, textAlign: "center" }}>Sin correos aquí.</div>}
+        {lista.map((c) => <FilaConversacion key={c.id} c={c} activa={activa === c.id} onClick={() => abrir(c.id)} />)}
+        {msgs && lista.length === 0 && <div className="muted" style={{ padding: "24px 16px", fontSize: 13, textAlign: "center" }}>{filtro === "inbox" && soloNoLeidos && !qn ? "No hay correos sin leer." : "Sin correos aquí."}</div>}
       </div>
       <div className="inbox__thread">
         {activa ? <Conversacion key={activa} convId={activa} incluirFuera={false} nav={nav} toast={toast} onCambio={cargar} NewContact={NewContact} />
           : <div className="muted" style={{ margin: "auto", fontSize: 13 }}>Selecciona un correo</div>}
       </div>
-      {redactar && <Redactor tipo="nuevo" onClose={() => setRedactar(false)} toast={toast} onEnviado={() => { setFiltro("sentitems"); cargar(); }} />}
+      {redactar && <Redactor tipo="nuevo" onClose={() => setRedactar(false)} toast={toast} onEnviado={() => { cambiarVista("sentitems", soloNoLeidos); cargar(); }} />}
     </div>
   );
 }

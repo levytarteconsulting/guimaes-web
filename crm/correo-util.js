@@ -39,10 +39,18 @@ export function agruparConversaciones(mensajes) {
 }
 
 // Filtro de la bandeja: "inbox" | "sentitems" | "sin_vincular".
-export function filtrarConversaciones(convs, filtro) {
+// En "inbox", soloNoLeidos deja las que tienen algún recibido sin leer y las
+// de "retenidas" (abiertas en esta vista: no desaparecen mientras se leen).
+export function filtrarConversaciones(convs, filtro, { soloNoLeidos = false, retenidas = null } = {}) {
   if (filtro === "sentitems") return convs.filter((c) => c.enEnviados);
   if (filtro === "sin_vincular") return convs.filter((c) => c.enInbox && !c.contact_id);
-  return convs.filter((c) => c.enInbox);
+  const recibidas = convs.filter((c) => c.enInbox);
+  return soloNoLeidos ? recibidas.filter((c) => c.noLeidos > 0 || (retenidas && retenidas.has(c.id))) : recibidas;
+}
+
+// Conversaciones distintas entre filas de recibidos sin leer (contador del menú).
+export function conversacionesDistintas(filas) {
+  return new Set((filas ?? []).map((m) => m.conversation_id || "m:" + m.id)).size;
 }
 
 // Con quién es la conversación: el remitente si es recibido; si es enviado,

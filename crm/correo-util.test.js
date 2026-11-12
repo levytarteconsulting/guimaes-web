@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  agruparConversaciones, asuntoDe, cidsDe, completarToken, contraparte, destinatariosRespuesta, destinatariosTexto,
+  agruparConversaciones, asuntoDe, conversacionesDistintas, cidsDe, completarToken, contraparte, destinatariosRespuesta, destinatariosTexto,
   documentoVisor, emailsInvalidos, filtrarConversaciones, firmaPorDefecto, fmtTamano, listaEmails, MAX_DIRECTO,
   mensajeParaResponder, sugerirContactos, textoPlano, tieneExternas, tokenActual, totalBytes, trozos, urlEnlace,
 } from "./correo-util.js";
@@ -113,4 +113,16 @@ test("firma por defecto, trozos, total, enlaces y texto", () => {
   assert.equal(urlEnlace(""), null);
   assert.equal(textoPlano("<p>&nbsp;</p><p><br></p>"), "");
   assert.equal(textoPlano("<p>Hola <b>ya</b></p>"), "Hola ya");
+});
+
+test("recibidos: solo no leídos por defecto, retenidas las abiertas y contador por conversación", () => {
+  const cs = agruparConversaciones([
+    m("a", { leido: false }), m("b", { leido: true, conversation_id: "c2" }), m("c", { leido: true, conversation_id: "c3" }),
+    m("d", { carpeta: "sentitems", conversation_id: "c4" }),
+  ]);
+  assert.deepEqual(filtrarConversaciones(cs, "inbox").map((c) => c.id).sort(), ["c1", "c2", "c3"]);
+  assert.deepEqual(filtrarConversaciones(cs, "inbox", { soloNoLeidos: true }).map((c) => c.id), ["c1"]);
+  assert.deepEqual(filtrarConversaciones(cs, "inbox", { soloNoLeidos: true, retenidas: new Set(["c2"]) }).map((c) => c.id).sort(), ["c1", "c2"]);
+  assert.deepEqual(filtrarConversaciones(cs, "sentitems", { soloNoLeidos: true }).map((c) => c.id), ["c4"]);
+  assert.equal(conversacionesDistintas([{ id: "1", conversation_id: "x" }, { id: "2", conversation_id: "x" }, { id: "3" }]), 2);
 });
