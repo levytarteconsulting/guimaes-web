@@ -127,6 +127,10 @@
       var svcEl = form.querySelector("#servicio");
       var svcLabel = svcEl && svcEl.selectedIndex >= 0 ? svcEl.options[svcEl.selectedIndex].text.trim() : "";
       if (svcEl && !svcEl.value) svcLabel = ""; // opción vacía = sin servicio elegido
+      // Páginas de servicio: no hay <select>, el servicio va en un campo oculto
+      // con el nombre exacto del catálogo del CRM (crm/data.js, SERVICES).
+      var svcHidden = form.querySelector('input[type="hidden"][name="servicio"]');
+      if (!svcEl && svcHidden) svcLabel = svcHidden.value.trim();
 
       var payload = {
         nombre: val("nombre"),
