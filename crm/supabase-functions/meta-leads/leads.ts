@@ -152,6 +152,25 @@ function humanize(key: string): string {
 
 export type Respuesta = { campo: string; pregunta: string; respuesta: string };
 
+// Teléfono en formato internacional. Quita espacios y símbolos; 00 → +; 9 cifras
+// españolas (6, 7, 8 o 9 delante) o 34 + 9 cifras → +34…. null si no lo parece.
+// (La misma regla está en crm/supabase-meta-leads-telefono.sql para el relleno.)
+export function normPhone(v: string | null | undefined): string | null {
+  let d = String(v ?? "").replace(/[\s\-.()\/]/g, "");
+  if (d.startsWith("00")) d = "+" + d.slice(2);
+  if (/^\+\d{8,15}$/.test(d)) return d;
+  if (/^[6789]\d{8}$/.test(d)) return "+34" + d;
+  if (/^34[6789]\d{8}$/.test(d)) return "+" + d;
+  return null;
+}
+const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+// Preguntas personalizadas que son teléfono, email o nombre completo (por el
+// nombre del campo o su etiqueta, normalizados).
+const ES_TELEFONO = /(telefono|phone|movil|celular)/;
+const ES_EMAIL = /(e_?mail|correo)/;
+const ES_NOMBRE = /(full_?name|nombre_completo|nombre_y_apellidos?|tu_nombre|su_nombre)/;
+const NO_NOMBRE = /(empresa|company|negocio|compania)/;
+
 export type LeadRow = {
   nombre: string | null; empresa: string | null; email: string | null; telefono: string | null;
   servicio: string | null; mensaje: string | null; lang: string; source: string; status: string;
@@ -162,11 +181,20 @@ export type LeadRow = {
 export function mapLead(lead: any, ctx: { formName?: string | null; pageId?: string | null; adgroupId?: string | null }): LeadRow {
   const fields: any[] = Array.isArray(lead?.field_data) ? lead.field_data : [];
   const byKey = new Map<string, string>();
+  const etiqueta = new Map<string, string>(); // clave → nombre y etiqueta normalizados
   for (const f of fields) {
     const k = normKey(String(f?.name ?? ""));
     const v = valueOf(f);
-    if (k && v && !byKey.has(k)) byKey.set(k, v);
+    if (k && v && !byKey.has(k)) { byKey.set(k, v); etiqueta.set(k, k + " " + normKey(String(f?.label ?? ""))); }
   }
+  // Primer campo (en el orden del formulario) cuyo nombre o etiqueta encaje y cuyo valor sea válido.
+  const buscar = (re: RegExp, ok: (v: string) => boolean, excluir?: RegExp) => {
+    for (const [k, v] of byKey) {
+      const t = etiqueta.get(k) ?? k;
+      if (re.test(t) && !(excluir && excluir.test(t)) && ok(v)) return { key: k, value: v };
+    }
+    return null;
+  };
   const take = (...keys: string[]) => {
     for (const k of keys) if (byKey.get(k)) return { key: k, value: byKey.get(k)! };
     return null;
@@ -175,16 +203,22 @@ export function mapLead(lead: any, ctx: { formName?: string | null; pageId?: str
   const used = new Set<string>();
   const use = (r: { key: string; value: string } | null) => { if (r) used.add(r.key); return r?.value ?? null; };
 
-  let nombre = use(take("full_name", "nombre_completo", "nombre_y_apellidos"));
+  let nombre = use(take("full_name", "nombre_completo", "nombre_y_apellidos") ?? buscar(ES_NOMBRE, () => true, NO_NOMBRE));
   if (!nombre) {
     const first = take("first_name", "nombre");
     const last = take("last_name", "apellidos", "apellido");
     const parts = [use(first), use(last)].filter(Boolean);
     nombre = parts.length ? parts.join(" ") : null;
   }
-  const emailRaw = use(take("email", "correo_electronico", "work_email"));
-  const email = emailRaw ? emailRaw.replace(/\s+/g, "").toLowerCase() : null;
-  const telefono = use(take("phone_number", "telefono", "phone", "work_phone_number", "movil"));
+  const limpiaEmail = (v: string) => v.replace(/\s+/g, "").toLowerCase();
+  const emailStd = take("email", "correo_electronico", "work_email");
+  const emailRaw = use(emailStd ?? buscar(ES_EMAIL, (v) => EMAIL_RE.test(limpiaEmail(v))));
+  const email = emailRaw ? limpiaEmail(emailRaw) : null;
+  // Teléfono: el primero válido entre los estándar y las preguntas personalizadas;
+  // si ninguno lo es, el estándar tal cual (como hasta ahora).
+  const telStd = take("phone_number", "telefono", "phone", "work_phone_number", "movil");
+  const telOk = telStd && normPhone(telStd.value) ? telStd : buscar(ES_TELEFONO, (v) => !!normPhone(v));
+  const telefono = telOk ? normPhone(use(telOk)) : use(telStd);
   const empresa = use(take("company_name", "empresa", "nombre_de_la_empresa", "company"));
 
   // Pregunta personalizada que parezca el servicio o un mensaje libre.

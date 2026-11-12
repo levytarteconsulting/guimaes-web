@@ -3,7 +3,7 @@
 // (sin red ni permisos).
 import assert from "node:assert/strict";
 import {
-  Contacto, createHandler, Db, extractLeadgenEvents, LeadRow, mapLead, SOURCE,
+  Contacto, createHandler, Db, extractLeadgenEvents, LeadRow, mapLead, normPhone, SOURCE,
 } from "./leads.ts";
 
 const APP_SECRET = "secreto-de-prueba";
@@ -375,4 +375,63 @@ Deno.test("import: dry_run por defecto no escribe; real recorre páginas, sin av
   assert.equal(again.existentes, 3);
   assert.equal(s.leads.length, 3);
   assert.equal(s.pushes.length, 1, "sin nada nuevo no hay push");
+});
+
+// ---- Teléfono, email y nombre como preguntas personalizadas ----
+// Caso real: formulario «Captación de clientes» (Facebook) con el teléfono como
+// pregunta personalizada «Número de teléfono» y sin phone_number.
+const LEAD_CUSTOM: Lead = {
+  id: "L9", created_time: "2026-11-11T18:02:00+0000", form_id: FORM, platform: "fb", is_organic: false,
+  field_data: [
+    { name: "full_name", values: ["Luis Gómez"] },
+    { name: "email", values: ["luis@example.com"] },
+    { name: "número_de_teléfono", values: ["612 34 56 78"] },
+    { name: "cuéntanos_en_que_podemos_ayudarte", values: ["Necesito un asesor"] },
+  ],
+};
+
+Deno.test("pregunta personalizada «Número de teléfono»: rellena telefono (+34) y se vincula por teléfono", async () => {
+  const { handler, leads, notas } = setup({ L9: LEAD_CUSTOM }, [{ id: "c-luis", full_name: "Luis", email: "otro@example.com", phone: "612345678" }]);
+  const body = webhookBody("L9");
+  const res = await post(handler, body, { "x-hub-signature-256": await sign(body) });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).results, { L9: "vinculado" });
+  assert.equal(leads[0].telefono, "+34612345678");
+  assert.equal(leads[0].contact_id, "c-luis");
+  assert.ok(!leads[0].respuestas.some((r) => r.campo === "número_de_teléfono"), "no se repite en las respuestas");
+  assert.match(notas[0].body, /Teléfono: \+34612345678/);
+});
+
+Deno.test("preguntas personalizadas: primer teléfono válido, email y nombre completo; lo que no lo parece se queda en respuestas", () => {
+  const row = mapLead({
+    id: "L10",
+    field_data: [
+      { name: "¿prefieres_que_te_llamemos_por_teléfono?", values: ["Sí"] },
+      { name: "nombre_de_tu_empresa", values: ["Bar Pepe"] },
+      { name: "Tu nombre", values: ["Pepe Ruiz"] },
+      { name: "q1", label: "Teléfono móvil", values: ["0034 699-111-222"] },
+      { name: "celular", values: ["+52 55 1234 5678"] },
+      { name: "correo_de_contacto", values: [" Pepe@Bar.ES "] },
+    ],
+  }, {});
+  assert.equal(row.telefono, "+34699111222", "por la etiqueta, el primero válido");
+  assert.equal(row.email, "pepe@bar.es");
+  assert.equal(row.nombre, "Pepe Ruiz", "no toma el nombre de la empresa");
+  assert.deepEqual(row.respuestas.map((r) => r.campo), ["¿prefieres_que_te_llamemos_por_teléfono?", "nombre_de_tu_empresa", "celular"]);
+  // phone_number estándar válido manda; si no vale, se busca en las personalizadas.
+  assert.equal(mapLead({ id: "x", field_data: [{ name: "phone_number", values: ["600112233"] }, { name: "movil", values: ["611000000"] }] }, {}).telefono, "+34600112233");
+  assert.equal(mapLead({ id: "x", field_data: [{ name: "phone_number", values: ["n/a"] }, { name: "Móvil", values: ["611000000"] }] }, {}).telefono, "+34611000000");
+  assert.equal(mapLead({ id: "x", field_data: [{ name: "phone_number", values: ["123"] }] }, {}).telefono, "123", "sin ninguno válido, el estándar tal cual");
+  assert.equal(mapLead({ id: "x", field_data: [{ name: "email_alternativo", values: ["no tengo"] }] }, {}).email, null);
+});
+
+Deno.test("normPhone: formato internacional", () => {
+  assert.equal(normPhone("612 345 678"), "+34612345678");
+  assert.equal(normPhone("(91) 123.45.67"), "+34911234567");
+  assert.equal(normPhone("34612345678"), "+34612345678");
+  assert.equal(normPhone("0034612345678"), "+34612345678");
+  assert.equal(normPhone("+44 20 7946 0958"), "+442079460958");
+  assert.equal(normPhone("512345678"), null, "9 cifras que no son españolas");
+  assert.equal(normPhone("Sí"), null);
+  assert.equal(normPhone(""), null);
 });
