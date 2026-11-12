@@ -110,9 +110,19 @@
     return _sbClient;
   }
 
+  // Una página puede tener varios formularios de lead (p. ej. el del hero y el
+  // del final en las páginas de servicio): todos comparten este envío. Cada
+  // uno dice dónde está con data-ubicacion (hero | final | contacto), que va
+  // a la capa de datos junto con el servicio.
   function initForm() {
-    var form = document.querySelector("#contact-form");
-    if (!form) return;
+    var forms = [];
+    document.querySelectorAll("#contact-form, form[data-lead-form]").forEach(function (f) {
+      if (forms.indexOf(f) < 0) forms.push(f);
+    });
+    forms.forEach(bindLeadForm);
+  }
+
+  function bindLeadForm(form) {
     var isEN = function () { return document.documentElement.lang === "en"; };
 
     form.addEventListener("submit", function (e) {
@@ -123,8 +133,11 @@
       var oldErr = form.querySelector(".form-err");
       if (oldErr) oldErr.parentNode.removeChild(oldErr);
 
-      var val = function (id) { var el = form.querySelector("#" + id); return el ? el.value.trim() : ""; };
-      var svcEl = form.querySelector("#servicio");
+      // Campos por name, no por id: con dos formularios en la página los ids
+      // del segundo llevan prefijo (h-nombre…) para no repetirse.
+      var field = function (name) { return form.querySelector('[name="' + name + '"]'); };
+      var val = function (name) { var el = field(name); return el ? el.value.trim() : ""; };
+      var svcEl = form.querySelector('select[name="servicio"]');
       var svcLabel = svcEl && svcEl.selectedIndex >= 0 ? svcEl.options[svcEl.selectedIndex].text.trim() : "";
       if (svcEl && !svcEl.value) svcLabel = ""; // opción vacía = sin servicio elegido
       // Páginas de servicio: no hay <select>, el servicio va en un campo oculto
@@ -165,7 +178,17 @@
       // RGPD: sin la casilla de consentimiento marcada, no se envía nada a Supabase.
       // El atributo required no basta porque el <form> lleva novalidate — esta
       // comprobación es la única barrera real antes del insert.
-      var consentEl = form.querySelector("#consent");
+      // Sin forma de responder no sirve de nada el lead (igual que en la landing).
+      if (!payload.nombre || (!payload.email && !payload.telefono)) {
+        showFieldError(isEN()
+          ? "Please give us your name and an email or phone number so we can reply."
+          : "Indícanos tu nombre y un email o teléfono para poder responderte.");
+        var first = field(payload.nombre ? (field("telefono") ? "telefono" : "email") : "nombre");
+        if (first) first.focus();
+        return;
+      }
+
+      var consentEl = field("consent");
       if (consentEl && !consentEl.checked) {
         showFieldError(isEN()
           ? "Please accept the Privacy Policy before sending."
@@ -202,13 +225,33 @@
           if (res && res.error) throw res.error;
           showSuccess();
           window.dataLayer = window.dataLayer || [];
-          window.dataLayer.push({ event: 'form_submit_success' });
+          window.dataLayer.push({
+            event: 'form_submit_success',
+            form_ubicacion: form.getAttribute("data-ubicacion") || "final",
+            servicio: payload.servicio
+          });
         })
         .catch(function (err) {
           if (window.console) console.error("Lead insert error:", err);
           showError();
         });
     });
+  }
+
+  /* ---------- Barra inferior de contacto (móvil, páginas de servicio) ----------
+     Empieza oculta (clase is-hidden en el HTML) y se muestra cuando el
+     formulario del hero (#cuentanos) no está en pantalla, para no duplicarlo.
+     Sin IntersectionObserver o sin formulario, se muestra siempre. */
+  function initCallbar() {
+    var bar = document.querySelector("[data-callbar]");
+    if (!bar) return;
+    var target = document.querySelector("#cuentanos");
+    if (!target || !("IntersectionObserver" in window)) { bar.classList.remove("is-hidden"); return; }
+    try {
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) { bar.classList.toggle("is-hidden", en.isIntersecting); });
+      }).observe(target);
+    } catch (e) { bar.classList.remove("is-hidden"); }
   }
 
   /* ---------- Botones flotantes: WhatsApp + teléfono ---------- */
@@ -329,6 +372,7 @@
     initHeader();
     initReveal();
     initForm();
+    initCallbar();
     initYear();
     initFloats();
     initCookieBanner();
