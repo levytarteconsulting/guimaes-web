@@ -141,14 +141,14 @@ function fakeGraph(): Graph {
       (g.adjuntos[s.draft] ??= []).push({ id: "att" + (++n), name: s.name, size: s.size, isInline: false });
       return new Response(null, { status: 201 });
     }
-    assert.ok(url.startsWith(U + "/"), "siempre /users/{id del buzón}: " + url);
+    assert.ok(url.startsWith(U + "/") || url.startsWith(`${GRAPH}/users('${BUZON}')/`), "siempre /users/{id del buzón}: " + url);
     const headers = (init?.headers ?? {}) as Record<string, string>;
     assert.match(headers["Authorization"], /^Bearer tok\d+$/);
     assert.ok(headers["Prefer"]?.startsWith('IdType="ImmutableId"'), "ids inmutables en todas las llamadas: " + url);
     const c: Llamada = { method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers };
     g.llamadas.push(c);
     const f = g.falla?.(c); if (f) return f;
-    const ruta = url.slice(U.length);
+    const ruta = url.startsWith(U + "/") ? url.slice(U.length) : url.slice(`${GRAPH}/users('${BUZON}')`.length);
     if (method === "GET" && ruta === "/messages?$top=1&$select=id") return resp(200, { value: [{ id: "x" }] });
     if (method === "GET" && g.paginas[url]) return resp(200, g.paginas[url]);
     const adj = ruta.match(/^\/messages\/([^/]+)\/attachments\?\$select=/);
@@ -954,7 +954,7 @@ function historico(g: Graph, db: FakeDb) {
   const desde = "2026-08-14T12:00:00Z";
   db.sync.inbox.importacion_desde = desde;
   const p1 = `${U}/mailFolders/inbox/messages?$select=id,receivedDateTime,isDraft&$filter=${encodeURIComponent("receivedDateTime ge " + desde)}&$top=25`;
-  const p2 = `${U}/mailFolders/inbox/messages?$skiptoken=2`;
+  const p2 = `${GRAPH}/users('${BUZON}')/mailFolders('AAMk')/messages?$skiptoken=2`; // como lo devuelve Graph
   g.paginas[p1] = { value: [
     { id: "h-ya", receivedDateTime: "2026-11-12T10:00:00Z" },
     { id: "h-info-oct", receivedDateTime: "2026-10-02T10:00:00Z" },

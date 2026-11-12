@@ -803,11 +803,16 @@ export async function importarHistorico(deps: Deps, db: Db, body: any) {
   const limite = ahora().getTime() + PRESUPUESTO_MS - MARGEN_HISTORICO_MS;
   const b = buzon(deps);
   const simular = body?.simular !== false;
-  const base = `${GRAPH}${b}/mailFolders/inbox/messages`; // los nextLink de Graph son absolutos
+  const base = `${b}/mailFolders/inbox/messages`;
+  // Los nextLink de Graph no repiten la ruta tal cual (p. ej. users('…')):
+  // basta con que sean de Graph, de este buzón y de mensajes.
+  const buzonId = String(deps.env("MS_GRAPH_MAILBOX") ?? "").toLowerCase();
+  const enlaceValido = (u: string) => u.startsWith(GRAPH + "/") && !!buzonId
+    && decodeURIComponent(u).toLowerCase().includes(buzonId) && /\/messages\?/i.test(u);
   let url: string;
   if (body?.cursor) {
     url = String(body.cursor);
-    if (!url.startsWith(base + "?")) throw new Peticion(400, "Cursor no válido");
+    if (!enlaceValido(url)) throw new Peticion(400, "Cursor no válido");
   } else {
     const est = await db.estado("inbox");
     const desde = est.importacion_desde
@@ -840,7 +845,7 @@ export async function importarHistorico(deps: Deps, db: Db, body: any) {
       r.importados++;
     }
     url = String(pag["@odata.nextLink"] ?? "");
-    if (url && !url.startsWith(base + "?")) throw new Peticion(502, "Enlace de Graph inesperado");
+    if (url && !enlaceValido(url)) throw new Peticion(502, "Enlace de Graph inesperado");
   }
   return r;
 }
