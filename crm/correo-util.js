@@ -129,3 +129,99 @@ export function fmtTamano(b) {
   if (b < 1048576) return Math.round(b / 1024) + " KB";
   return (b / 1048576).toFixed(1).replace(".", ",") + " MB";
 }
+
+// ---------------------------------------------------------------- redactor
+export const MAX_DIRECTO = 3 * 1024 * 1024;  // hasta aquí, un adjunto va en una sola petición
+export const MAX_TOTAL = 25 * 1024 * 1024;   // límite de adjuntos por correo
+const PROPIOS = new Set([ALIAS, "administracion@guimaes.es"]);
+const sinTildes = (s) => norm(s).normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+// Lo que se está escribiendo en un campo de destinatarios: lo que va tras la última coma o punto y coma.
+export function tokenActual(texto) {
+  const s = String(texto ?? "");
+  return s.slice(Math.max(s.lastIndexOf(","), s.lastIndexOf(";")) + 1).trim();
+}
+// Cambia lo que se está escribiendo por el email elegido y deja ", " para el siguiente.
+export function completarToken(texto, email) {
+  const s = String(texto ?? "");
+  const corte = Math.max(s.lastIndexOf(","), s.lastIndexOf(";")) + 1;
+  const antes = s.slice(0, corte).trim();
+  return (antes ? antes + " " : "") + email + ", ";
+}
+// Contactos del CRM (con email) cuyo nombre, empresa o email contienen la consulta,
+// sin los que ya están en el campo. Primero los que empiezan por la consulta.
+export function sugerirContactos(contactos, consulta, yaPuestos = [], max = 8) {
+  const q = sinTildes(consulta);
+  if (q.length < 2) return [];
+  const ya = new Set(yaPuestos.map(norm));
+  const vistos = new Set();
+  const out = [];
+  for (const c of contactos ?? []) {
+    const email = norm(c.email);
+    if (!email || ya.has(email) || vistos.has(email)) continue;
+    const campos = [c.full_name, c.company, c.email].map(sinTildes);
+    const pos = Math.min(...campos.map((x) => { const i = x.indexOf(q); return i < 0 ? Infinity : (i === 0 || x[i - 1] === " " ? 0 : 1); }));
+    if (pos === Infinity) continue;
+    vistos.add(email);
+    out.push({ pos, nombre: c.full_name || c.company || "", email: c.email.trim() });
+  }
+  out.sort((a, b) => a.pos - b.pos || a.nombre.localeCompare(b.nombre, "es"));
+  return out.slice(0, max).map(({ nombre, email }) => ({ nombre, email }));
+}
+
+// Destinatarios por defecto al responder (como Outlook): al remitente; a todos,
+// además el resto de Para en Para y los CC en CC, sin el propio buzón ni repetidos.
+export function destinatariosRespuesta(m, todos) {
+  if (!m) return { para: [], cc: [] };
+  const vistos = new Set(PROPIOS);
+  const tomar = (xs) => {
+    const out = [];
+    for (const e of xs) { const k = norm(e); if (k && !vistos.has(k)) { vistos.add(k); out.push(String(e).trim()); } }
+    return out;
+  };
+  const para = tomar([m.remitente_email, ...(todos ? (m.para ?? []).map((r) => r.email) : [])]);
+  const cc = todos ? tomar((m.cc ?? []).map((r) => r.email)) : [];
+  return { para, cc };
+}
+export function asuntoDe(asunto, tipo) {
+  const a = String(asunto ?? "").trim();
+  if (tipo === "reenvio") return /^(rv|fw|fwd)\s*:/i.test(a) ? a : "RV: " + a;
+  if (tipo === "respuesta" || tipo === "respuesta_todos") return /^re\s*:/i.test(a) ? a : "RE: " + a;
+  return a;
+}
+
+const escHtml = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+export function firmaPorDefecto(nombre) {
+  const n = String(nombre ?? "").trim();
+  return (n ? `<p><b>${escHtml(n)}</b><br>` : "<p>")
+    + `Guimaes · <a href="mailto:${ALIAS}">${ALIAS}</a> · 637 420 068 · <a href="https://guimaes.es">guimaes.es</a></p>`;
+}
+
+// Trozos [desde, largo] de una subida por sesión.
+export function trozos(tamano, trozo) {
+  const out = [];
+  for (let d = 0; d < tamano; d += trozo) out.push([d, Math.min(trozo, tamano - d)]);
+  return out;
+}
+export function totalBytes(...listas) {
+  return listas.flat().reduce((a, x) => a + (Number(x?.tamano) || 0), 0);
+}
+
+// Enlace del editor: http(s) o mailto; un dominio suelto se completa con https://.
+export function urlEnlace(texto) {
+  let s = String(texto ?? "").trim();
+  if (!s) return null;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) s = "mailto:" + s;
+  else if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = "https://" + s;
+  try {
+    const u = new URL(s);
+    if (!["http:", "https:", "mailto:"].includes(u.protocol)) return null;
+    if (u.protocol !== "mailto:" && !/\./.test(u.hostname)) return null;
+    return u.href;
+  } catch { return null; }
+}
+
+// ¿Hay texto escrito (sin contar la firma)? html: el del editor.
+export function textoPlano(html) {
+  return String(html ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
