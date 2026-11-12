@@ -24,6 +24,11 @@
 //   (los dos registran la fila con enviado_por; ver enviarBorrador)
 //   marcar_leido  — {mensaje_id, leido}: PATCH isRead en Outlook y en la tabla
 //   adjunto       — {adjunto_id} o {mensaje_id, cid}: descarga bajo demanda (no se guarda)
+//   borrador_*    — redactor con adjuntos, por pasos (ver "borradores" más abajo):
+//                   crear {tipo, mensaje_id?, empresa_id?} · adjuntar (binario ≤ 3 MB) ·
+//                   sesion {borrador, nombre, tipo, tamano} + trozo (binario) ·
+//                   documento {borrador, documento_id} · enviar {borrador, para, cc, cco, asunto, html} ·
+//                   descartar {borrador}
 //
 // Quién puede llamar:
 //   x-hook-secret = CORREO_CRON_SECRET (pg_cron)      → sincronizar, comprobar
@@ -75,7 +80,10 @@ export function errorSeguro(e: unknown): string {
 // ---------------------------------------------------------------- dependencias
 export type Fila = Record<string, unknown>;
 export type Estado = { delta_link: string | null; next_link: string | null; importacion_desde: string | null; descartados: number };
-export type MensajeDb = { id: string; graph_id: string; carpeta: Carpeta };
+export type MensajeDb = { id: string; graph_id: string; carpeta: Carpeta; empresa_id?: string | null };
+export type Sesion = { id: string; url: string; nombre: string; tamano: number; siguiente: number };
+export type BorradorDb = { graph_id: string; creado_por: string | null; tipo: string; origen_id: string | null; empresa_id: string | null; sesiones: Sesion[] };
+export type DocumentoDb = { id: string; empresa_id: string | null; storage_path: string; nombre: string; tipo: string | null; tamano: number | null; status: string };
 export type AdjuntoDb = { id: string; graph_id: string; mensaje_graph_id: string; nombre: string; tipo: string | null; content_id: string | null; inline: boolean };
 export interface Db {
   adminActivo(authUserId: string): Promise<string | null>; // admins.id si está activo
@@ -95,6 +103,13 @@ export interface Db {
   adjunto(id: string): Promise<AdjuntoDb | null>;
   adjuntosDe(mensajeId: string): Promise<AdjuntoDb[]>;
   marcarLeido(id: string, leido: boolean): Promise<void>;
+  crearBorrador(b: Omit<BorradorDb, "sesiones">): Promise<void>;
+  borrador(graphId: string): Promise<BorradorDb | null>;
+  guardarSesiones(graphId: string, sesiones: Sesion[]): Promise<void>;
+  borrarBorrador(graphId: string): Promise<void>;
+  borradoresViejos(antesIso: string, limite: number): Promise<string[]>;
+  documento(id: string): Promise<DocumentoDb | null>;
+  descargarDocumento(storagePath: string): Promise<Uint8Array>;
 }
 export type Deps = {
   env: (k: string) => string | undefined;
@@ -103,6 +118,7 @@ export type Deps = {
   usuario: (jwt: string) => Promise<string | null>;
   now?: () => Date;
   log?: (...a: unknown[]) => void;
+  uuid?: () => string;
 };
 
 export function timingSafeEqual(a: string, b: string): boolean {
@@ -325,7 +341,10 @@ export async function sincronizar(deps: Deps, db: Db) {
   const limite = (deps.now?.() ?? new Date()).getTime() + PRESUPUESTO_MS;
   const carpetas: Resumen[] = [];
   for (const c of CARPETAS) carpetas.push(await sincronizarCarpeta(deps, db, c, limite));
-  return { carpetas };
+  let borradores_limpiados = 0;
+  try { borradores_limpiados = await limpiarBorradores(deps, db); }
+  catch (e) { deps.log?.("correo: limpieza", errorSeguro(e)); }
+  return { carpetas, borradores_limpiados };
 }
 
 // ---------------------------------------------------------------- comprobar
@@ -443,6 +462,255 @@ export async function responder(deps: Deps, db: Db, body: any, enviadoPor: strin
   return enviarBorrador(deps, db, borrador, cambios, enviadoPor);
 }
 
+// ---------------------------------------------------------------- borradores (redactor con adjuntos)
+// El redactor del CRM envía por pasos sobre un borrador que registra en
+// correo_borradores: crear → adjuntar (≤ 3 MB directo; más, por sesión de
+// subida en trozos) → enviar. Si falla algo, el CRM llama a descartar. Solo
+// se actúa sobre borradores de esa tabla y del mismo usuario; la limpieza de
+// los de más de 2 h (en sincronizar) también solo toca los de esa tabla.
+export const MAX_DIRECTO = 3 * 1024 * 1024;
+export const MAX_TOTAL = 25 * 1024 * 1024;
+export const TROZO = 6 * 327_680; // 1,875 MiB: múltiplo de 320 KiB, como pide Graph
+export const HORAS_BORRADOR = 2;
+const MAX_LIMPIEZA = 20;
+const MAX_HTML_REDACTOR = 500_000;
+const CREAR: Record<string, string | null> = { nuevo: null, respuesta: "createReply", respuesta_todos: "createReplyAll", reenvio: "createForward" };
+
+const mb = (n: number) => (n / 1048576).toFixed(1).replace(".", ",") + " MB";
+const rutaMsg = (deps: Deps, id: string) => `${buzon(deps)}/messages/${encodeURIComponent(id)}`;
+
+export function aBase64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+export function nombreFichero(x: unknown): string {
+  const n = String(x ?? "").replace(/[\u0000-\u001f\u007f\/\\]/g, "").trim().slice(0, 200);
+  return n || "adjunto";
+}
+const mime = (x: unknown) => (/^[\w.+-]+\/[\w.+-]+$/.test(String(x ?? "")) ? String(x) : "application/octet-stream");
+export function urlSubidaValida(u: string): boolean {
+  try {
+    const x = new URL(u);
+    return x.protocol === "https:" && /(^|\.)office(365)?\.com$/i.test(x.hostname);
+  } catch { return false; }
+}
+function textoDe(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function miBorrador(db: Db, id: unknown, adminId: string | null): Promise<BorradorDb> {
+  const s = String(id ?? "");
+  if (!s || s.length > 512) throw new Peticion(400, "Falta el borrador");
+  const b = await db.borrador(s);
+  if (!b || b.creado_por !== adminId) throw new Peticion(404, "Borrador no encontrado");
+  return b;
+}
+
+async function adjuntosDelBorrador(deps: Deps, id: string): Promise<any[]> {
+  let pag = await graph(deps, `${rutaMsg(deps, id)}/attachments?$select=id,name,size,isInline`);
+  const todos = [...(pag.value ?? [])];
+  for (let i = 0; pag["@odata.nextLink"] && i < 10; i++) {
+    pag = await graph(deps, pag["@odata.nextLink"]);
+    todos.push(...(pag.value ?? []));
+  }
+  return todos;
+}
+async function comprobarTotal(deps: Deps, id: string, nuevo: number) {
+  const ya = (await adjuntosDelBorrador(deps, id)).reduce((a, x) => a + (Number(x.size) || 0), 0);
+  if (ya + nuevo > MAX_TOTAL) throw new Peticion(413, `Los adjuntos superan el límite de 25 MB por correo (${mb(ya + nuevo)})`);
+}
+
+export async function borradorCrear(deps: Deps, db: Db, body: any, adminId: string | null) {
+  const tipo = String(body?.tipo ?? "");
+  if (!(tipo in CREAR)) throw new Peticion(400, "Tipo de borrador no válido");
+  let origen: MensajeDb | null = null;
+  if (tipo !== "nuevo") {
+    origen = await mensajeDe(db, body?.mensaje_id);
+    if (tipo !== "reenvio" && origen.carpeta !== "inbox") throw new Peticion(400, "Solo se puede responder a un mensaje recibido");
+  }
+  const empresa = /^[0-9a-f-]{36}$/i.test(String(body?.empresa_id ?? "")) ? String(body.empresa_id) : (origen?.empresa_id ?? null);
+  const b = buzon(deps);
+  const borrador = tipo === "nuevo"
+    ? await graph(deps, `${b}/messages`, { method: "POST", body: { subject: "", body: { contentType: "HTML", content: "" } } })
+    : await graph(deps, `${b}/messages/${encodeURIComponent(origen!.graph_id)}/${CREAR[tipo]}`, { method: "POST", body: {} });
+  const id = String(borrador?.id ?? "");
+  if (!id) throw new Peticion(502, "Graph no devolvió el borrador");
+  try {
+    await db.crearBorrador({ graph_id: id, creado_por: adminId, tipo, origen_id: origen?.id ?? null, empresa_id: empresa });
+  } catch (e) {
+    try { await graph(deps, rutaMsg(deps, id), { method: "DELETE" }); } catch { /* ya no está */ }
+    throw e;
+  }
+  const quien = (xs: any[] | undefined) => lista(noSoyYo(xs));
+  const originales = tipo === "reenvio"
+    ? (await adjuntosDelBorrador(deps, id)).filter((a) => !a.isInline).map((a) => ({ nombre: String(a.name ?? ""), tamano: Number(a.size) || 0 }))
+    : [];
+  return {
+    borrador: id,
+    asunto: String(borrador?.subject ?? ""),
+    para: tipo === "reenvio" ? [] : quien(borrador?.toRecipients),
+    cc: tipo === "reenvio" ? [] : quien(borrador?.ccRecipients),
+    empresa_id: empresa,
+    adjuntos_originales: originales,
+  };
+}
+
+export async function borradorAdjuntar(deps: Deps, db: Db, q: URLSearchParams, bytes: Uint8Array, adminId: string | null) {
+  const b = await miBorrador(db, q.get("borrador"), adminId);
+  if (!bytes.length) throw new Peticion(400, "Fichero vacío");
+  if (bytes.length > MAX_DIRECTO) throw new Peticion(413, "Más de 3 MB: usa la subida por trozos");
+  await comprobarTotal(deps, b.graph_id, bytes.length);
+  const nombre = nombreFichero(q.get("nombre"));
+  await graph(deps, `${rutaMsg(deps, b.graph_id)}/attachments`, {
+    method: "POST",
+    body: { "@odata.type": "#microsoft.graph.fileAttachment", name: nombre, contentType: mime(q.get("tipo")), contentBytes: aBase64(bytes) },
+  });
+  return { ok: true, nombre, tamano: bytes.length };
+}
+
+async function abrirSesion(deps: Deps, db: Db, graphId: string, nombre: string, tipo: string, tamano: number): Promise<Sesion> {
+  const r = await graph(deps, `${rutaMsg(deps, graphId)}/attachments/createUploadSession`, {
+    method: "POST", body: { AttachmentItem: { attachmentType: "file", name: nombre, size: tamano, contentType: tipo } },
+  });
+  const url = String(r?.uploadUrl ?? "");
+  if (!urlSubidaValida(url)) throw new Peticion(502, "Graph devolvió una URL de subida inesperada");
+  const s: Sesion = { id: deps.uuid?.() ?? crypto.randomUUID(), url, nombre, tamano, siguiente: 0 };
+  const actual = await db.borrador(graphId);
+  await db.guardarSesiones(graphId, [...(actual?.sesiones ?? []), s]);
+  return s;
+}
+
+async function subirTrozo(deps: Deps, db: Db, graphId: string, s: Sesion, desde: number, bytes: Uint8Array) {
+  if (desde !== s.siguiente) throw new Peticion(409, "Trozo fuera de orden");
+  const esperado = Math.min(TROZO, s.tamano - desde);
+  if (esperado <= 0 || bytes.length !== esperado) throw new Peticion(400, "Tamaño de trozo no válido");
+  const fin = desde + bytes.length - 1;
+  // La URL de la sesión ya va autenticada: sin Authorization (Graph lo rechaza).
+  const res = await deps.fetch(s.url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.length), "Content-Range": `bytes ${desde}-${fin}/${s.tamano}` },
+    body: bytes,
+  });
+  let cuerpo: any = {};
+  try { cuerpo = await res.json(); } catch { /* sin cuerpo */ }
+  if (!res.ok) throw new GraphError(res.status, String(cuerpo?.error?.code ?? "subida"));
+  const siguiente = fin + 1;
+  const completo = siguiente >= s.tamano;
+  const actual = await db.borrador(graphId);
+  const otras = (actual?.sesiones ?? []).filter((x) => x.id !== s.id);
+  await db.guardarSesiones(graphId, completo ? otras : [...otras, { ...s, siguiente }]);
+  return { siguiente, completo };
+}
+
+export async function borradorSesion(deps: Deps, db: Db, body: any, adminId: string | null) {
+  const b = await miBorrador(db, body?.borrador, adminId);
+  const tamano = Number(body?.tamano);
+  if (!Number.isInteger(tamano) || tamano <= 0) throw new Peticion(400, "Tamaño no válido");
+  if (tamano > MAX_TOTAL) throw new Peticion(413, `El fichero supera el límite de 25 MB por correo (${mb(tamano)})`);
+  await comprobarTotal(deps, b.graph_id, tamano);
+  const s = await abrirSesion(deps, db, b.graph_id, nombreFichero(body?.nombre), mime(body?.tipo), tamano);
+  return { sesion: s.id, trozo: TROZO };
+}
+
+export async function borradorTrozo(deps: Deps, db: Db, q: URLSearchParams, bytes: Uint8Array, adminId: string | null) {
+  const b = await miBorrador(db, q.get("borrador"), adminId);
+  const s = b.sesiones.find((x) => x.id === q.get("sesion"));
+  if (!s) throw new Peticion(404, "Sesión de subida no encontrada");
+  return subirTrozo(deps, db, b.graph_id, s, Number(q.get("desde")), bytes);
+}
+
+export async function borradorDocumento(deps: Deps, db: Db, body: any, adminId: string | null) {
+  const b = await miBorrador(db, body?.borrador, adminId);
+  if (!b.empresa_id) throw new Peticion(400, "Este correo no está vinculado a una empresa");
+  const id = String(body?.documento_id ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Peticion(400, "Falta documento_id");
+  const doc = await db.documento(id);
+  if (!doc || doc.empresa_id !== b.empresa_id || doc.status !== "stored") throw new Peticion(404, "Documento no encontrado en la empresa");
+  if ((doc.tamano ?? 0) > MAX_TOTAL) throw new Peticion(413, `El documento supera el límite de 25 MB por correo (${mb(doc.tamano!)})`);
+  const bytes = await db.descargarDocumento(doc.storage_path);
+  await comprobarTotal(deps, b.graph_id, bytes.length);
+  const nombre = nombreFichero(doc.nombre);
+  const tipo = mime(doc.tipo);
+  if (bytes.length <= MAX_DIRECTO) {
+    await graph(deps, `${rutaMsg(deps, b.graph_id)}/attachments`, {
+      method: "POST", body: { "@odata.type": "#microsoft.graph.fileAttachment", name: nombre, contentType: tipo, contentBytes: aBase64(bytes) },
+    });
+  } else {
+    let s = await abrirSesion(deps, db, b.graph_id, nombre, tipo, bytes.length);
+    for (let desde = 0; desde < bytes.length; desde += TROZO) {
+      const r = await subirTrozo(deps, db, b.graph_id, s, desde, bytes.subarray(desde, desde + TROZO));
+      s = { ...s, siguiente: r.siguiente };
+    }
+  }
+  return { ok: true, nombre, tamano: bytes.length };
+}
+
+export async function borradorEnviar(deps: Deps, db: Db, body: any, adminId: string | null) {
+  const b = await miBorrador(db, body?.borrador, adminId);
+  const para = destinatarios(body?.para, "para", true);
+  const cc = destinatarios(body?.cc, "cc");
+  const cco = destinatarios(body?.cco, "cco");
+  const asunto = String(body?.asunto ?? "").trim();
+  if (b.tipo === "nuevo" && !asunto) throw new Peticion(400, "Falta el asunto");
+  if (asunto.length > 255) throw new Peticion(400, "El asunto es demasiado largo");
+  const html = String(body?.html ?? "");
+  if (html.length > MAX_HTML_REDACTOR) throw new Peticion(400, "El mensaje es demasiado largo");
+  if (b.tipo !== "reenvio" && !textoDe(html)) throw new Peticion(400, "El mensaje está vacío");
+  if (b.sesiones.length) throw new Peticion(409, "Hay adjuntos a medio subir");
+  const limpio = sanearHtml(html);
+  const ruta = rutaMsg(deps, b.graph_id);
+  try {
+    let contenido = limpio;
+    if (b.tipo !== "nuevo") {
+      // La cita del original (la prepara Graph como Outlook) va debajo de lo escrito.
+      const actual = await graph(deps, `${ruta}?$select=body`);
+      contenido = conCita(String(actual?.body?.content ?? ""), limpio);
+    }
+    await comprobarTotal(deps, b.graph_id, 0);
+    const cambios: Record<string, unknown> = {
+      body: { contentType: "HTML", content: contenido },
+      toRecipients: para, ccRecipients: cc, bccRecipients: cco,
+    };
+    if (asunto) cambios.subject = asunto;
+    const r = await enviarBorrador(deps, db, { id: b.graph_id }, cambios, adminId);
+    await db.borrarBorrador(b.graph_id).catch(() => { /* lo quita la limpieza */ });
+    return r;
+  } catch (e) {
+    // enviarBorrador ya borra el borrador en Outlook si falla el PATCH o el envío;
+    // si el fallo es anterior (cita, límite), se borra aquí.
+    try { await graph(deps, ruta, { method: "DELETE" }); } catch { /* ya no está */ }
+    await db.borrarBorrador(b.graph_id).catch(() => {});
+    throw e;
+  }
+}
+
+export async function borradorDescartar(deps: Deps, db: Db, body: any, adminId: string | null) {
+  const b = await miBorrador(db, body?.borrador, adminId);
+  try { await graph(deps, rutaMsg(deps, b.graph_id), { method: "DELETE" }); }
+  catch (e) { if (!(e instanceof GraphError && e.estado === 404)) throw e; }
+  await db.borrarBorrador(b.graph_id);
+  return { ok: true };
+}
+
+// Solo borradores registrados por el CRM: nunca los que alguien tenga en Outlook.
+export async function limpiarBorradores(deps: Deps, db: Db): Promise<number> {
+  const antes = new Date((deps.now?.() ?? new Date()).getTime() - HORAS_BORRADOR * 3_600_000).toISOString();
+  const ids = await db.borradoresViejos(antes, MAX_LIMPIEZA);
+  let n = 0;
+  for (const id of ids) {
+    try {
+      try { await graph(deps, rutaMsg(deps, id), { method: "DELETE" }); }
+      catch (e) { if (!(e instanceof GraphError && e.estado === 404)) throw e; }
+      await db.borrarBorrador(id);
+      n++;
+    } catch (e) {
+      deps.log?.("correo: limpieza de borrador", errorSeguro(e));
+    }
+  }
+  return n;
+}
+
 export async function marcarLeido(deps: Deps, db: Db, body: any) {
   const m = await mensajeDe(db, body?.mensaje_id);
   const leido = body?.leido !== false;
@@ -510,6 +778,13 @@ const PERMITIDO: Record<string, Quien[]> = {
   responder: ["usuario"],
   marcar_leido: ["usuario"],
   adjunto: ["usuario"],
+  borrador_crear: ["usuario"],
+  borrador_adjuntar: ["usuario"],
+  borrador_sesion: ["usuario"],
+  borrador_trozo: ["usuario"],
+  borrador_documento: ["usuario"],
+  borrador_enviar: ["usuario"],
+  borrador_descartar: ["usuario"],
 };
 
 export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
@@ -538,8 +813,21 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
         quien = "usuario";
       }
 
+      // Ficheros (adjuntar y trozos): binario con los datos en la URL; el resto, JSON.
       let body: any;
-      try { body = await req.json(); } catch { return json({ error: "JSON inválido." }, 400); }
+      let bytes: Uint8Array | null = null;
+      const q = new URL(req.url).searchParams;
+      if ((req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/octet-stream")) {
+        body = { accion: q.get("accion") };
+        if (!["borrador_adjuntar", "borrador_trozo"].includes(String(body.accion))) return json({ error: "Acción desconocida." }, 400);
+        const largo = Number(req.headers.get("content-length") ?? "0");
+        if (largo > MAX_DIRECTO) return json({ error: "Fichero demasiado grande para una sola petición." }, 413);
+        bytes = new Uint8Array(await req.arrayBuffer());
+        if (bytes.length > MAX_DIRECTO) return json({ error: "Fichero demasiado grande para una sola petición." }, 413);
+      } else {
+        try { body = await req.json(); } catch { return json({ error: "JSON inválido." }, 400); }
+        if (["borrador_adjuntar", "borrador_trozo"].includes(String(body?.accion))) return json({ error: "Envía el fichero como binario." }, 400);
+      }
       const accion = String(body?.accion ?? "");
       if (!PERMITIDO[accion]) return json({ error: "Acción desconocida." }, 400);
       if (!PERMITIDO[accion].includes(quien)) return json({ error: "No autorizado." }, 403);
@@ -550,6 +838,13 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       if (accion === "enviar") return json(await enviar(deps, db, body, adminId));
       if (accion === "responder") return json(await responder(deps, db, body, adminId));
       if (accion === "marcar_leido") return json(await marcarLeido(deps, db, body));
+      if (accion === "borrador_crear") return json(await borradorCrear(deps, db, body, adminId));
+      if (accion === "borrador_adjuntar") return json(await borradorAdjuntar(deps, db, q, bytes!, adminId));
+      if (accion === "borrador_sesion") return json(await borradorSesion(deps, db, body, adminId));
+      if (accion === "borrador_trozo") return json(await borradorTrozo(deps, db, q, bytes!, adminId));
+      if (accion === "borrador_documento") return json(await borradorDocumento(deps, db, body, adminId));
+      if (accion === "borrador_enviar") return json(await borradorEnviar(deps, db, body, adminId));
+      if (accion === "borrador_descartar") return json(await borradorDescartar(deps, db, body, adminId));
       return await adjunto(deps, db, body, h);
     } catch (e) {
       if (e instanceof Peticion) return json({ error: e.message }, e.estado);

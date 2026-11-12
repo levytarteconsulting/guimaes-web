@@ -76,7 +76,7 @@ const db: Db = {
     ok(await service.from("correo_adjuntos").upsert(filas, { onConflict: "mensaje_id,graph_id" }));
   },
   async mensaje(id) {
-    return ok(await service.from("correo_mensajes").select("id, graph_id, carpeta").eq("id", id).maybeSingle());
+    return ok(await service.from("correo_mensajes").select("id, graph_id, carpeta, empresa_id").eq("id", id).maybeSingle());
   },
   async adjunto(id) {
     const d = ok(await service.from("correo_adjuntos")
@@ -90,6 +90,35 @@ const db: Db = {
   },
   async marcarLeido(id, leido) {
     ok(await service.from("correo_mensajes").update({ leido }).eq("id", id));
+  },
+  async crearBorrador(b) {
+    ok(await service.from("correo_borradores").insert(b));
+  },
+  async borrador(graphId) {
+    const d = ok(await service.from("correo_borradores")
+      .select("graph_id, creado_por, tipo, origen_id, empresa_id, sesiones").eq("graph_id", graphId).maybeSingle());
+    return d ? { ...d, sesiones: Array.isArray(d.sesiones) ? d.sesiones : [] } : null;
+  },
+  async guardarSesiones(graphId, sesiones) {
+    ok(await service.from("correo_borradores").update({ sesiones }).eq("graph_id", graphId));
+  },
+  async borrarBorrador(graphId) {
+    ok(await service.from("correo_borradores").delete().eq("graph_id", graphId));
+  },
+  async borradoresViejos(antesIso, limite) {
+    const d = ok(await service.from("correo_borradores").select("graph_id")
+      .lt("created_at", antesIso).order("created_at", { ascending: true }).limit(limite));
+    return (d ?? []).map((r: { graph_id: string }) => r.graph_id);
+  },
+  async documento(id) {
+    const d = ok(await service.from("documentos")
+      .select("id, empresa_id, storage_path, original_filename, mime_type, size_bytes, status").eq("id", id).maybeSingle());
+    return d ? { id: d.id, empresa_id: d.empresa_id, storage_path: d.storage_path, nombre: d.original_filename ?? "",
+                 tipo: d.mime_type ?? null, tamano: d.size_bytes ?? null, status: d.status } : null;
+  },
+  async descargarDocumento(storagePath) {
+    const blob = ok(await service.storage.from("documentos").download(storagePath));
+    return new Uint8Array(await blob.arrayBuffer());
   },
 };
 
