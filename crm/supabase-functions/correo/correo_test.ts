@@ -434,9 +434,10 @@ test("adjunto: por id y por cid (contentId o nombre); desconocido → 404", asyn
 });
 
 // ---------------------------------------------------------------- quién
-test("autorización: cron solo sincroniza; usuario inactivo 403; sin credenciales 401", async () => {
+test("autorización: cron solo sincroniza y comprueba; usuario inactivo 403; sin credenciales 401", async () => {
   const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
-  assert.equal((await jsonDe(d, { accion: "comprobar" }, { "x-hook-secret": CRON })).status, 403);
+  assert.deepEqual(await jsonDe(d, { accion: "comprobar" }, { "x-hook-secret": CRON }), { status: 200, body: { ok: true } });
+  assert.equal((await jsonDe(d, { accion: "marcar_leido" }, { "x-hook-secret": CRON })).status, 403);
   assert.equal((await jsonDe(d, { accion: "enviar" }, { "x-hook-secret": CRON })).status, 403);
   assert.equal((await jsonDe(d, { accion: "sincronizar" }, { "x-hook-secret": "otro" })).status, 401);
   assert.equal((await jsonDe(d, { accion: "comprobar" }, { authorization: "Bearer jwt-inactivo" })).status, 403);
