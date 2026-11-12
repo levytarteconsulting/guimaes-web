@@ -11,7 +11,8 @@
 //   MS_GRAPH_TENANT_ID, MS_GRAPH_CLIENT_ID, MS_GRAPH_CLIENT_SECRET — app de Entra
 //   MS_GRAPH_MAILBOX   — id del buzón administracion@ (/users/{id})
 //   CORREO_CRON_SECRET — el mismo valor que 'correo_cron_secret' en Vault
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — inyectadas por Supabase
+//   SUPABASE_URL y la clave de servicio — inyectadas por Supabase (las usa el cliente
+//   de base de datos de la función; nunca se comparan con lo que llega)
 //
 // Desplegar (desde crm/):
 //   supabase functions deploy correo --use-api --project-ref zuktsotrcolqdowpbnrx
@@ -30,9 +31,9 @@ function ok<T>(r: { data: T; error: unknown }): T {
 }
 
 const db: Db = {
-  async usuarioActivo(authUserId) {
-    const d = ok(await service.from("admins").select("activo").eq("auth_user_id", authUserId).maybeSingle());
-    return !!d?.activo;
+  async adminActivo(authUserId) {
+    const d = ok(await service.from("admins").select("id, activo").eq("auth_user_id", authUserId).maybeSingle());
+    return d?.activo ? d.id : null;
   },
   async reservar(carpeta, segundos) {
     return !!ok(await service.rpc("correo_sync_reservar", { p_carpeta: carpeta, p_segundos: segundos }));
@@ -51,6 +52,17 @@ const db: Db = {
   async guardarMensajes(filas) {
     const d = ok(await service.from("correo_mensajes").upsert(filas, { onConflict: "graph_id" }).select("id, graph_id"));
     return Object.fromEntries((d ?? []).map((r: { id: string; graph_id: string }) => [r.graph_id, r.id]));
+  },
+  async registrarEnviado(fila) {
+    ok(await service.from("correo_mensajes").upsert(fila, { onConflict: "graph_id" }));
+  },
+  async reasignarEnviado(internetMessageId, graphId) {
+    // Solo filas registradas al enviar y solo si el id nuevo no existe ya.
+    const ya = ok(await service.from("correo_mensajes").select("id").eq("graph_id", graphId).maybeSingle());
+    if (ya) return;
+    ok(await service.from("correo_mensajes").update({ graph_id: graphId })
+      .eq("internet_message_id", internetMessageId).eq("carpeta", "sentitems")
+      .not("enviado_por", "is", null).neq("graph_id", graphId));
   },
   async marcarFuera(graphIds, enIso) {
     const d = ok(await service.from("correo_mensajes").update({ fuera_bandeja: true, fuera_bandeja_at: enIso })

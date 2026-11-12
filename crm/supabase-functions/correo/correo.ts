@@ -19,15 +19,15 @@
 // Acciones (POST, cuerpo JSON {accion, ...}):
 //   comprobar     — GET /users/{id}/messages?$top=1&$select=id → {ok} o {ok:false, estado, codigo}
 //   sincronizar   — delta de inbox y sentitems (90 días la primera vez)
-//   enviar        — {para[], cc[]?, cco[]?, asunto, texto}: sendMail con from = info@
+//   enviar        — {para[], cc[]?, cco[]?, asunto, texto}: POST /messages → PATCH from = info@ → send
 //   responder     — {mensaje_id, texto, todos?}: createReply(All) → PATCH from → send
+//   (los dos registran la fila con enviado_por; ver enviarBorrador)
 //   marcar_leido  — {mensaje_id, leido}: PATCH isRead en Outlook y en la tabla
 //   adjunto       — {adjunto_id} o {mensaje_id, cid}: descarga bajo demanda (no se guarda)
 //
 // Quién puede llamar:
 //   x-hook-secret = CORREO_CRON_SECRET (pg_cron)      → sincronizar, comprobar
-//   Authorization: Bearer <service role>              → todas
-//   Authorization: Bearer <JWT de usuario activo CRM> → todas
+//   Authorization: Bearer <JWT de usuario activo CRM> → todas (enviado_por = ese usuario)
 
 import { sanearHtml, textoAHtml } from "./sanear.ts";
 
@@ -78,12 +78,16 @@ export type Estado = { delta_link: string | null; next_link: string | null; impo
 export type MensajeDb = { id: string; graph_id: string; carpeta: Carpeta };
 export type AdjuntoDb = { id: string; graph_id: string; mensaje_graph_id: string; nombre: string; tipo: string | null; content_id: string | null; inline: boolean };
 export interface Db {
-  usuarioActivo(authUserId: string): Promise<boolean>;
+  adminActivo(authUserId: string): Promise<string | null>; // admins.id si está activo
   reservar(carpeta: Carpeta, segundos: number): Promise<boolean>;
   liberar(carpeta: Carpeta): Promise<void>;
   estado(carpeta: Carpeta): Promise<Estado>;
   guardarEstado(carpeta: Carpeta, cambios: Partial<Estado> & { ultimo_ok?: string; ultimo_error?: string | null }): Promise<void>;
   guardarMensajes(filas: Fila[]): Promise<Record<string, string>>; // graph_id → id
+  registrarEnviado(fila: Fila): Promise<void>;                       // upsert por graph_id
+  // Red de seguridad por si un enviado llegara con otro id: la fila
+  // registrada al enviar (misma internet_message_id) toma el id nuevo.
+  reasignarEnviado(internetMessageId: string, graphId: string): Promise<void>;
   marcarFuera(graphIds: string[], enIso: string): Promise<number>;  // solo filas existentes
   leidoSiExiste(graphId: string, leido: boolean): Promise<void>;
   guardarAdjuntos(filas: Fila[]): Promise<void>;
@@ -135,6 +139,9 @@ async function token(deps: Deps): Promise<string> {
   return cacheToken.token;
 }
 
+// Ids inmutables en TODAS las llamadas: no cambian al mover un mensaje y el
+// borrador conserva su id al enviarse (llega a Enviados con el mismo).
+export const PREFER_ID = 'IdType="ImmutableId"';
 type Opc = { method?: string; body?: unknown; prefer?: string; crudo?: boolean };
 async function graph(deps: Deps, ruta: string, o: Opc = {}): Promise<any> {
   const url = ruta.startsWith("https://") ? ruta : GRAPH + ruta;
@@ -142,7 +149,7 @@ async function graph(deps: Deps, ruta: string, o: Opc = {}): Promise<any> {
   if (!url.startsWith(GRAPH + "/")) throw new Peticion(502, "Enlace de Graph inesperado");
   const headers: Record<string, string> = { "Authorization": `Bearer ${await token(deps)}` };
   if (o.body !== undefined) headers["Content-Type"] = "application/json";
-  if (o.prefer) headers["Prefer"] = o.prefer;
+  headers["Prefer"] = o.prefer ? `${PREFER_ID}, ${o.prefer}` : PREFER_ID;
   const res = await deps.fetch(url, { method: o.method ?? "GET", headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
   if (res.ok && o.crudo) return res;
   const texto = await res.text();
@@ -259,6 +266,9 @@ async function sincronizarCarpeta(deps: Deps, db: Db, carpeta: Carpeta, limite: 
       }
       if (quitar.length) r.fuera_bandeja += await db.marcarFuera(quitar, ahora().toISOString());
       if (guardar.length) {
+        if (carpeta === "sentitems") {
+          for (const m of guardar) if (m.internetMessageId) await db.reasignarEnviado(m.internetMessageId, m.id);
+        }
         const ids = await db.guardarMensajes(guardar.map((m) => filaDe(m, carpeta)));
         r.guardados += guardar.length;
         for (const m of guardar) {
@@ -352,7 +362,40 @@ function texto(x: unknown): string {
 }
 const FROM = { emailAddress: { address: ALIAS } };
 
-export async function enviar(deps: Deps, body: any) {
+// Todo envío va por borrador: crear (POST /messages o createReply[All]) →
+// PATCH from = info@ → send. Con ids inmutables, el id del borrador es el
+// que tendrá en Enviados: se inserta la fila con ese graph_id y enviado_por,
+// y la sincronización la completa sin duplicarla.
+async function enviarBorrador(deps: Deps, db: Db, borrador: any, cambios: Record<string, unknown>, enviadoPor: string | null) {
+  const b = buzon(deps);
+  const id = String(borrador?.id ?? "");
+  if (!id) throw new Peticion(502, "Graph no devolvió el borrador");
+  const ruta = `${b}/messages/${encodeURIComponent(id)}`;
+  let final: any;
+  try {
+    final = await graph(deps, ruta, { method: "PATCH", body: { ...cambios, from: FROM } });
+    await graph(deps, `${ruta}/send`, { method: "POST" });
+  } catch (e) {
+    // No dejar el borrador a medias en el buzón.
+    try { await graph(deps, ruta, { method: "DELETE" }); } catch { /* ya no está */ }
+    throw e;
+  }
+  // Ya está enviado: si falla el registro, lo trae la sincronización (sin enviado_por).
+  try {
+    const m = { ...borrador, ...(final && typeof final === "object" ? final : {}), id, from: FROM };
+    await db.registrarEnviado({
+      ...filaDe(m, "sentitems"),
+      fecha: (deps.now?.() ?? new Date()).toISOString(),
+      leido: true,
+      enviado_por: enviadoPor,
+    });
+  } catch (e) {
+    (deps.log ?? console.error)("correo: enviado sin registrar", errorSeguro(e));
+  }
+  return { ok: true, graph_id: id };
+}
+
+export async function enviar(deps: Deps, db: Db, body: any, enviadoPor: string | null) {
   const asunto = String(body?.asunto ?? "").trim();
   if (!asunto) throw new Peticion(400, "Falta el asunto");
   if (asunto.length > 255) throw new Peticion(400, "El asunto es demasiado largo");
@@ -362,10 +405,9 @@ export async function enviar(deps: Deps, body: any) {
     toRecipients: destinatarios(body?.para, "para", true),
     ccRecipients: destinatarios(body?.cc, "cc"),
     bccRecipients: destinatarios(body?.cco, "cco"),
-    from: FROM,
   };
-  await graph(deps, `${buzon(deps)}/sendMail`, { method: "POST", body: { message, saveToSentItems: true } });
-  return { ok: true };
+  const borrador = await graph(deps, `${buzon(deps)}/messages`, { method: "POST", body: message });
+  return enviarBorrador(deps, db, borrador, {}, enviadoPor);
 }
 
 // Mete el texto nuevo delante de la cita que prepara createReply.
@@ -386,30 +428,19 @@ async function mensajeDe(db: Db, id: unknown): Promise<MensajeDb> {
   return m;
 }
 
-export async function responder(deps: Deps, db: Db, body: any) {
+export async function responder(deps: Deps, db: Db, body: any, enviadoPor: string | null) {
   const m = await mensajeDe(db, body?.mensaje_id);
   if (m.carpeta !== "inbox") throw new Peticion(400, "Solo se puede responder a un mensaje recibido");
   const t = texto(body?.texto);
-  const b = buzon(deps);
-  const borrador = await graph(deps, `${b}/messages/${encodeURIComponent(m.graph_id)}/${body?.todos ? "createReplyAll" : "createReply"}`, { method: "POST", body: {} });
-  const bid = encodeURIComponent(String(borrador?.id ?? ""));
-  try {
-    const cambios: Record<string, unknown> = {
-      from: FROM,
-      body: { contentType: "HTML", content: conCita(String(borrador?.body?.content ?? ""), textoAHtml(t)) },
-    };
-    if (body?.todos) {
-      cambios.toRecipients = noSoyYo(borrador?.toRecipients);
-      cambios.ccRecipients = noSoyYo(borrador?.ccRecipients);
-    }
-    await graph(deps, `${b}/messages/${bid}`, { method: "PATCH", body: cambios });
-    await graph(deps, `${b}/messages/${bid}/send`, { method: "POST" });
-  } catch (e) {
-    // No dejar el borrador a medias en el buzón.
-    try { await graph(deps, `${b}/messages/${bid}`, { method: "DELETE" }); } catch { /* ya está */ }
-    throw e;
+  const borrador = await graph(deps, `${buzon(deps)}/messages/${encodeURIComponent(m.graph_id)}/${body?.todos ? "createReplyAll" : "createReply"}`, { method: "POST", body: {} });
+  const cambios: Record<string, unknown> = {
+    body: { contentType: "HTML", content: conCita(String(borrador?.body?.content ?? ""), textoAHtml(t)) },
+  };
+  if (body?.todos) {
+    cambios.toRecipients = noSoyYo(borrador?.toRecipients);
+    cambios.ccRecipients = noSoyYo(borrador?.ccRecipients);
   }
-  return { ok: true };
+  return enviarBorrador(deps, db, borrador, cambios, enviadoPor);
 }
 
 export async function marcarLeido(deps: Deps, db: Db, body: any) {
@@ -471,14 +502,14 @@ function cors(req: Request): Record<string, string> {
   };
 }
 
-type Quien = "cron" | "servicio" | "usuario";
+type Quien = "cron" | "usuario";
 const PERMITIDO: Record<string, Quien[]> = {
-  comprobar: ["cron", "servicio", "usuario"],
-  sincronizar: ["cron", "servicio", "usuario"],
-  enviar: ["servicio", "usuario"],
-  responder: ["servicio", "usuario"],
-  marcar_leido: ["servicio", "usuario"],
-  adjunto: ["servicio", "usuario"],
+  comprobar: ["cron", "usuario"],
+  sincronizar: ["cron", "usuario"],
+  enviar: ["usuario"],
+  responder: ["usuario"],
+  marcar_leido: ["usuario"],
+  adjunto: ["usuario"],
 };
 
 export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
@@ -491,6 +522,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
 
     try {
       let quien: Quien;
+      let adminId: string | null = null;
       const hook = req.headers.get("x-hook-secret");
       if (hook !== null) {
         const secreto = deps.env("CORREO_CRON_SECRET") ?? "";
@@ -499,15 +531,11 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       } else {
         const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
         if (!bearer) return json({ error: "No autorizado." }, 401);
-        const service = deps.env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-        if (service && timingSafeEqual(bearer, service)) {
-          quien = "servicio";
-        } else {
-          const uid = await deps.usuario(bearer);
-          if (!uid) return json({ error: "No autorizado." }, 401);
-          if (!(await deps.db().usuarioActivo(uid))) return json({ error: "No autorizado." }, 403);
-          quien = "usuario";
-        }
+        const uid = await deps.usuario(bearer);
+        if (!uid) return json({ error: "No autorizado." }, 401);
+        adminId = await deps.db().adminActivo(uid);
+        if (!adminId) return json({ error: "No autorizado." }, 403);
+        quien = "usuario";
       }
 
       let body: any;
@@ -519,8 +547,8 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       if (accion === "comprobar") return json(await comprobar(deps));
       const db = deps.db();
       if (accion === "sincronizar") return json(await sincronizar(deps, db));
-      if (accion === "enviar") return json(await enviar(deps, body));
-      if (accion === "responder") return json(await responder(deps, db, body));
+      if (accion === "enviar") return json(await enviar(deps, db, body, adminId));
+      if (accion === "responder") return json(await responder(deps, db, body, adminId));
       if (accion === "marcar_leido") return json(await marcarLeido(deps, db, body));
       return await adjunto(deps, db, body, h);
     } catch (e) {
