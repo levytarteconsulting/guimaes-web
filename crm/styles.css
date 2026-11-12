@@ -633,3 +633,17 @@ body.no-scroll{overflow:hidden;}
 @media(max-width:820px){
   .ig-resumen__fila{flex-direction:column;}
 }
+
+/* ---- Correo (crm/correo.jsx) ---- */
+.correo-visor{display:block;width:100%;border:0;background:#fff;border-radius:8px;}
+.correo-aviso{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted);background:var(--mist);border-radius:8px;padding:6px 10px;margin-bottom:8px;}
+.correo-adjuntos{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.correo-adjunto{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:12.5px;color:var(--ink);background:var(--mist);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;}
+.correo-adjunto span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;}
+.correo-adjunto:hover{background:var(--mist-2);}
+.correo-estado{margin-top:18px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:flex-start;gap:4px;}
+.correo-ficha{display:flex;flex-direction:column;background:var(--mist);border-top:1px solid var(--line);}
+.correo-ficha .inbox__thread__head{display:none;}
+.correo-ficha .inbox__thread__body{padding:14px;}
+.correo-ficha .inbox__reply{padding:12px 14px;}
+@media(max-width:820px){.inbox__thread{min-height:60vh;}.correo-adjunto span:nth-child(2){max-width:160px;}}
