@@ -83,3 +83,10 @@ verify_jwt = true
 [functions.instagram]
 entrypoint = "../supabase-functions/instagram/index.ts"
 verify_jwt = false
+
+# Correo de info@guimaes.es (crm/supabase-correo.sql): la llama pg_cron con
+# x-hook-secret (sin JWT) y el CRM con el JWT del usuario; la autorización
+# (secreto de cron, service role o usuario activo del CRM) la hace el código.
+[functions.correo]
+entrypoint = "../supabase-functions/correo/index.ts"
+verify_jwt = false
