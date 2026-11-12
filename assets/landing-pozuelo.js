@@ -142,7 +142,7 @@
           if (res && res.error) throw res.error;
           showSuccess();
           window.dataLayer = window.dataLayer || [];
-          window.dataLayer.push({ event: 'form_submit_success' });
+          window.dataLayer.push({ event: 'form_submit_success', form_ubicacion: 'landing', servicio: payload.servicio });
         })
         .catch(function (err) {
           if (window.console) console.error("Lead insert error:", err);

@@ -381,3 +381,104 @@
 .blog-chip:hover { border-color: var(--line-strong); color: var(--ink); }
 .blog-chip.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .blog-filter + .post-grid { margin-top: 30px; }
+
+/* ============================================================
+   CONVERSIÓN EN PÁGINAS DE SERVICIO
+   Hero con formulario, teléfono en cabecera, franja CTA y barra
+   inferior en móvil (initForm / initCallbar en assets/app.js).
+   ============================================================ */
+
+/* --- Teléfono en la cabecera (en móvil y con el menú centrado, solo icono) --- */
+.nav__tel {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--display); font-weight: 600; font-size: .95rem; color: var(--ink);
+  height: 40px; padding: 0 12px; border-radius: 100px; white-space: nowrap;
+  transition: color .18s, background .18s;
+}
+.nav__tel svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.nav__tel:hover { color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 759px), (min-width: 1000px) and (max-width: 1179px) {
+  .nav__tel { width: 40px; padding: 0; border: 1px solid var(--line); background: var(--mist); }
+  .nav__tel span { display: none; }
+}
+
+/* --- Hero con formulario --- */
+.svc-hero--lead .svc-hero__bg { background: var(--ink); } /* mientras carga la foto */
+.svc-hero__grid { position: relative; z-index: 1; display: grid; gap: 30px; padding-block: clamp(34px,6vw,80px); }
+.svc-hero--lead .svc-hero__inner { padding-block: 0; max-width: none; }
+.svc-hero--lead h1 { font-size: clamp(2rem,3.6vw,3.05rem); }
+.svc-hero--lead .svc-hero__inner > p { font-size: clamp(1.02rem,1.3vw,1.15rem); }
+@media (min-width: 960px) {
+  .svc-hero__grid { grid-template-columns: minmax(0,1.12fr) minmax(0,.88fr); gap: clamp(40px,5vw,72px); align-items: center; }
+}
+
+.hero-perks { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 26px; }
+.hero-perks li { display: flex; align-items: center; gap: 9px; color: #fff; font-family: var(--display); font-weight: 600; font-size: .98rem; }
+.hero-perks svg { width: 22px; height: 22px; padding: 4px; border-radius: 50%; background: rgba(22,184,166,.22); color: #6BE3D3; flex: none; }
+
+.hero-form { scroll-margin-top: 92px; }
+.hero-form__card { color: var(--ink); border: 0; box-shadow: var(--shadow-lg); padding: clamp(22px,3vw,32px); }
+.svc-hero .hero-form p { color: inherit; margin-top: 0; max-width: none; font-size: inherit; }
+.svc-hero .hero-form .hero-form__title { font-family: var(--display); font-weight: 700; font-size: 1.4rem; letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
+.svc-hero .hero-form .hero-form__sub { color: var(--slate); font-size: .95rem; margin: 6px 0 18px; }
+.svc-hero .hero-form .form-ok .lead { color: var(--slate); margin-top: 10px; font-size: 1.02rem; }
+.hero-form .field { margin-bottom: 14px; gap: 6px; }
+.hero-form .form-row { gap: 0 14px; }
+.hero-form .field input, .hero-form .field textarea { padding: 11px 14px; }
+.hero-form .field textarea { min-height: 70px; }
+.hero-form .form-check { margin-bottom: 16px; }
+.field__opt { font-weight: 500; font-size: .82rem; color: var(--slate); }
+.hero-form__submit { width: 100%; justify-content: center; }
+.hero-form__alt {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px;
+  margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+.hero-form__tel { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: .95rem; }
+.hero-form__tel svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.hero-form__tel b { color: var(--ink); font-family: var(--display); white-space: nowrap; }
+.hero-form__tel:hover b { color: var(--accent); }
+.hero-form__wa {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 100px;
+  background: #EAF9F0; border: 1px solid #BDEBCF; color: #0B6B3A;
+  font-family: var(--display); font-weight: 600; font-size: .92rem; transition: background .18s;
+}
+.hero-form__wa svg { width: 18px; height: 18px; color: #1FAF55; }
+.hero-form__wa:hover { background: #DDF5E7; }
+
+/* --- Franja CTA intermedia --- */
+.cta-strip { background: var(--ink); color: #DCE7F2; }
+.cta-strip__inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 32px; padding-block: 30px; }
+.cta-strip__txt { font-size: 1.08rem; line-height: 1.5; max-width: 60ch; }
+.cta-strip__txt b { color: #fff; font-family: var(--display); }
+.cta-strip__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.cta-strip__tel { display: inline-flex; align-items: center; gap: 8px; color: #fff; font-family: var(--display); font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
+.cta-strip__tel svg { width: 20px; height: 20px; color: #8FB8FF; }
+.cta-strip__tel:hover { color: #BFD4FF; }
+
+/* --- Barra inferior en móvil --- */
+.callbar { display: none; }
+@media (max-width: 719px) {
+  .callbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 75;
+    display: grid; grid-template-columns: 1fr 1fr 1.35fr;
+    background: #fff; border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 20px rgba(7,20,35,.08);
+    padding-bottom: env(safe-area-inset-bottom);
+    transition: transform .25s ease, visibility 0s;
+  }
+  .callbar.is-hidden { transform: translateY(110%); visibility: hidden; transition: transform .25s ease, visibility 0s .25s; }
+  .callbar a {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    min-height: 56px; padding: 8px 6px; font-family: var(--display); font-weight: 600; font-size: .8rem; color: var(--ink);
+  }
+  .callbar svg { width: 20px; height: 20px; }
+  .callbar__tel svg { color: var(--accent); }
+  .callbar__wa svg { color: #1FAF55; }
+  .callbar .callbar__form { background: var(--accent); color: #fff; }
+  /* El pie no queda tapado; el WhatsApp flotante sobra (está en la barra);
+     con el banner de cookies abierto, la barra no aparece. */
+  body.has-callbar { padding-bottom: 56px; }
+  body.has-callbar .floats { display: none; }
+  body:has(.cookie-banner) .callbar { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .callbar, .callbar.is-hidden { transition: none; } }
