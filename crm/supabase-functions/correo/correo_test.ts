@@ -4,7 +4,10 @@
 // (con Deno: deno test supabase-functions/correo/)
 import assert from "node:assert/strict";
 import { test, beforeEach } from "node:test";
-import { ALIAS, buscarCid, conCita, createHandler, DIAS_IMPORTACION, esDeInfo, GRAPH, olvidarToken, PRESUPUESTO_MS } from "./correo.ts";
+import {
+  ALIAS, buscarCid, conCita, createHandler, DIAS_IMPORTACION, esDeInfo, GRAPH, limpiarBorradores, MAX_DIRECTO, nombreFichero,
+  olvidarToken, PRESUPUESTO_MS, TROZO, urlSubidaValida,
+} from "./correo.ts";
 import type { AdjuntoDb, Carpeta, Db, Deps, Estado, Fila } from "./correo.ts";
 import { sanearHtml, textoAHtml } from "./sanear.ts";
 
@@ -68,7 +71,7 @@ class FakeDb implements Db {
     }
   }
   porId(id: string) { return [...this.mensajes.values()].find((m) => m.id === id); }
-  async mensaje(id: string) { const m = this.porId(id); return m ? { id: m.id, graph_id: String(m.graph_id), carpeta: m.carpeta as Carpeta } : null; }
+  async mensaje(id: string) { const m = this.porId(id); return m ? { id: m.id, graph_id: String(m.graph_id), carpeta: m.carpeta as Carpeta, empresa_id: (m.empresa_id as string) ?? null } : null; }
   aAdj(a: Fila & { id: string }): AdjuntoDb {
     const m = this.porId(String(a.mensaje_id))!;
     return { id: a.id, graph_id: String(a.graph_id), mensaje_graph_id: String(m.graph_id), nombre: String(a.nombre), tipo: (a.tipo as string) ?? null, content_id: (a.content_id as string) ?? null, inline: !!a.inline };
@@ -76,6 +79,18 @@ class FakeDb implements Db {
   async adjunto(id: string) { const a = this.adjuntos.find((x) => x.id === id); return a ? this.aAdj(a) : null; }
   async adjuntosDe(mid: string) { return this.adjuntos.filter((a) => a.mensaje_id === mid).map((a) => this.aAdj(a)); }
   async marcarLeido(id: string, leido: boolean) { const m = this.porId(id); if (m) m.leido = leido; }
+  borradores = new Map<string, any>();
+  documentos = new Map<string, any>();
+  ficheros = new Map<string, Uint8Array>();
+  async crearBorrador(b: any) { this.borradores.set(b.graph_id, { ...b, sesiones: [], created_at: reloj.toISOString() }); }
+  async borrador(g: string) { const b = this.borradores.get(g); return b ? JSON.parse(JSON.stringify(b)) : null; }
+  async guardarSesiones(g: string, s: any[]) { const b = this.borradores.get(g); if (b) b.sesiones = s; }
+  async borrarBorrador(g: string) { this.borradores.delete(g); }
+  async borradoresViejos(antes: string, limite: number) {
+    return [...this.borradores.values()].filter((b) => b.created_at < antes).slice(0, limite).map((b) => b.graph_id);
+  }
+  async documento(id: string) { return this.documentos.get(id) ?? null; }
+  async descargarDocumento(p: string) { const f = this.ficheros.get(p); if (!f) throw new Error("no está"); return f; }
 }
 
 // ---------------------------------------------------------------- Graph simulado
@@ -89,11 +104,16 @@ type Graph = {
   falla?: (c: Llamada) => Response | null;
   borrador?: any;
   borradores: Record<string, any>;
+  sesiones: Record<string, { draft: string; name: string; size: number; recibido: number }>;
+  subidas: { url: string; headers: Record<string, string>; largo: number }[];
+  borrados: string[];
+  uploadUrl?: (draft: string, n: number) => string;
 };
 const resp = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 function fakeGraph(): Graph {
-  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, borradores: {}, fetch: null as any };
+  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, borradores: {}, sesiones: {}, subidas: [], borrados: [], fetch: null as any };
+  let n = 0;
   g.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -104,6 +124,19 @@ function fakeGraph(): Graph {
       assert.equal(p.get("scope"), "https://graph.microsoft.com/.default");
       g.tokens++;
       return resp(200, { access_token: "tok" + g.tokens, expires_in: 3599 });
+    }
+    if (url.startsWith("https://outlook.office.com/upload/")) {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      assert.equal(headers["Authorization"], undefined, "la URL de subida no lleva el token");
+      const largo = (init?.body as Uint8Array).length;
+      g.subidas.push({ url, headers, largo });
+      const s = g.sesiones[url];
+      const [, a, b, total] = headers["Content-Range"].match(/^bytes (\d+)-(\d+)\/(\d+)$/)!;
+      assert.equal(Number(a), s.recibido); assert.equal(Number(b) - Number(a) + 1, largo); assert.equal(Number(total), s.size);
+      s.recibido += largo;
+      if (s.recibido < s.size) return resp(200, { nextExpectedRanges: [`${s.recibido}-`] });
+      (g.adjuntos[s.draft] ??= []).push({ id: "att" + (++n), name: s.name, size: s.size, isInline: false });
+      return new Response(null, { status: 201 });
     }
     assert.ok(url.startsWith(U + "/"), "siempre /users/{id del buzón}: " + url);
     const headers = (init?.headers ?? {}) as Record<string, string>;
@@ -117,6 +150,28 @@ function fakeGraph(): Graph {
     if (method === "GET" && g.paginas[url]) return resp(200, g.paginas[url]);
     const adj = ruta.match(/^\/messages\/([^/]+)\/attachments\?\$select=/);
     if (method === "GET" && adj) return resp(200, { value: g.adjuntos[decodeURIComponent(adj[1])] ?? [] });
+    const sub = ruta.match(/^\/messages\/([^/]+)\/attachments\/createUploadSession$/);
+    if (method === "POST" && sub) {
+      const draft = decodeURIComponent(sub[1]);
+      const url = g.uploadUrl ? g.uploadUrl(draft, ++n) : `https://outlook.office.com/upload/${draft}/${++n}`;
+      g.sesiones[url] = { draft, name: c.body.AttachmentItem.name, size: c.body.AttachmentItem.size, recibido: 0 };
+      return resp(201, { uploadUrl: url });
+    }
+    const pa = ruta.match(/^\/messages\/([^/]+)\/attachments$/);
+    if (method === "POST" && pa) {
+      const draft = decodeURIComponent(pa[1]);
+      const size = Buffer.from(c.body.contentBytes, "base64").length;
+      (g.adjuntos[draft] ??= []).push({ id: "att" + (++n), name: c.body.name, size, isInline: false, contentType: c.body.contentType, contentBytes: c.body.contentBytes });
+      return resp(201, { id: "att" + n });
+    }
+    if (method === "POST" && /\/createForward$/.test(ruta)) {
+      const origen = decodeURIComponent(ruta.split("/")[2]);
+      g.borradores["fw1"] = { id: "fw1", conversationId: "conv-" + origen, internetMessageId: "<fw1@x>", subject: "RV: hola", body: { contentType: "html", content: "<html><body><div>original reenviado</div></body></html>" }, toRecipients: [], ccRecipients: [], isDraft: true };
+      g.adjuntos["fw1"] = (g.adjuntos[origen] ?? []).map((a) => ({ ...a }));
+      return resp(201, g.borradores["fw1"]);
+    }
+    const gb = ruta.match(/^\/messages\/([^/?]+)\?\$select=body$/);
+    if (method === "GET" && gb) return resp(200, { body: g.borradores[decodeURIComponent(gb[1])]?.body ?? { content: "" } });
     const val = ruta.match(/^\/messages\/([^/]+)\/attachments\/([^/]+)\/\$value$/);
     if (method === "GET" && val) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
     if (method === "POST" && ruta === "/sendMail") throw new Error("sendMail no se usa: todo va por borrador");
@@ -136,7 +191,11 @@ function fakeGraph(): Graph {
       return resp(200, { id, ...c.body });
     }
     if (method === "POST" && /^\/messages\/[^/]+\/send$/.test(ruta)) return new Response(null, { status: 202 });
-    if (method === "DELETE") return new Response(null, { status: 204 });
+    if (method === "DELETE") {
+      const id = decodeURIComponent(ruta.split("/")[2]);
+      g.borrados.push(id); delete g.borradores[id];
+      return new Response(null, { status: 204 });
+    }
     return resp(404, { error: { code: "ErrorItemNotFound", message: "no" } });
   }) as typeof fetch;
   return g;
@@ -562,4 +621,244 @@ test("textoAHtml, conCita y buscarCid", () => {
   assert.equal(buscarCid([a("x.png", "<ABC>"), a("y.png", null)], "abc")?.id, undefined);
   assert.equal(buscarCid([a("x.png", "ABC"), a("y.png", null)], "<abc>")?.id, "x.png");
   assert.equal(buscarCid([a("x.png", "ABC"), a("y.png", null)], "y.png@1")?.id, "y.png");
+});
+
+// ---------------------------------------------------------------- redactor (borradores)
+const EMPRESA = "eeeeeeee-0000-0000-0000-000000000001";
+const OTRA = "eeeeeeee-0000-0000-0000-000000000002";
+async function binario(d: Deps, params: Record<string, string>, bytes: Uint8Array, auth: Record<string, string> = { authorization: "Bearer jwt-activo" }) {
+  const res = await createHandler(d)(new Request("https://f/correo?" + new URLSearchParams(params), {
+    method: "POST", headers: { "content-type": "application/octet-stream", ...auth }, body: bytes,
+  }));
+  return { status: res.status, body: await res.json() };
+}
+const bytes = (n: number, v = 7) => new Uint8Array(n).fill(v);
+async function nuevoBorrador(d: Deps, extra: Record<string, unknown> = {}) {
+  const r = await jsonDe(d, { accion: "borrador_crear", tipo: "nuevo", ...extra });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body.borrador as string;
+}
+
+test("borrador_crear: nuevo, respuesta y reenvío quedan registrados con su usuario; no se responde a un enviado", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const ids = await db.guardarMensajes([{ graph_id: "m1", carpeta: "inbox", empresa_id: EMPRESA }, { graph_id: "s1", carpeta: "sentitems" }]);
+  g.adjuntos["m1"] = [{ id: "o1", name: "factura.pdf", size: 1000, isInline: false }, { id: "o2", name: "logo.png", size: 50, isInline: true }];
+
+  const n = await jsonDe(d, { accion: "borrador_crear", tipo: "nuevo", empresa_id: OTRA });
+  assert.equal(n.body.borrador, "nuevo1");
+  assert.deepEqual(db.borradores.get("nuevo1"), { graph_id: "nuevo1", creado_por: "admin-u-activo", tipo: "nuevo", origen_id: null, empresa_id: OTRA, sesiones: [], created_at: reloj.toISOString() });
+
+  const r = await jsonDe(d, { accion: "borrador_crear", tipo: "respuesta", mensaje_id: ids.m1 });
+  assert.equal(r.body.borrador, "borrador1");
+  assert.deepEqual(r.body.para, [{ email: "cliente@ejemplo.invalid", nombre: "Cliente" }]);
+  assert.equal(r.body.empresa_id, EMPRESA, "la empresa sale del mensaje original");
+  assert.equal(db.borradores.get("borrador1").origen_id, ids.m1);
+
+  const f = await jsonDe(d, { accion: "borrador_crear", tipo: "reenvio", mensaje_id: ids.m1 });
+  assert.equal(f.body.borrador, "fw1");
+  assert.deepEqual(f.body.para, []);
+  assert.deepEqual(f.body.adjuntos_originales, [{ nombre: "factura.pdf", tamano: 1000 }], "conserva los adjuntos del original");
+  assert.ok(g.llamadas.some((c) => c.method === "POST" && c.url === `${U}/messages/m1/createForward`));
+
+  assert.equal((await jsonDe(d, { accion: "borrador_crear", tipo: "respuesta", mensaje_id: ids.s1 })).status, 400);
+  assert.equal((await jsonDe(d, { accion: "borrador_crear", tipo: "otro" })).status, 400);
+  assert.equal(db.borradores.size, 3);
+});
+
+test("borrador_adjuntar: binario ≤ 3 MB como fileAttachment en base64; más de 3 MB o en JSON se rechaza", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  const r = await binario(d, { accion: "borrador_adjuntar", borrador: b, nombre: "presu/puesto.pdf", tipo: "application/pdf" }, bytes(1000));
+  assert.deepEqual(r, { status: 200, body: { ok: true, nombre: "presupuesto.pdf", tamano: 1000 } });
+  const post = g.llamadas.find((c) => c.method === "POST" && c.url === `${U}/messages/${b}/attachments`)!;
+  assert.equal(post.body["@odata.type"], "#microsoft.graph.fileAttachment");
+  assert.equal(post.body.contentType, "application/pdf");
+  assert.deepEqual(Buffer.from(post.body.contentBytes, "base64"), Buffer.from(bytes(1000)));
+
+  const antes = g.llamadas.length;
+  assert.equal((await binario(d, { accion: "borrador_adjuntar", borrador: b, nombre: "x" }, bytes(MAX_DIRECTO + 1))).status, 413);
+  assert.equal((await jsonDe(d, { accion: "borrador_adjuntar", borrador: b })).status, 400);
+  assert.equal((await binario(d, { accion: "borrador_enviar", borrador: b }, bytes(1))).status, 400, "binario solo para adjuntar y trozos");
+  assert.equal(g.llamadas.length, antes, "sin llamar a Graph");
+});
+
+test("sesión de subida: trozos en orden de TROZO bytes, PUT sin token y con Content-Range", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  const total = 2 * TROZO + 1234;
+  const s = await jsonDe(d, { accion: "borrador_sesion", borrador: b, nombre: "planos.zip", tipo: "application/zip", tamano: total });
+  assert.equal(s.status, 200); assert.equal(s.body.trozo, TROZO);
+  assert.equal(TROZO % 327_680, 0, "múltiplo de 320 KiB");
+  assert.ok(TROZO <= MAX_DIRECTO);
+  const cus = g.llamadas.find((c) => c.url.endsWith("/attachments/createUploadSession"))!;
+  assert.deepEqual(cus.body, { AttachmentItem: { attachmentType: "file", name: "planos.zip", size: total, contentType: "application/zip" } });
+  assert.equal(JSON.stringify(s.body).includes("outlook.office.com"), false, "la URL de subida no sale al navegador");
+
+  const trozo = (desde: number, n: number) => binario(d, { accion: "borrador_trozo", borrador: b, sesion: s.body.sesion, desde: String(desde) }, bytes(n));
+  assert.equal((await trozo(TROZO, TROZO)).status, 409, "fuera de orden");
+  assert.equal((await trozo(0, 100)).status, 400, "tamaño de trozo incorrecto");
+  assert.deepEqual((await trozo(0, TROZO)).body, { siguiente: TROZO, completo: false });
+  assert.deepEqual((await trozo(TROZO, TROZO)).body, { siguiente: 2 * TROZO, completo: false });
+  assert.deepEqual((await trozo(2 * TROZO, 1234)).body, { siguiente: total, completo: true });
+  assert.deepEqual(g.subidas.map((x) => [x.headers["Content-Range"], x.largo]), [
+    [`bytes 0-${TROZO - 1}/${total}`, TROZO], [`bytes ${TROZO}-${2 * TROZO - 1}/${total}`, TROZO], [`bytes ${2 * TROZO}-${total - 1}/${total}`, 1234],
+  ]);
+  assert.deepEqual(db.borradores.get(b).sesiones, [], "sesión cerrada");
+  assert.deepEqual(g.adjuntos[b].map((a) => [a.name, a.size]), [["planos.zip", total]]);
+});
+
+test("sesión de subida: una URL de subida que no es de Office → 502 sin guardarla", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  g.uploadUrl = () => "https://malo.invalid/upload";
+  const b = await nuevoBorrador(d);
+  const r = await jsonDe(d, { accion: "borrador_sesion", borrador: b, nombre: "x", tamano: 5_000_000 });
+  assert.equal(r.status, 502);
+  assert.deepEqual(db.borradores.get(b).sesiones, []);
+  assert.equal(urlSubidaValida("https://outlook.office.com/api/v2.0/x"), true);
+  assert.equal(urlSubidaValida("https://attachments.office365.com/x"), true);
+  assert.equal(urlSubidaValida("http://outlook.office.com/x"), false);
+  assert.equal(urlSubidaValida("https://outlook.office.com.malo.invalid/x"), false);
+  assert.equal(urlSubidaValida("https://notoffice.com/x"), false);
+});
+
+test("límite de 25 MB por correo, contando lo ya adjunto (también los originales de un reenvío)", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  g.adjuntos[b] = [{ id: "x", name: "grande", size: 24 * 1048576, isInline: false }];
+  const r = await binario(d, { accion: "borrador_adjuntar", borrador: b, nombre: "y" }, bytes(1048577));
+  assert.equal(r.status, 413);
+  assert.match(r.body.error, /25 MB por correo \(25,0 MB\)/);
+  assert.equal((await jsonDe(d, { accion: "borrador_sesion", borrador: b, nombre: "z", tamano: 2 * 1048576 })).status, 413);
+  assert.equal((await jsonDe(d, { accion: "borrador_sesion", borrador: b, nombre: "z", tamano: 26 * 1048576 })).status, 413);
+  assert.equal(g.adjuntos[b].length, 1);
+  assert.equal(g.llamadas.filter((c) => c.url.endsWith("/createUploadSession")).length, 0);
+});
+
+test("borradores ajenos: de otro usuario o que no están en la tabla → 404 sin tocar Graph", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  db.borradores.get(b).creado_por = "admin-otro";
+  g.borradores["deOutlook"] = { id: "deOutlook", isDraft: true };
+  const antes = g.llamadas.length;
+  for (const id of [b, "deOutlook"]) {
+    assert.equal((await binario(d, { accion: "borrador_adjuntar", borrador: id, nombre: "x" }, bytes(10))).status, 404);
+    assert.equal((await jsonDe(d, { accion: "borrador_sesion", borrador: id, nombre: "x", tamano: 10 })).status, 404);
+    assert.equal((await jsonDe(d, { accion: "borrador_enviar", borrador: id, para: ["a@ejemplo.invalid"], asunto: "x", html: "<p>x</p>" })).status, 404);
+    assert.equal((await jsonDe(d, { accion: "borrador_descartar", borrador: id })).status, 404);
+  }
+  assert.equal(g.llamadas.length, antes);
+  assert.ok(g.borradores["deOutlook"], "el borrador de Outlook sigue ahí");
+  assert.equal((await jsonDe(d, { accion: "borrador_crear", tipo: "nuevo" }, { "x-hook-secret": CRON })).status, 403, "el cron no redacta");
+});
+
+test("borrador_documento: solo de la empresa del borrador y guardado; ≤ 3 MB directo, más por trozos", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const doc = (id: string, o: Record<string, unknown>) => db.documentos.set(id, { id, empresa_id: EMPRESA, status: "stored", nombre: "doc.pdf", tipo: "application/pdf", storage_path: "p/" + id, ...o });
+  const D1 = "dddddddd-0000-0000-0000-000000000001", D2 = "dddddddd-0000-0000-0000-000000000002";
+  const D3 = "dddddddd-0000-0000-0000-000000000003", D4 = "dddddddd-0000-0000-0000-000000000004";
+  doc(D1, { nombre: "pequeño.pdf", tamano: 500 }); db.ficheros.set("p/" + D1, bytes(500));
+  doc(D2, { nombre: "grande.pdf", tamano: MAX_DIRECTO + 10 }); db.ficheros.set("p/" + D2, bytes(MAX_DIRECTO + 10));
+  doc(D3, { empresa_id: OTRA }); db.ficheros.set("p/" + D3, bytes(5));
+  doc(D4, { status: "pending" }); db.ficheros.set("p/" + D4, bytes(5));
+
+  const sin = await nuevoBorrador(d);
+  assert.equal((await jsonDe(d, { accion: "borrador_documento", borrador: sin, documento_id: D1 })).status, 400, "sin empresa");
+  await jsonDe(d, { accion: "borrador_descartar", borrador: sin });
+
+  const b = await nuevoBorrador(d, { empresa_id: EMPRESA });
+  assert.equal((await jsonDe(d, { accion: "borrador_documento", borrador: b, documento_id: D3 })).status, 404, "de otra empresa");
+  assert.equal((await jsonDe(d, { accion: "borrador_documento", borrador: b, documento_id: D4 })).status, 404, "no guardado");
+  assert.deepEqual((await jsonDe(d, { accion: "borrador_documento", borrador: b, documento_id: D1 })).body, { ok: true, nombre: "pequeño.pdf", tamano: 500 });
+  assert.equal(g.subidas.length, 0);
+  assert.deepEqual((await jsonDe(d, { accion: "borrador_documento", borrador: b, documento_id: D2 })).body, { ok: true, nombre: "grande.pdf", tamano: MAX_DIRECTO + 10 });
+  assert.deepEqual(g.subidas.map((x) => x.largo), [TROZO, MAX_DIRECTO + 10 - TROZO]);
+  assert.deepEqual(g.adjuntos[b].map((a) => [a.name, a.size]), [["pequeño.pdf", 500], ["grande.pdf", MAX_DIRECTO + 10]]);
+  assert.deepEqual(db.borradores.get(b).sesiones, []);
+});
+
+test("borrador_enviar: HTML saneado encima de la cita, from info@, fila con enviado_por y borrador fuera de la tabla", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const ids = await db.guardarMensajes([{ graph_id: "m1", carpeta: "inbox" }]);
+  const b = (await jsonDe(d, { accion: "borrador_crear", tipo: "respuesta", mensaje_id: ids.m1 })).body.borrador;
+  const r = await jsonDe(d, {
+    accion: "borrador_enviar", borrador: b, para: ["cliente@ejemplo.invalid"], cc: ["otro@ejemplo.invalid"], cco: ["oculto@ejemplo.invalid"],
+    asunto: "RE: hola", html: '<p onclick="x()">Hola <b>ya</b><script>alert(1)</script></p><ul><li>uno</li></ul>',
+  });
+  assert.deepEqual(r, { status: 200, body: { ok: true, graph_id: "borrador1" } });
+  const patch = g.llamadas.find((c) => c.method === "PATCH" && c.url === `${U}/messages/borrador1`)!;
+  assert.deepEqual(patch.body.from, { emailAddress: { address: ALIAS } });
+  assert.equal(patch.body.body.contentType, "HTML");
+  assert.equal(patch.body.body.content, "<html><body><p>Hola <b>ya</b></p><ul><li>uno</li></ul><div>cita</div></body></html>");
+  assert.deepEqual(patch.body.bccRecipients, [{ emailAddress: { address: "oculto@ejemplo.invalid" } }]);
+  assert.equal(g.llamadas.at(-1)!.url, `${U}/messages/borrador1/send`);
+  assert.equal(db.mensajes.get("borrador1")!.enviado_por, "admin-u-activo");
+  assert.equal(db.borradores.has("borrador1"), false);
+});
+
+test("borrador_enviar: valida; con trozos pendientes 409; si falla el envío borra el borrador y no registra", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  const ok = { accion: "borrador_enviar", borrador: b, para: ["a@ejemplo.invalid"], asunto: "Hola", html: "<p>x</p>" };
+  assert.equal((await jsonDe(d, { ...ok, para: [] })).status, 400);
+  assert.equal((await jsonDe(d, { ...ok, asunto: " " })).status, 400);
+  assert.equal((await jsonDe(d, { ...ok, html: "<p> </p>" })).status, 400);
+  await jsonDe(d, { accion: "borrador_sesion", borrador: b, nombre: "x", tamano: 5_000_000 });
+  assert.equal((await jsonDe(d, ok)).status, 409);
+  db.borradores.get(b).sesiones = [];
+  g.falla = (c) => (c.url.endsWith("/send") ? resp(403, { error: { code: "ErrorSendAsDenied", message: "x" } }) : null);
+  const r = await jsonDe(d, ok);
+  assert.equal(r.status, 403);
+  assert.ok(g.borrados.includes(b), "borrador borrado en Outlook");
+  assert.equal(db.borradores.has(b), false);
+  assert.equal(db.mensajes.has(b), false);
+});
+
+test("borrador_enviar: un reenvío puede ir sin texto y conserva los adjuntos originales", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const ids = await db.guardarMensajes([{ graph_id: "s1", carpeta: "sentitems" }]);
+  g.adjuntos["s1"] = [{ id: "o1", name: "factura.pdf", size: 1000, isInline: false }];
+  const b = (await jsonDe(d, { accion: "borrador_crear", tipo: "reenvio", mensaje_id: ids.s1 })).body.borrador;
+  const r = await jsonDe(d, { accion: "borrador_enviar", borrador: b, para: ["nuevo@ejemplo.invalid"], html: "" });
+  assert.equal(r.status, 200);
+  const patch = g.llamadas.find((c) => c.method === "PATCH" && c.url === `${U}/messages/fw1`)!;
+  assert.equal(patch.body.subject, undefined, "conserva el asunto RV:");
+  assert.match(patch.body.body.content, /original reenviado/);
+  assert.equal(g.llamadas.some((c) => c.method === "DELETE" && /attachments/.test(c.url)), false);
+  assert.equal(g.adjuntos["fw1"].length, 1);
+});
+
+test("borrador_descartar: lo borra en Outlook (aunque ya no esté) y de la tabla", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const b = await nuevoBorrador(d);
+  assert.deepEqual((await jsonDe(d, { accion: "borrador_descartar", borrador: b })).body, { ok: true });
+  assert.deepEqual(g.borrados, [b]);
+  assert.equal(db.borradores.size, 0);
+  const b2 = await nuevoBorrador(d);
+  g.falla = (c) => (c.method === "DELETE" ? resp(404, { error: { code: "ErrorItemNotFound" } }) : null);
+  assert.equal((await jsonDe(d, { accion: "borrador_descartar", borrador: b2 })).status, 200);
+  assert.equal(db.borradores.size, 0);
+});
+
+test("limpieza: solo borra los borradores del CRM de más de 2 h; nunca uno ajeno de Outlook aunque sea viejo", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  reloj = new Date("2026-11-12T08:00:00Z");
+  const viejo = await nuevoBorrador(d);           // nuevo1, del CRM, 4 h
+  // Borrador que una persona tiene en Outlook desde hace días: no está en correo_borradores.
+  g.borradores["ajeno-viejo"] = { id: "ajeno-viejo", isDraft: true, createdDateTime: "2026-11-01T08:00:00Z" };
+  reloj = new Date("2026-11-12T11:30:00Z");
+  db.borradores.set("reciente", { graph_id: "reciente", creado_por: "admin-u-activo", tipo: "nuevo", sesiones: [], created_at: reloj.toISOString() });
+  reloj = new Date("2026-11-12T12:00:00Z");
+  assert.equal(await limpiarBorradores(d, db), 1);
+  assert.deepEqual(g.borrados, [viejo]);
+  assert.ok(g.borradores["ajeno-viejo"], "el borrador ajeno sigue en Outlook");
+  assert.ok(!g.llamadas.some((c) => c.url.includes("ajeno-viejo")), "ni se consulta");
+  assert.deepEqual([...db.borradores.keys()], ["reciente"]);
+  assert.ok(!g.llamadas.some((c) => c.method === "GET" && /\/messages\?|mailFolders\/drafts/.test(c.url)), "no lista borradores del buzón");
+});
+
+test("nombreFichero: sin rutas ni caracteres de control", () => {
+  assert.equal(nombreFichero("../../etc/passwd"), "....etcpasswd");
+  assert.equal(nombreFichero("a\u0000b\nc.pdf"), "abc.pdf");
+  assert.equal(nombreFichero(""), "adjunto");
+  assert.equal(nombreFichero("x".repeat(300)).length, 200);
 });
