@@ -98,6 +98,7 @@ export interface Db {
   reasignarEnviado(internetMessageId: string, graphId: string): Promise<void>;
   marcarFuera(graphIds: string[], enIso: string): Promise<number>;  // solo filas existentes
   leidoSiExiste(graphId: string, leido: boolean): Promise<void>;
+  existentes(graphIds: string[]): Promise<string[]>;                 // graph_id que ya están en correo_mensajes
   guardarAdjuntos(filas: Fila[]): Promise<void>;
   mensaje(id: string): Promise<MensajeDb | null>;
   adjunto(id: string): Promise<AdjuntoDb | null>;
@@ -191,6 +192,26 @@ export function esDeInfo(m: any, carpeta: Carpeta): boolean {
   if (carpeta === "inbox") return [...(m.toRecipients ?? []), ...(m.ccRecipients ?? [])].some((r: any) => dir(r) === ALIAS);
   return dir(m.from) === ALIAS;
 }
+// Respaldo del filtro: hasta que se activó SendFromAliasEnabled, Exchange
+// reescribía el destinatario info@ → administracion@ ("Resolved") y
+// toRecipients/ccRecipients ya no mostraban info@. Las cabeceras originales
+// To y Cc sí lo conservan. Solo cuenta la dirección exacta (no noinfo@…,
+// ni info@guimaes.es.otro, ni otras cabeceras como Received).
+const RE_INFO = /(^|[\s<,;:"'(])info@guimaes\.es(?=$|[\s>,;"')])/i;
+export function infoEnCabeceras(cabeceras: any[] | undefined): boolean {
+  return (cabeceras ?? []).some((h: any) => /^(to|cc)$/i.test(String(h?.name ?? "").trim()) && RE_INFO.test(String(h?.value ?? "")));
+}
+// Pide solo internetMessageHeaders de un mensaje. Si ya no está (404), no pasa.
+async function cabecerasConInfo(deps: Deps, b: string, graphId: string): Promise<boolean> {
+  try {
+    const m = await graph(deps, `${b}/messages/${encodeURIComponent(graphId)}?$select=internetMessageHeaders`);
+    return infoEnCabeceras(m?.internetMessageHeaders);
+  } catch (e) {
+    if (e instanceof GraphError && e.estado === 404) return false;
+    throw e;
+  }
+}
+
 // Un elemento del delta sin los campos del filtro no se puede clasificar.
 function completo(m: any, carpeta: Carpeta): boolean {
   return carpeta === "inbox" ? Array.isArray(m.toRecipients) : m.from !== undefined;
@@ -247,6 +268,31 @@ async function listarAdjuntos(deps: Deps, b: string, graphId: string): Promise<a
   return todos;
 }
 
+// Guarda los mensajes (ya filtrados) y los metadatos de sus adjuntos. Devuelve cuántos adjuntos.
+async function guardarConAdjuntos(deps: Deps, db: Db, b: string, carpeta: Carpeta, guardar: any[]): Promise<number> {
+  const ids = await db.guardarMensajes(guardar.map((m) => filaDe(m, carpeta)));
+  let n = 0;
+  for (const m of guardar) {
+    // Las imágenes incrustadas no cuentan en hasAttachments: mirar también cid:.
+    const conCid = /\bcid:/i.test(String(m.body?.content ?? ""));
+    if (!m.hasAttachments && !conCid) continue;
+    if (!ids[m.id]) continue;
+    const adj = await listarAdjuntos(deps, b, m.id);
+    if (!adj.length) continue;
+    await db.guardarAdjuntos(adj.map((a) => ({
+      mensaje_id: ids[m.id],
+      graph_id: a.id,
+      nombre: String(a.name ?? ""),
+      tipo: a.contentType ?? null,
+      tamano: typeof a.size === "number" ? a.size : null,
+      inline: !!a.isInline,
+      content_id: a.contentId ? String(a.contentId).replace(/^<|>$/g, "") : null,
+    })));
+    n += adj.length;
+  }
+  return n;
+}
+
 export type Resumen = {
   carpeta: Carpeta; reservada: boolean; completa: boolean;
   guardados: number; descartados: number; fuera_bandeja: number; adjuntos: number; error?: string;
@@ -277,7 +323,9 @@ async function sincronizarCarpeta(deps: Deps, db: Db, carpeta: Carpeta, limite: 
           if (typeof m.isRead === "boolean") await db.leidoSiExiste(m.id, m.isRead);
           continue;
         }
-        if (m.isDraft || !esDeInfo(m, carpeta)) { r.descartados++; continue; }
+        if (m.isDraft) { r.descartados++; continue; }
+        // Respaldo: si el filtro por destinatarios lo descarta, mirar las cabeceras originales (solo inbox).
+        if (!esDeInfo(m, carpeta) && !(carpeta === "inbox" && await cabecerasConInfo(deps, b, m.id))) { r.descartados++; continue; }
         guardar.push(m);
       }
       if (quitar.length) r.fuera_bandeja += await db.marcarFuera(quitar, ahora().toISOString());
@@ -285,26 +333,8 @@ async function sincronizarCarpeta(deps: Deps, db: Db, carpeta: Carpeta, limite: 
         if (carpeta === "sentitems") {
           for (const m of guardar) if (m.internetMessageId) await db.reasignarEnviado(m.internetMessageId, m.id);
         }
-        const ids = await db.guardarMensajes(guardar.map((m) => filaDe(m, carpeta)));
         r.guardados += guardar.length;
-        for (const m of guardar) {
-          // Las imágenes incrustadas no cuentan en hasAttachments: mirar también cid:.
-          const conCid = /\bcid:/i.test(String(m.body?.content ?? ""));
-          if (!m.hasAttachments && !conCid) continue;
-          if (!ids[m.id]) continue;
-          const adj = await listarAdjuntos(deps, b, m.id);
-          if (!adj.length) continue;
-          await db.guardarAdjuntos(adj.map((a) => ({
-            mensaje_id: ids[m.id],
-            graph_id: a.id,
-            nombre: String(a.name ?? ""),
-            tipo: a.contentType ?? null,
-            tamano: typeof a.size === "number" ? a.size : null,
-            inline: !!a.isInline,
-            content_id: a.contentId ? String(a.contentId).replace(/^<|>$/g, "") : null,
-          })));
-          r.adjuntos += adj.length;
-        }
+        r.adjuntos += await guardarConAdjuntos(deps, db, b, carpeta, guardar);
       }
       const descartados = descartadosAntes + r.descartados;
       if (pag["@odata.nextLink"]) {
@@ -759,6 +789,62 @@ export async function diagnostico(deps: Deps) {
   };
 }
 
+// ---------------------------------------------------------------- importación histórica (a mano, no la lanza el cron)
+// Recorre la bandeja de entrada del periodo de importación (90 días) y, para
+// los mensajes que no están en correo_mensajes, pide solo
+// internetMessageHeaders: si To o Cc originales llevan info@, se importa
+// como un mensaje normal (simular: solo se cuenta); si no, se descarta sin
+// guardar nada. Con presupuesto de tiempo: si no termina, devuelve un cursor
+// (enlace de Graph de la página siguiente) para continuar.
+const POR_PAGINA_HISTORICO = 25;
+const MARGEN_HISTORICO_MS = 30_000;
+export async function importarHistorico(deps: Deps, db: Db, body: any) {
+  const ahora = () => (deps.now?.() ?? new Date());
+  const limite = ahora().getTime() + PRESUPUESTO_MS - MARGEN_HISTORICO_MS;
+  const b = buzon(deps);
+  const simular = body?.simular !== false;
+  const base = `${GRAPH}${b}/mailFolders/inbox/messages`; // los nextLink de Graph son absolutos
+  let url: string;
+  if (body?.cursor) {
+    url = String(body.cursor);
+    if (!url.startsWith(base + "?")) throw new Peticion(400, "Cursor no válido");
+  } else {
+    const est = await db.estado("inbox");
+    const desde = est.importacion_desde
+      ? new Date(est.importacion_desde).toISOString().replace(/\.\d{3}Z$/, "Z")
+      : new Date(ahora().getTime() - DIAS_IMPORTACION * 86_400_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    url = `${base}?$select=id,receivedDateTime,isDraft&$filter=${encodeURIComponent(`receivedDateTime ge ${desde}`)}&$top=${POR_PAGINA_HISTORICO}`;
+  }
+  const r = { simular, revisados: 0, ya_estaban: 0, pasan: 0, descartados: 0, importados: 0, adjuntos: 0, por_mes: {} as Record<string, number>, cursor: null as string | null };
+  while (url) {
+    if (ahora().getTime() > limite) { r.cursor = url; break; }
+    const pag = await graph(deps, url);
+    const ms = (pag.value ?? []).filter((m: any) => m?.id);
+    const ya = new Set(ms.length ? await db.existentes(ms.map((m: any) => String(m.id))) : []);
+    for (const m of ms) {
+      r.revisados++;
+      if (ya.has(String(m.id))) { r.ya_estaban++; continue; }
+      if (m.isDraft || !(await cabecerasConInfo(deps, b, String(m.id)))) { r.descartados++; continue; }
+      r.pasan++;
+      const mes = String(m.receivedDateTime ?? "").slice(0, 7) || "(sin fecha)";
+      r.por_mes[mes] = (r.por_mes[mes] ?? 0) + 1;
+      if (simular) continue;
+      let completo: any;
+      try {
+        completo = await graph(deps, `${b}/messages/${encodeURIComponent(m.id)}?$select=${SELECT}`, { prefer: 'outlook.body-content-type="html"' });
+      } catch (e) {
+        if (e instanceof GraphError && e.estado === 404) { r.pasan--; r.por_mes[mes]--; r.descartados++; continue; }
+        throw e;
+      }
+      r.adjuntos += await guardarConAdjuntos(deps, db, b, "inbox", [completo]);
+      r.importados++;
+    }
+    url = String(pag["@odata.nextLink"] ?? "");
+    if (url && !url.startsWith(base + "?")) throw new Peticion(502, "Enlace de Graph inesperado");
+  }
+  return r;
+}
+
 export async function marcarLeido(deps: Deps, db: Db, body: any) {
   const m = await mensajeDe(db, body?.mensaje_id);
   const leido = body?.leido !== false;
@@ -822,6 +908,7 @@ type Quien = "cron" | "usuario";
 const PERMITIDO: Record<string, Quien[]> = {
   comprobar: ["cron", "usuario"],
   diagnostico: ["cron", "usuario"],
+  importar_historico: ["cron", "usuario"],
   sincronizar: ["cron", "usuario"],
   enviar: ["usuario"],
   responder: ["usuario"],
@@ -885,6 +972,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       if (accion === "diagnostico") return json(await diagnostico(deps));
       const db = deps.db();
       if (accion === "sincronizar") return json(await sincronizar(deps, db));
+      if (accion === "importar_historico") return json(await importarHistorico(deps, db, body));
       if (accion === "enviar") return json(await enviar(deps, db, body, adminId));
       if (accion === "responder") return json(await responder(deps, db, body, adminId));
       if (accion === "marcar_leido") return json(await marcarLeido(deps, db, body));

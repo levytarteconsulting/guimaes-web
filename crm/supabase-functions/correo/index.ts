@@ -69,6 +69,10 @@ const db: Db = {
       .in("graph_id", graphIds).eq("fuera_bandeja", false).select("id"));
     return (d ?? []).length;
   },
+  async existentes(graphIds) {
+    const d = ok(await service.from("correo_mensajes").select("graph_id").in("graph_id", graphIds));
+    return (d ?? []).map((x: { graph_id: string }) => x.graph_id);
+  },
   async leidoSiExiste(graphId, leido) {
     ok(await service.from("correo_mensajes").update({ leido }).eq("graph_id", graphId));
   },
