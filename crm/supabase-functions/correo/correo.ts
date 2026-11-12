@@ -25,7 +25,7 @@
 //   adjunto       — {adjunto_id} o {mensaje_id, cid}: descarga bajo demanda (no se guarda)
 //
 // Quién puede llamar:
-//   x-hook-secret = CORREO_CRON_SECRET (pg_cron)      → sincronizar
+//   x-hook-secret = CORREO_CRON_SECRET (pg_cron)      → sincronizar, comprobar
 //   Authorization: Bearer <service role>              → todas
 //   Authorization: Bearer <JWT de usuario activo CRM> → todas
 
@@ -473,7 +473,7 @@ function cors(req: Request): Record<string, string> {
 
 type Quien = "cron" | "servicio" | "usuario";
 const PERMITIDO: Record<string, Quien[]> = {
-  comprobar: ["servicio", "usuario"],
+  comprobar: ["cron", "servicio", "usuario"],
   sincronizar: ["cron", "servicio", "usuario"],
   enviar: ["servicio", "usuario"],
   responder: ["servicio", "usuario"],
