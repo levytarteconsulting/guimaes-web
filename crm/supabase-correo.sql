@@ -1,10 +1,13 @@
 -- ============================================================
 -- GUIMAES — Correo de info@guimaes.es en el CRM (parte 1: esquema)
 --
--- La Edge Function "correo" (crm/supabase-functions/correo/) copia aquí los
--- mensajes de la bandeja de entrada y de Elementos enviados de
--- info@guimaes.es (Microsoft Graph, delta query) y envía/responde desde el
--- CRM. Esta migración solo crea el esquema; el job de pg_cron va en una
+-- info@guimaes.es es un alias del buzón administracion@guimaes.es. La Edge
+-- Function "correo" (crm/supabase-functions/correo/) lee ese buzón
+-- (Microsoft Graph, delta query) y copia aquí SOLO lo que es de info@: de la
+-- bandeja de entrada, los mensajes con info@ en para o cc; de Elementos
+-- enviados, los enviados desde info@. El resto no se guarda en ninguna tabla
+-- (correo_sync solo lleva un contador de descartados). Envía y responde
+-- desde el CRM como info@. Esta migración solo crea el esquema; el job de pg_cron va en una
 -- migración aparte (crm/supabase-correo-cron.sql), cuando la función ya
 -- esté desplegada.
 --
@@ -19,14 +22,16 @@
 --         contacto y empresa. Si vuelve a aparecer en el delta, la función
 --         la desmarca.
 --       - emails_norm: emails de remitente y destinatarios normalizados
---         (lower(btrim())), sin el buzón; lo rellena el trigger.
+--         (lower(btrim())), sin info@ ni administracion@ (el propio buzón);
+--         lo rellena el trigger.
 --       - contact_id / empresa_id: vínculo automático (ver abajo).
 --       - enviado_por: usuario del CRM que lo envió desde el CRM.
 --   * correo_adjuntos: solo metadatos (los ficheros no se guardan; la
 --     función los descarga de Graph bajo demanda).
 --   * correo_sync: estado de la sincronización por carpeta (deltaLink,
 --     nextLink para reanudar una importación cortada, reserva para que dos
---     ejecuciones no se pisen, último error).
+--     ejecuciones no se pisen, último error, contador de descartados por el
+--     filtro de info@).
 --   * Vinculación automática por email normalizado (misma expresión que el
 --     índice contactos_email_norm_idx):
 --       - al insertar un mensaje (o cambiar sus direcciones) sin contacto:
@@ -163,6 +168,7 @@ begin
     ultima_ejecucion  timestamptz,
     ultimo_ok         timestamptz,
     ultimo_error      text,
+    descartados       bigint not null default 0,  -- mensajes del buzón que no son de info@
     constraint correo_sync_carpeta_chk check (carpeta in ('inbox', 'sentitems'))
   );
   insert into public.correo_sync (carpeta) values ('inbox'), ('sentitems');
@@ -220,10 +226,11 @@ begin
         v_lista := public.correo_emails_de(new.para) || public.correo_emails_de(new.cc)
                    || public.correo_emails_de(new.cco);
       end if;
-      -- Sin duplicados (manteniendo el orden) y sin el propio buzón.
+      -- Sin duplicados (manteniendo el orden) y sin el propio buzón
+      -- (info@ es alias de administracion@).
       select coalesce(array_agg(e order by o), '{}') into new.emails_norm
       from (select e, min(o) as o from unnest(v_lista) with ordinality as u(e, o)
-            where e <> 'info@guimaes.es' group by e) d;
+            where e not in ('info@guimaes.es', 'administracion@guimaes.es') group by e) d;
     end if;
 
     if new.contact_id is null then
@@ -318,7 +325,7 @@ begin
 
   revoke all on public.correo_mensajes, public.correo_adjuntos, public.correo_sync from public, anon, authenticated;
   grant select on public.correo_mensajes, public.correo_adjuntos to authenticated;
-  grant select (carpeta, updated_at, importacion_desde, ultima_ejecucion, ultimo_ok, ultimo_error)
+  grant select (carpeta, updated_at, importacion_desde, ultima_ejecucion, ultimo_ok, ultimo_error, descartados)
     on public.correo_sync to authenticated;
   grant all on public.correo_mensajes, public.correo_adjuntos, public.correo_sync to service_role;
 
@@ -423,7 +430,7 @@ begin
   -- Recibido de un contacto existente → vínculo con contacto y empresa.
   insert into public.correo_mensajes (graph_id, carpeta, remitente_email, para, fecha)
   values ('prueba-1d-1', 'inbox', 'PRUEBA.1d@ejemplo.invalid',
-          '[{"email":"info@guimaes.es"}]', now())
+          '[{"email":"info@guimaes.es"},{"email":"Administracion@guimaes.es"}]', now())
   returning id into v_m1;
   insert into correo_prueba
   select 'recibido vinculado', contact_id = v_c and empresa_id = v_e
