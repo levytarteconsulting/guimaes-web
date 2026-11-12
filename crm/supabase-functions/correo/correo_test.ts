@@ -9,14 +9,13 @@ import type { AdjuntoDb, Carpeta, Db, Deps, Estado, Fila } from "./correo.ts";
 import { sanearHtml, textoAHtml } from "./sanear.ts";
 
 const BUZON = "091c33e7-0000-0000-0000-000000000000";
-const SERVICE = "service-role-key";
 const CRON = "secreto-cron";
 const U = `${GRAPH}/users/${BUZON}`;
 const SECRETO_ASUNTO = "ASUNTO-PRIVADO-DE-ADMINISTRACION";
 
 const env: Record<string, string> = {
   MS_GRAPH_TENANT_ID: "tenant", MS_GRAPH_CLIENT_ID: "cliente", MS_GRAPH_CLIENT_SECRET: "secreto",
-  MS_GRAPH_MAILBOX: BUZON, CORREO_CRON_SECRET: CRON, SUPABASE_SERVICE_ROLE_KEY: SERVICE,
+  MS_GRAPH_MAILBOX: BUZON, CORREO_CRON_SECRET: CRON,
 };
 
 // ---------------------------------------------------------------- base de datos simulada
@@ -30,7 +29,16 @@ class FakeDb implements Db {
   reservadas = new Set<Carpeta>();
   activos = new Set(["u-activo"]);
   n = 0;
-  async usuarioActivo(uid: string) { return this.activos.has(uid); }
+  async adminActivo(uid: string) { return this.activos.has(uid) ? "admin-" + uid : null; }
+  async registrarEnviado(f: Fila) { await this.guardarMensajes([f]); }
+  async reasignarEnviado(imid: string, gid: string) {
+    if (this.mensajes.has(gid)) return;
+    for (const [g, m] of this.mensajes) {
+      if (m.internet_message_id === imid && m.carpeta === "sentitems" && m.enviado_por && g !== gid) {
+        this.mensajes.delete(g); this.mensajes.set(gid, { ...m, graph_id: gid });
+      }
+    }
+  }
   async reservar(c: Carpeta) { if (this.reservadas.has(c)) return false; this.reservadas.add(c); return true; }
   async liberar(c: Carpeta) { this.reservadas.delete(c); }
   async estado(c: Carpeta) { const s = this.sync[c]; return { delta_link: s.delta_link, next_link: s.next_link, importacion_desde: s.importacion_desde, descartados: s.descartados }; }
@@ -80,11 +88,12 @@ type Graph = {
   adjuntos: Record<string, any[]>;    // graph_id del mensaje → adjuntos
   falla?: (c: Llamada) => Response | null;
   borrador?: any;
+  borradores: Record<string, any>;
 };
 const resp = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 function fakeGraph(): Graph {
-  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, fetch: null as any };
+  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, borradores: {}, fetch: null as any };
   g.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -99,6 +108,7 @@ function fakeGraph(): Graph {
     assert.ok(url.startsWith(U + "/"), "siempre /users/{id del buzón}: " + url);
     const headers = (init?.headers ?? {}) as Record<string, string>;
     assert.match(headers["Authorization"], /^Bearer tok\d+$/);
+    assert.ok(headers["Prefer"]?.startsWith('IdType="ImmutableId"'), "ids inmutables en todas las llamadas: " + url);
     const c: Llamada = { method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers };
     g.llamadas.push(c);
     const f = g.falla?.(c); if (f) return f;
@@ -109,9 +119,22 @@ function fakeGraph(): Graph {
     if (method === "GET" && adj) return resp(200, { value: g.adjuntos[decodeURIComponent(adj[1])] ?? [] });
     const val = ruta.match(/^\/messages\/([^/]+)\/attachments\/([^/]+)\/\$value$/);
     if (method === "GET" && val) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-    if (method === "POST" && ruta === "/sendMail") return new Response(null, { status: 202 });
-    if (method === "POST" && /\/createReply(All)?$/.test(ruta)) return resp(201, g.borrador ?? { id: "borrador1", body: { contentType: "html", content: "<html><body><div>cita</div></body></html>" }, toRecipients: [], ccRecipients: [] });
-    if (method === "PATCH" && /^\/messages\/[^/]+$/.test(ruta)) return resp(200, {});
+    if (method === "POST" && ruta === "/sendMail") throw new Error("sendMail no se usa: todo va por borrador");
+    if (method === "POST" && ruta === "/messages") {
+      g.borradores["nuevo1"] = { ...c.body, id: "nuevo1", conversationId: "conv-nuevo1", internetMessageId: "<nuevo1@x>", isDraft: true };
+      return resp(201, g.borradores["nuevo1"]);
+    }
+    if (method === "POST" && /\/createReply(All)?$/.test(ruta)) {
+      const b = g.borrador ?? { id: "borrador1", conversationId: "conv-m1", internetMessageId: "<b1@x>", subject: "RE: hola", body: { contentType: "html", content: "<html><body><div>cita</div></body></html>" }, toRecipients: [dir("cliente@ejemplo.invalid", "Cliente")], ccRecipients: [] };
+      g.borradores[b.id] = { ...b, isDraft: true };
+      return resp(201, g.borradores[b.id]);
+    }
+    const pm = ruta.match(/^\/messages\/([^/]+)$/);
+    if (method === "PATCH" && pm) {
+      const id = decodeURIComponent(pm[1]);
+      if (g.borradores[id]) { Object.assign(g.borradores[id], c.body); return resp(200, g.borradores[id]); }
+      return resp(200, { id, ...c.body });
+    }
     if (method === "POST" && /^\/messages\/[^/]+\/send$/.test(ruta)) return new Response(null, { status: 202 });
     if (method === "DELETE") return new Response(null, { status: 204 });
     return resp(404, { error: { code: "ErrorItemNotFound", message: "no" } });
@@ -141,7 +164,7 @@ function deps(g: Graph, db: FakeDb, extra: Partial<Deps> = {}): Deps {
     ...extra,
   };
 }
-async function llamar(d: Deps, body: unknown, auth: Record<string, string> = { authorization: "Bearer " + SERVICE }) {
+async function llamar(d: Deps, body: unknown, auth: Record<string, string> = { authorization: "Bearer jwt-activo" }) {
   const res = await createHandler(d)(new Request("https://f/correo", { method: "POST", headers: { "content-type": "application/json", ...auth }, body: JSON.stringify(body) }));
   return res;
 }
@@ -239,7 +262,7 @@ test("sincronizar: importación inicial de 90 días con $select (to, cc, from) y
   assert.equal(c.url, inicial("inbox"));
   assert.match(c.url, /\$filter=receivedDateTime%20ge%202026-08-14T12%3A00%3A00Z/);
   for (const campo of ["toRecipients", "ccRecipients", "from"]) assert.ok(c.url.includes(campo));
-  assert.equal(c.headers["Prefer"], 'odata.maxpagesize=50, outlook.body-content-type="html"');
+  assert.equal(c.headers["Prefer"], 'IdType="ImmutableId", odata.maxpagesize=50, outlook.body-content-type="html"');
   assert.equal(db.sync.inbox.importacion_desde, "2026-08-14T12:00:00Z");
   assert.equal(db.sync.inbox.delta_link, `${U}/d/i`);
   assert.equal(db.sync.inbox.next_link, null);
@@ -345,16 +368,51 @@ test("sincronizar: si otra ejecución tiene la carpeta reservada, no hace nada",
 });
 
 // ---------------------------------------------------------------- enviar / responder
-test("enviar: sendMail con from = info@, guardando en enviados y el texto escapado", async () => {
-  const g = fakeGraph();
-  const r = await jsonDe(deps(g, new FakeDb()), { accion: "enviar", para: ["cliente@ejemplo.invalid"], cc: [], asunto: "Hola", texto: "Línea <b>1</b>\nLínea 2" }, { authorization: "Bearer jwt-activo" });
-  assert.deepEqual(r, { status: 200, body: { ok: true } });
+test("enviar: borrador (POST /messages) → PATCH from info@ → send; registra la fila con enviado_por", async () => {
+  const g = fakeGraph(); const db = new FakeDb();
+  const r = await jsonDe(deps(g, db), { accion: "enviar", para: ["cliente@ejemplo.invalid"], cc: [], asunto: "Hola", texto: "Línea <b>1</b>\nLínea 2" });
+  assert.deepEqual(r, { status: 200, body: { ok: true, graph_id: "nuevo1" } });
+  assert.deepEqual(g.llamadas.map((c) => [c.method, c.url.slice(U.length)]), [
+    ["POST", "/messages"], ["PATCH", "/messages/nuevo1"], ["POST", "/messages/nuevo1/send"],
+  ]);
   const c = g.llamadas[0];
-  assert.equal(c.method, "POST"); assert.equal(c.url, `${U}/sendMail`);
-  assert.equal(c.body.saveToSentItems, true);
-  assert.deepEqual(c.body.message.from, { emailAddress: { address: ALIAS } });
-  assert.deepEqual(c.body.message.toRecipients, [{ emailAddress: { address: "cliente@ejemplo.invalid" } }]);
-  assert.equal(c.body.message.body.content, "<p>Línea &lt;b&gt;1&lt;/b&gt;<br>Línea 2</p>");
+  assert.equal(c.body.from, undefined, "el from va en el PATCH");
+  assert.deepEqual(c.body.toRecipients, [{ emailAddress: { address: "cliente@ejemplo.invalid" } }]);
+  assert.equal(c.body.body.content, "<p>Línea &lt;b&gt;1&lt;/b&gt;<br>Línea 2</p>");
+  assert.deepEqual(g.llamadas[1].body, { from: { emailAddress: { address: ALIAS } } });
+  const f = db.mensajes.get("nuevo1")!;
+  assert.equal(f.enviado_por, "admin-u-activo");
+  assert.equal(f.carpeta, "sentitems");
+  assert.equal(f.remitente_email, ALIAS);
+  assert.equal(f.conversation_id, "conv-nuevo1");
+  assert.equal(f.internet_message_id, "<nuevo1@x>");
+  assert.equal(f.asunto, "Hola");
+  assert.equal(f.leido, true);
+  assert.equal(f.fecha, reloj.toISOString());
+});
+
+test("enviar y luego sincronizar: la misma fila (id inmutable), sin duplicar y conservando enviado_por", async () => {
+  const g = fakeGraph(); const db = new FakeDb();
+  await jsonDe(deps(g, db), { accion: "enviar", para: ["cliente@ejemplo.invalid"], asunto: "Hola", texto: "x" });
+  db.sync.inbox.delta_link = `${U}/d/i`; db.sync.sentitems.delta_link = `${U}/d/s`;
+  g.paginas[`${U}/d/i`] = { value: [], "@odata.deltaLink": `${U}/d/i` };
+  g.paginas[`${U}/d/s`] = { value: [msg("nuevo1", { internetMessageId: "<nuevo1@x>", from: dir(ALIAS), toRecipients: [dir("cliente@ejemplo.invalid")], subject: "Hola", isRead: true, sentDateTime: "2026-11-12T12:00:01Z" })], "@odata.deltaLink": `${U}/d/s2` };
+  await jsonDe(deps(g, db), { accion: "sincronizar" }, { "x-hook-secret": CRON });
+  assert.equal(db.mensajes.size, 1);
+  const f = db.mensajes.get("nuevo1")!;
+  assert.equal(f.enviado_por, "admin-u-activo");
+  assert.equal(f.fecha, "2026-11-12T12:00:01Z", "la sincronización completa los datos de Graph");
+});
+
+test("red de seguridad: si el enviado llega con otro id, la fila registrada lo toma (misma internet_message_id)", async () => {
+  const g = fakeGraph(); const db = new FakeDb();
+  await jsonDe(deps(g, db), { accion: "enviar", para: ["cliente@ejemplo.invalid"], asunto: "Hola", texto: "x" });
+  db.sync.inbox.delta_link = `${U}/d/i`; db.sync.sentitems.delta_link = `${U}/d/s`;
+  g.paginas[`${U}/d/i`] = { value: [], "@odata.deltaLink": `${U}/d/i` };
+  g.paginas[`${U}/d/s`] = { value: [msg("otro-id", { internetMessageId: "<nuevo1@x>", from: dir(ALIAS) })], "@odata.deltaLink": `${U}/d/s2` };
+  await jsonDe(deps(g, db), { accion: "sincronizar" }, { "x-hook-secret": CRON });
+  assert.deepEqual([...db.mensajes.keys()], ["otro-id"]);
+  assert.equal(db.mensajes.get("otro-id")!.enviado_por, "admin-u-activo");
 });
 
 test("enviar: valida destinatarios, asunto y texto", async () => {
@@ -366,17 +424,23 @@ test("enviar: valida destinatarios, asunto y texto", async () => {
   assert.equal(g.llamadas.length, 0);
 });
 
-test("responder: createReply → PATCH from info@ y texto delante de la cita → send", async () => {
+test("responder: createReply → PATCH from info@ y texto delante de la cita → send; registra la fila", async () => {
   const g = fakeGraph(); const db = new FakeDb();
   const ids = await db.guardarMensajes([{ graph_id: "m1", carpeta: "inbox" }]);
-  const r = await jsonDe(deps(g, db), { accion: "responder", mensaje_id: ids.m1, texto: "Gracias" }, { authorization: "Bearer jwt-activo" });
-  assert.deepEqual(r.body, { ok: true });
+  const r = await jsonDe(deps(g, db), { accion: "responder", mensaje_id: ids.m1, texto: "Gracias" });
+  assert.deepEqual(r.body, { ok: true, graph_id: "borrador1" });
   assert.deepEqual(g.llamadas.map((c) => [c.method, c.url.slice(U.length)]), [
     ["POST", "/messages/m1/createReply"], ["PATCH", "/messages/borrador1"], ["POST", "/messages/borrador1/send"],
   ]);
   assert.deepEqual(g.llamadas[1].body.from, { emailAddress: { address: ALIAS } });
   assert.equal(g.llamadas[1].body.body.content, "<html><body><p>Gracias</p><div>cita</div></body></html>");
-  assert.ok(!g.llamadas.some((c) => c.url.endsWith("/reply")), "nunca /reply directo");
+  assert.ok(!g.llamadas.some((c) => /\/reply(All)?$/.test(c.url)), "nunca /reply directo");
+  const f = db.mensajes.get("borrador1")!;
+  assert.equal(f.enviado_por, "admin-u-activo");
+  assert.equal(f.conversation_id, "conv-m1");
+  assert.equal(f.asunto, "RE: hola");
+  assert.deepEqual(f.para, [{ email: "cliente@ejemplo.invalid", nombre: "Cliente" }]);
+  assert.match(String(f.cuerpo_html), /<p>Gracias<\/p><div>cita<\/div>/);
 });
 
 test("responder a todos: quita info@ y administracion@ de los destinatarios", async () => {
@@ -389,13 +453,14 @@ test("responder a todos: quita info@ y administracion@ de los destinatarios", as
   assert.deepEqual(g.llamadas[1].body.ccRecipients, [dir("otro@ejemplo.invalid")]);
 });
 
-test("responder: si falla el envío borra el borrador; mensajes ajenos o enviados no", async () => {
+test("responder: si falla el envío borra el borrador y no registra nada; mensajes ajenos o enviados no", async () => {
   const g = fakeGraph(); const db = new FakeDb();
   const ids = await db.guardarMensajes([{ graph_id: "m1", carpeta: "inbox" }, { graph_id: "s1", carpeta: "sentitems" }]);
   g.falla = (c) => (c.url.endsWith("/send") ? resp(403, { error: { code: "ErrorSendAsDenied", message: "x" } }) : null);
   const r = await jsonDe(deps(g, db), { accion: "responder", mensaje_id: ids.m1, texto: "x" });
   assert.equal(r.status, 403); assert.equal(r.body.codigo, "ErrorSendAsDenied");
   assert.equal(g.llamadas.at(-1)!.method, "DELETE");
+  assert.equal(db.mensajes.has("borrador1"), false);
   assert.equal((await jsonDe(deps(g, db), { accion: "responder", mensaje_id: ids.s1, texto: "x" })).status, 400);
   assert.equal((await jsonDe(deps(g, db), { accion: "responder", mensaje_id: "11111111-1111-1111-1111-111111111111", texto: "x" })).status, 404);
 });
@@ -442,6 +507,7 @@ test("autorización: cron solo sincroniza y comprueba; usuario inactivo 403; sin
   assert.equal((await jsonDe(d, { accion: "sincronizar" }, { "x-hook-secret": "otro" })).status, 401);
   assert.equal((await jsonDe(d, { accion: "comprobar" }, { authorization: "Bearer jwt-inactivo" })).status, 403);
   assert.equal((await jsonDe(d, { accion: "comprobar" }, { authorization: "Bearer basura" })).status, 401);
+  assert.equal((await jsonDe(d, { accion: "enviar", para: ["a@b.es"], asunto: "a", texto: "b" }, { "x-hook-secret": CRON })).status, 403, "el cron no envía");
   assert.equal((await jsonDe(d, { accion: "comprobar" }, {})).status, 401);
   assert.equal((await jsonDe(d, { accion: "borrar_todo" })).status, 400);
   db.sync.inbox.delta_link = `${U}/d/i`; db.sync.sentitems.delta_link = `${U}/d/s`;
