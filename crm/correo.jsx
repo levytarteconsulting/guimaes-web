@@ -1,8 +1,11 @@
 import React from "react";
 import {
-  agruparConversaciones, ALIAS, cidsDe, contraparte, destinatariosTexto, documentoVisor, emailsInvalidos,
-  filtrarConversaciones, fmtFechaCorreo, fmtFechaLarga, fmtTamano, listaEmails, mensajeParaResponder, tieneExternas,
+  agruparConversaciones, ALIAS, asuntoDe, cidsDe, completarToken, contraparte, destinatariosRespuesta, destinatariosTexto,
+  documentoVisor, emailsInvalidos, filtrarConversaciones, firmaPorDefecto, fmtFechaCorreo, fmtFechaLarga, fmtTamano,
+  listaEmails, MAX_DIRECTO, MAX_TOTAL, mensajeParaResponder, sugerirContactos, textoPlano, tieneExternas, tokenActual,
+  totalBytes, trozos, urlEnlace,
 } from "./correo-util.js";
+import { sanearHtml } from "./supabase-functions/correo/sanear.ts";
 /* GUIMAES CRM — Correo de info@guimaes.es (Microsoft 365).
    Bandeja agrupada por conversación, lectura, responder, redactar, marcar
    leído (también en Outlook), filtro "sin vincular", crear contacto desde el
@@ -84,6 +87,37 @@ export const CORREO = {
       throw new Error(msg);
     }
     return res.blob();
+  },
+  // Ficheros del redactor: binario, con los datos de la petición en la URL.
+  async binario(params, blob) {
+    const { data } = await Auth.client.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) throw new Error("Sesión caducada");
+    const res = await fetch(`${window.SUPABASE_CONFIG.url}/functions/v1/correo?` + new URLSearchParams(params), {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "apikey": window.SUPABASE_CONFIG.anonKey, "Content-Type": "application/octet-stream" },
+      body: blob,
+    });
+    let j = null;
+    try { j = await res.json(); } catch (e) { /* sin cuerpo */ }
+    if (!res.ok) throw new Error((j && j.error) || `Error ${res.status} al subir el fichero`);
+    return j;
+  },
+  // Usuario del CRM (admins) de la sesión.
+  async yo() {
+    const { data } = await Auth.client.auth.getSession();
+    const uid = data?.session?.user?.id;
+    return (uid && CRM.USERS.find((u) => u.auth_user_id === uid)) || null;
+  },
+  // Firma del usuario (RLS: cada uno solo ve la suya). null si no ha guardado ninguna.
+  async firma() {
+    const { data, error } = await Auth.client.from("correo_firmas").select("html").maybeSingle();
+    if (error) throw error;
+    return data ? data.html : null;
+  },
+  async guardarFirma(adminId, html) {
+    const { error } = await Auth.client.from("correo_firmas").upsert({ admin_id: adminId, html }, { onConflict: "admin_id" });
+    if (error) throw error;
   },
 };
 
@@ -197,16 +231,14 @@ function MensajeCard({ m, toast }) {
 function Conversacion({ convId, incluirFuera, nav, toast, onCambio, NewContact }) {
   const [ms, setMs] = cState(null);
   const [err, setErr] = cState(null);
-  const [texto, setTexto] = cState("");
-  const [todos, setTodos] = cState(false);
-  const [enviando, setEnviando] = cState(false);
+  const [redactor, setRedactor] = cState(null);
   const [crear, setCrear] = cState(false);
 
   const cargar = cCallback(async () => {
     try { setMs(await CORREO.conversacion(convId, incluirFuera)); setErr(null); }
     catch (e) { setErr(errTexto(e)); }
   }, [convId, incluirFuera]);
-  cEffect(() => { setMs(null); setTexto(""); setTodos(false); cargar(); }, [cargar]);
+  cEffect(() => { setMs(null); setRedactor(null); cargar(); }, [cargar]);
 
   // Al abrir: marcar como leídos los recibidos (también en Outlook).
   cEffect(() => {
@@ -232,17 +264,6 @@ function Conversacion({ convId, incluirFuera, nav, toast, onCambio, NewContact }
     try { await CORREO.funcion("marcar_leido", { mensaje_id: destino.id, leido: false }); toast("Marcado como no leído"); refrescarNoLeidos(); onCambio && onCambio(); }
     catch (e) { toast("No se pudo marcar: " + errTexto(e)); }
   };
-  const responder = async () => {
-    if (!texto.trim() || !destino) return;
-    setEnviando(true);
-    try {
-      await CORREO.funcion("responder", { mensaje_id: destino.id, texto, todos });
-      setTexto(""); toast("Respuesta enviada desde " + ALIAS);
-      await cargar(); onCambio && onCambio();
-    } catch (e) { toast("No se pudo enviar: " + errTexto(e)); }
-    finally { setEnviando(false); }
-  };
-
   return <>
     <div className="inbox__thread__head">
       <div style={{ fontWeight: 700, fontFamily: "var(--display)", fontSize: 16 }}>{conv.asunto}</div>
@@ -258,16 +279,14 @@ function Conversacion({ convId, incluirFuera, nav, toast, onCambio, NewContact }
     <div className="inbox__thread__body">
       {conv.mensajes.map((m) => <MensajeCard key={m.id} m={m} toast={toast} />)}
     </div>
-    {destino ? <div className="inbox__reply">
-      <textarea placeholder={`Responder a ${otro.nombre || otro.email}…`} value={texto} onChange={(e) => setTexto(e.target.value)} disabled={enviando}></textarea>
-      <div className="row" style={{ marginTop: 8, justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <label className="muted" style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} disabled={enviando} />Responder a todos
-        </label>
-        <span className="muted" style={{ fontSize: 12 }}>Sale desde {ALIAS}</span>
-        <button className="btn btn--primary btn--sm" onClick={responder} disabled={enviando || !texto.trim()}><Icon name="send" size={14} />{enviando ? "Enviando…" : "Responder"}</button>
-      </div>
-    </div> : null}
+    <div className="inbox__reply correo-acciones">
+      {destino && <button className="btn btn--primary btn--sm" onClick={() => setRedactor({ tipo: "respuesta", mensaje: destino })}><Icon name="reply" size={14} />Responder</button>}
+      {destino && <button className="btn btn--sm" onClick={() => setRedactor({ tipo: "respuesta_todos", mensaje: destino })}><Icon name="reply" size={14} />Responder a todos</button>}
+      <button className="btn btn--sm" onClick={() => setRedactor({ tipo: "reenvio", mensaje: conv.ultimo })}><Icon name="arrowR" size={14} />Reenviar</button>
+      <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>Sale desde {ALIAS}</span>
+    </div>
+    {redactor && <Redactor tipo={redactor.tipo} mensaje={redactor.mensaje} empresaId={redactor.mensaje.empresa_id || conv.empresa_id || null}
+      toast={toast} onClose={() => setRedactor(null)} onEnviado={async () => { await cargar(); onCambio && onCambio(); }} />}
     {crear && <NewContact initial={{ full_name: otro.nombre || "", email: otro.email }} onClose={() => setCrear(false)} onSave={async (f) => {
       try {
         await CRM.addContact(Auth.client, f);
@@ -278,36 +297,366 @@ function Conversacion({ convId, incluirFuera, nav, toast, onCambio, NewContact }
   </>;
 }
 
-// ---------------------------------------------------------------- redactar
-export function Redactar({ onClose, toast, para: paraInicial = "", onEnviado }) {
-  const [para, setPara] = cState(paraInicial);
-  const [cc, setCc] = cState("");
-  const [asunto, setAsunto] = cState("");
-  const [texto, setTexto] = cState("");
-  const [enviando, setEnviando] = cState(false);
-  const lp = listaEmails(para), lc = listaEmails(cc);
-  const malos = emailsInvalidos([...lp, ...lc]);
-  const puede = lp.length && !malos.length && asunto.trim() && texto.trim() && !enviando;
+// ---------------------------------------------------------------- redactor
+// Todo envío va por un borrador de la función: crear → adjuntar (≤ 3 MB en una
+// petición; más, por trozos) → documentos → enviar. Si algo falla, se
+// descarta el borrador y no se envía nada. Los ficheros no se guardan en el CRM.
+async function enviarCorreo(op, progreso) {
+  const { borrador } = await CORREO.funcion("borrador_crear", { tipo: op.tipo, mensaje_id: op.mensaje_id, empresa_id: op.empresa_id });
+  try {
+    const n = op.ficheros.length + op.documentos.length;
+    let i = 0;
+    for (const f of op.ficheros) {
+      i++;
+      progreso(`Subiendo ${f.name} (${i}/${n})…`);
+      if (f.size <= MAX_DIRECTO) {
+        await CORREO.binario({ accion: "borrador_adjuntar", borrador, nombre: f.name, tipo: f.type || "" }, f);
+      } else {
+        const s = await CORREO.funcion("borrador_sesion", { borrador, nombre: f.name, tipo: f.type || "", tamano: f.size });
+        for (const [desde, largo] of trozos(f.size, s.trozo)) {
+          progreso(`Subiendo ${f.name} (${i}/${n}) · ${Math.floor((desde * 100) / f.size)} %`);
+          await CORREO.binario({ accion: "borrador_trozo", borrador, sesion: s.sesion, desde: String(desde) }, f.slice(desde, desde + largo));
+        }
+      }
+    }
+    for (const d of op.documentos) {
+      i++;
+      progreso(`Adjuntando ${d.nombre} (${i}/${n})…`);
+      await CORREO.funcion("borrador_documento", { borrador, documento_id: d.id });
+    }
+    progreso("Enviando…");
+    return await CORREO.funcion("borrador_enviar", { borrador, para: op.para, cc: op.cc, cco: op.cco, asunto: op.asunto, html: op.html });
+  } catch (e) {
+    try { await CORREO.funcion("borrador_descartar", { borrador }); } catch (x) { /* ya no está */ }
+    throw e;
+  }
+}
+
+const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Editor ligero: contentEditable + execCommand. Lo pegado se sanea; al enviar,
+// el servidor vuelve a sanear todo.
+function EditorRico({ editorRef, inicial, onInput, minHeight = 200 }) {
+  const [enlace, setEnlace] = cState(null);
+  const [malEnlace, setMalEnlace] = cState(false);
+  const rango = cRef(null);
+  cEffect(() => { if (editorRef.current) editorRef.current.innerHTML = inicial || "<p><br></p>"; }, []);
+  const avisar = () => onInput && onInput();
+  const cmd = (c, v) => { editorRef.current.focus(); document.execCommand(c, false, v); avisar(); };
+  const abrirEnlace = () => {
+    const sel = window.getSelection();
+    rango.current = sel && sel.rangeCount && editorRef.current.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+    setMalEnlace(false);
+    setEnlace("");
+  };
+  const ponerEnlace = () => {
+    const url = urlEnlace(enlace);
+    if (!url) { setMalEnlace(true); return; }
+    editorRef.current.focus();
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    if (rango.current) sel.addRange(rango.current);
+    if (rango.current && !rango.current.collapsed) document.execCommand("createLink", false, url);
+    else document.execCommand("insertHTML", false, `<a href="${escAttr(url)}">${escAttr(enlace.trim())}</a>&nbsp;`);
+    setEnlace(null); avisar();
+  };
+  const pegar = (e) => {
+    const html = e.clipboardData && e.clipboardData.getData("text/html");
+    if (!html) return; // texto plano: lo pega el navegador
+    e.preventDefault();
+    document.execCommand("insertHTML", false, sanearHtml(html));
+    avisar();
+  };
+  const B = (titulo, accion, contenido) => <button type="button" className="correo-ed__btn" title={titulo} aria-label={titulo}
+    onMouseDown={(e) => { e.preventDefault(); accion(); }}>{contenido}</button>;
+  return <div className="correo-ed">
+    <div className="correo-ed__barra">
+      {B("Negrita (Ctrl+B)", () => cmd("bold"), <b>B</b>)}
+      {B("Cursiva (Ctrl+I)", () => cmd("italic"), <i>I</i>)}
+      {B("Subrayado (Ctrl+U)", () => cmd("underline"), <u>U</u>)}
+      <span className="correo-ed__sep" />
+      {B("Lista con viñetas", () => cmd("insertUnorderedList"), "• Lista")}
+      {B("Lista numerada", () => cmd("insertOrderedList"), "1. Lista")}
+      <span className="correo-ed__sep" />
+      {B("Enlace", abrirEnlace, "Enlace")}
+      {B("Quitar formato", () => { cmd("removeFormat"); cmd("unlink"); }, "Quitar formato")}
+    </div>
+    {enlace !== null && <div className="correo-ed__enlace">
+      <input className="inp" autoFocus placeholder="https://… o un email" value={enlace}
+        onChange={(e) => { setEnlace(e.target.value); setMalEnlace(false); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); ponerEnlace(); }
+          if (e.key === "Escape") { e.stopPropagation(); setEnlace(null); }
+        }} />
+      <button type="button" className="btn btn--sm btn--primary" onClick={ponerEnlace}>Poner enlace</button>
+      <button type="button" className="btn btn--sm btn--ghost" onClick={() => setEnlace(null)}>Cancelar</button>
+      {malEnlace && <span style={{ fontSize: 12, color: "#DC3A47" }}>Enlace no válido (http, https o email)</span>}
+    </div>}
+    <div ref={editorRef} className="correo-ed__area" contentEditable suppressContentEditableWarning
+      style={{ minHeight }} onInput={avisar} onPaste={pegar} />
+  </div>;
+}
+
+// Para / CC / CCO con autocompletado de los contactos del CRM.
+function CampoEmails({ value, onChange, placeholder, autoFocus }) {
+  const [abierto, setAbierto] = cState(false);
+  const [sel, setSel] = cState(0);
+  const sugs = abierto ? sugerirContactos(CRM.CONTACTS, tokenActual(value), listaEmails(value)) : [];
+  const elegir = (s) => { onChange(completarToken(value, s.email)); setSel(0); };
+  return <div className="correo-dest">
+    <input className="inp" value={value} placeholder={placeholder} autoFocus={autoFocus} autoComplete="off" spellCheck={false}
+      onChange={(e) => { onChange(e.target.value); setAbierto(true); setSel(0); }}
+      onFocus={() => setAbierto(true)} onBlur={() => setTimeout(() => setAbierto(false), 150)}
+      onKeyDown={(e) => {
+        if (!sugs.length) return;
+        if (e.key === "ArrowDown") { e.preventDefault(); setSel((sel + 1) % sugs.length); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); setSel((sel - 1 + sugs.length) % sugs.length); }
+        else if (e.key === "Enter") { e.preventDefault(); elegir(sugs[sel] || sugs[0]); }
+        else if (e.key === "Escape") { e.stopPropagation(); setAbierto(false); }
+      }} />
+    {sugs.length > 0 && <div className="correo-dest__lista" role="listbox">
+      {sugs.map((s, k) => <div key={s.email} role="option" aria-selected={k === sel} className={"correo-dest__op" + (k === sel ? " on" : "")}
+        onMouseDown={(e) => { e.preventDefault(); elegir(s); }} onMouseEnter={() => setSel(k)}>
+        <b>{s.nombre || s.email}</b>{s.nombre && <span className="muted"> {s.email}</span>}
+      </div>)}
+    </div>}
+  </div>;
+}
+
+// Selector de documentos de la empresa (todas sus carpetas), agrupados por carpeta / subcarpeta.
+function ElegirDocumentos({ empresaId, elegidos, onClose, onElegir }) {
+  const [docs, setDocs] = cState(null);
+  const [err, setErr] = cState(null);
+  const [q, setQ] = cState("");
+  const [sel, setSel] = cState(() => new Set(elegidos));
+  cEffect(() => {
+    let vivo = true;
+    CRM.loadDocumentosEmpresa(Auth.client, empresaId)
+      .then((r) => vivo && setDocs(r.docs.filter((d) => d.status === "stored")))
+      .catch((e) => vivo && setErr(errTexto(e)));
+    return () => { vivo = false; };
+  }, [empresaId]);
+  const nombre = (d) => CRM.docDisplayName(d);
+  const ruta = (d) => d.folder_path || "Sin carpeta";
+  const qn = q.trim().toLowerCase();
+  const lista = (docs || [])
+    .filter((d) => !qn || nombre(d).toLowerCase().includes(qn) || ruta(d).toLowerCase().includes(qn))
+    .sort((a, b) => ruta(a).localeCompare(ruta(b), "es") || nombre(a).localeCompare(nombre(b), "es"));
+  const grupos = [];
+  for (const d of lista) {
+    if (!grupos.length || grupos[grupos.length - 1].ruta !== ruta(d)) grupos.push({ ruta: ruta(d), docs: [] });
+    grupos[grupos.length - 1].docs.push(d);
+  }
+  const cambiar = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const aceptar = () => onElegir((docs || []).filter((d) => sel.has(d.id)).map((d) => ({ id: d.id, nombre: nombre(d), tamano: d.size_bytes || 0, ruta: ruta(d) })));
+  const total = (docs || []).filter((d) => sel.has(d.id)).reduce((a, d) => a + (d.size_bytes || 0), 0);
+  return <Modal title="Documentos de la empresa" wide onClose={onClose} footer={<>
+    <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>{sel.size ? `${sel.size} elegidos · ${fmtTamano(total)}` : ""}</span>
+    <button className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+    <button className="btn btn--primary" onClick={aceptar} disabled={!docs}>Adjuntar{sel.size ? ` (${sel.size})` : ""}</button>
+  </>}>
+    <input className="inp" placeholder="Buscar por nombre o carpeta" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+    {err && <p className="muted">No se pudieron cargar: {err}</p>}
+    {!docs && !err && <p className="muted">Cargando…</p>}
+    {docs && !lista.length && <p className="muted">{docs.length ? "Ningún documento coincide." : "Esta empresa no tiene documentos."}</p>}
+    <div className="correo-docs">
+      {grupos.map((g) => <div key={g.ruta}>
+        <div className="correo-docs__carpeta"><Icon name="folder" size={13} />{g.ruta}</div>
+        {g.docs.map((d) => <label key={d.id} className="correo-docs__doc">
+          <input type="checkbox" checked={sel.has(d.id)} onChange={() => cambiar(d.id)} />
+          <span className="correo-docs__nombre">{nombre(d)}</span>
+          <span className="muted">{fmtTamano(d.size_bytes)}</span>
+        </label>)}
+      </div>)}
+    </div>
+  </Modal>;
+}
+
+function EditarFirma({ html, yo, toast, onClose, onGuardada }) {
+  const ref = cRef(null);
+  const [guardando, setGuardando] = cState(false);
+  const guardar = async () => {
+    const limpio = sanearHtml(ref.current.innerHTML);
+    if (limpio.length > 20000) { toast("La firma es demasiado larga"); return; }
+    if (!yo) { toast("No se encontró tu usuario del CRM"); return; }
+    setGuardando(true);
+    try { await CORREO.guardarFirma(yo.id, limpio); toast("Firma guardada"); onGuardada(limpio); onClose(); }
+    catch (e) { toast("No se pudo guardar la firma: " + errTexto(e)); setGuardando(false); }
+  };
+  return <Modal title="Mi firma" onClose={onClose} footer={<>
+    <button className="btn btn--ghost" style={{ marginRight: "auto" }} onClick={() => { ref.current.innerHTML = sanearHtml(firmaPorDefecto(yo?.name)); }} disabled={guardando}>Restaurar la de por defecto</button>
+    <button className="btn btn--ghost" onClick={onClose} disabled={guardando}>Cancelar</button>
+    <button className="btn btn--primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando…" : "Guardar"}</button>
+  </>}>
+    <EditorRico editorRef={ref} inicial={html} minHeight={90} />
+    <p className="muted" style={{ fontSize: 12 }}>Se guarda para tu usuario y se añade a los correos que redactes.</p>
+  </Modal>;
+}
+
+const TITULOS = { nuevo: "Redactar correo", respuesta: "Responder", respuesta_todos: "Responder a todos", reenvio: "Reenviar" };
+
+// tipo: nuevo | respuesta | respuesta_todos | reenvio; mensaje: fila completa
+// (con cuerpo_html y adjuntos) a la que se responde o que se reenvía.
+export function Redactor({ tipo = "nuevo", mensaje = null, empresaId = null, para: paraInicial = "", onClose, toast, onEnviado }) {
+  const ini = cRef(null);
+  if (!ini.current) {
+    const d = tipo === "respuesta" || tipo === "respuesta_todos"
+      ? destinatariosRespuesta(mensaje, tipo === "respuesta_todos")
+      : { para: tipo === "nuevo" && paraInicial ? [paraInicial] : [], cc: [] };
+    ini.current = { para: d.para.join(", "), cc: d.cc.join(", "), asunto: mensaje ? asuntoDe(mensaje.asunto, tipo) : "" };
+  }
+  const [para, setPara] = cState(ini.current.para);
+  const [cc, setCc] = cState(ini.current.cc);
+  const [cco, setCco] = cState("");
+  const [verCco, setVerCco] = cState(false);
+  const [asunto, setAsunto] = cState(ini.current.asunto);
+  const [yo, setYo] = cState(null);
+  const [firma, setFirma] = cState(null);
+  const [ficheros, setFicheros] = cState([]);
+  const [docs, setDocs] = cState([]);
+  const [elegirDocs, setElegirDocs] = cState(false);
+  const [editarFirma, setEditarFirma] = cState(false);
+  const [verCita, setVerCita] = cState(false);
+  const [arrastrando, setArrastrando] = cState(false);
+  const [enviando, setEnviando] = cState(null);
+  const [hayTexto, setHayTexto] = cState(false);
+  const editor = cRef(null);
+  const elegirFichero = cRef(null);
+
+  cEffect(() => {
+    let vivo = true;
+    (async () => {
+      const u = await CORREO.yo().catch(() => null);
+      let h = null;
+      try { h = await CORREO.firma(); } catch (e) { /* sin firma guardada: la de por defecto */ }
+      if (vivo) { setYo(u); setFirma(sanearHtml(h != null ? h : firmaPorDefecto(u?.name))); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  const medirTexto = () => {
+    const c = editor.current && editor.current.cloneNode(true);
+    if (!c) return;
+    c.querySelectorAll("[data-firma]").forEach((x) => x.remove());
+    setHayTexto(!!textoPlano(c.innerHTML));
+  };
+  const ponerFirma = (html) => {
+    setFirma(html);
+    const ed = editor.current;
+    if (!ed) return;
+    let f = ed.querySelector("[data-firma]");
+    if (!f) { f = document.createElement("div"); f.setAttribute("data-firma", "1"); ed.appendChild(f); }
+    f.innerHTML = html;
+  };
+
+  const originales = tipo === "reenvio"
+    ? (mensaje?.adjuntos ?? []).filter((a) => !a.inline).map((a) => ({ nombre: a.nombre, tamano: a.tamano || 0 }))
+    : [];
+  const total = totalBytes(ficheros.map((f) => ({ tamano: f.size })), docs, originales);
+  const excede = total > MAX_TOTAL;
+  const anadir = (lista) => {
+    const nuevos = [];
+    for (const f of lista || []) {
+      if (!f.size) { toast(`${f.name} está vacío y no se adjunta`); continue; }
+      nuevos.push(f);
+    }
+    if (nuevos.length) setFicheros((xs) => [...xs, ...nuevos]);
+  };
+  const conFicheros = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+
+  const lp = listaEmails(para), lc = listaEmails(cc), lb = listaEmails(cco);
+  const malos = emailsInvalidos([...lp, ...lc, ...lb]);
+  const falta = !lp.length ? "Falta el destinatario"
+    : malos.length ? null
+    : tipo === "nuevo" && !asunto.trim() ? "Falta el asunto"
+    : tipo !== "reenvio" && !hayTexto ? "Escribe el mensaje"
+    : null;
+  const puede = !enviando && firma !== null && !falta && !malos.length && !excede;
+
   const enviar = async () => {
     if (!puede) return;
-    setEnviando(true);
+    setEnviando("Preparando…");
     try {
-      await CORREO.funcion("enviar", { para: lp, cc: lc, asunto: asunto.trim(), texto });
+      await enviarCorreo({
+        tipo, mensaje_id: mensaje?.id, empresa_id: empresaId, ficheros, documentos: docs,
+        para: lp, cc: lc, cco: lb, asunto: asunto.trim(), html: editor.current.innerHTML,
+      }, setEnviando);
       toast("Correo enviado desde " + ALIAS);
-      onEnviado && onEnviado(); onClose();
-    } catch (e) { toast("No se pudo enviar: " + errTexto(e)); }
-    finally { setEnviando(false); }
+      onEnviado && onEnviado();
+      onClose();
+    } catch (e) {
+      toast("No se ha enviado: " + errTexto(e));
+      setEnviando(null);
+    }
   };
-  return <Modal title="Redactar correo" wide onClose={onClose} footer={<>
-    <button className="btn btn--ghost" onClick={onClose} disabled={enviando}>Cancelar</button>
-    <button className="btn btn--primary" onClick={enviar} disabled={!puede}><Icon name="send" size={15} />{enviando ? "Enviando…" : "Enviar"}</button>
+  const cerrar = () => { if (!enviando) onClose(); };
+
+  return <Modal title={TITULOS[tipo] || TITULOS.nuevo} wide onClose={cerrar} footer={<>
+    <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>{enviando || `Sale desde ${ALIAS}`}</span>
+    <button className="btn btn--ghost" onClick={cerrar} disabled={!!enviando}>Cancelar</button>
+    <button className="btn btn--primary" onClick={enviar} disabled={!puede} title={falta || ""}><Icon name="send" size={15} />{enviando ? "Enviando…" : "Enviar"}</button>
   </>}>
-    <Field label="Para"><input className="inp" placeholder="destinatario@empresa.es (varios separados por comas)" value={para} onChange={(e) => setPara(e.target.value)} /></Field>
-    <Field label="CC"><input className="inp" value={cc} onChange={(e) => setCc(e.target.value)} /></Field>
-    <Field label="Asunto"><input className="inp" value={asunto} onChange={(e) => setAsunto(e.target.value)} /></Field>
-    <Field label="Mensaje"><textarea className="inp" style={{ minHeight: 180 }} value={texto} onChange={(e) => setTexto(e.target.value)}></textarea></Field>
-    {malos.length > 0 && <p style={{ fontSize: 12, color: "#DC3A47" }}>Email no válido: {malos.join(", ")}</p>}
-    <p className="muted" style={{ fontSize: 12 }}>Se envía desde {ALIAS} y queda en Elementos enviados de Outlook.</p>
+    <div className={"correo-red" + (arrastrando ? " correo-red--soltar" : "")}
+      onDragOver={(e) => { if (conFicheros(e) && !enviando) { e.preventDefault(); setArrastrando(true); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setArrastrando(false); }}
+      onDrop={(e) => { if (!conFicheros(e)) return; e.preventDefault(); setArrastrando(false); if (!enviando) anadir(e.dataTransfer.files); }}>
+      <fieldset disabled={!!enviando} className="correo-red__campos">
+        <Field label={<span className="correo-red__etq">Para{!verCco && <button type="button" className="correo-red__cco" onClick={() => setVerCco(true)}>CCO</button>}</span>}>
+          <CampoEmails value={para} onChange={setPara} placeholder="Nombre o email (varios separados por comas)" autoFocus={tipo !== "respuesta" && tipo !== "respuesta_todos"} />
+        </Field>
+        <Field label="CC"><CampoEmails value={cc} onChange={setCc} /></Field>
+        {verCco && <Field label="CCO"><CampoEmails value={cco} onChange={setCco} placeholder="Copia oculta" /></Field>}
+        <Field label="Asunto"><input className="inp" value={asunto} onChange={(e) => setAsunto(e.target.value)} /></Field>
+      </fieldset>
+      {firma === null
+        ? <div className="muted" style={{ padding: 12 }}>Cargando…</div>
+        : <EditorRico editorRef={editor} onInput={medirTexto}
+            inicial={`<p><br></p><p><br></p><div data-firma="1">${firma}</div>`} />}
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+        <button type="button" className="btn btn--sm btn--ghost" onClick={() => setEditarFirma(true)} disabled={firma === null || !!enviando}><Icon name="edit" size={13} />Editar mi firma</button>
+        {mensaje && <button type="button" className="btn btn--sm btn--ghost" onClick={() => setVerCita((v) => !v)}>
+          <Icon name={verCita ? "chevronD" : "chevronR"} size={13} />{tipo === "reenvio" ? "Mensaje reenviado" : "Mensaje original"} (va debajo de tu texto)
+        </button>}
+      </div>
+      {mensaje && verCita && <div className="correo-cita">
+        <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+          De {mensaje.remitente_nombre ? `${mensaje.remitente_nombre} <${mensaje.remitente_email}>` : mensaje.remitente_email} · {fmtFechaLarga(mensaje.fecha)}
+        </div>
+        <VisorHtml mensaje={mensaje} />
+      </div>}
+
+      <div className="correo-adj">
+        {(originales.length > 0 || ficheros.length > 0 || docs.length > 0) && <div className="correo-adj__lista">
+          {originales.map((a, k) => <div key={"o" + k} className="correo-adj__fila">
+            <Icon name="paperclip" size={13} /><span className="correo-adj__nombre">{a.nombre}</span>
+            <span className="muted">{fmtTamano(a.tamano)} · del mensaje original</span>
+          </div>)}
+          {ficheros.map((f, k) => <div key={"f" + k} className="correo-adj__fila">
+            <Icon name="paperclip" size={13} /><span className="correo-adj__nombre">{f.name}</span>
+            <span className="muted">{fmtTamano(f.size)}</span>
+            <button type="button" className="correo-adj__quitar" title="Quitar" aria-label={"Quitar " + f.name} disabled={!!enviando}
+              onClick={() => setFicheros((xs) => xs.filter((_, j) => j !== k))}><Icon name="x" size={13} /></button>
+          </div>)}
+          {docs.map((d) => <div key={d.id} className="correo-adj__fila">
+            <Icon name="folder" size={13} /><span className="correo-adj__nombre">{d.nombre}</span>
+            <span className="muted">{d.ruta} · {fmtTamano(d.tamano)}</span>
+            <button type="button" className="correo-adj__quitar" title="Quitar" aria-label={"Quitar " + d.nombre} disabled={!!enviando}
+              onClick={() => setDocs((xs) => xs.filter((x) => x.id !== d.id))}><Icon name="x" size={13} /></button>
+          </div>)}
+        </div>}
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" className="btn btn--sm" onClick={() => elegirFichero.current.click()} disabled={!!enviando}><Icon name="paperclip" size={14} />Adjuntar</button>
+          <input ref={elegirFichero} type="file" multiple hidden onChange={(e) => { anadir(e.target.files); e.target.value = ""; }} />
+          {empresaId && <button type="button" className="btn btn--sm" onClick={() => setElegirDocs(true)} disabled={!!enviando}><Icon name="folder" size={14} />Desde documentos de la empresa</button>}
+          <span className="muted" style={{ fontSize: 12 }}>{total ? `${fmtTamano(total)} de 25 MB` : "Hasta 25 MB por correo"} · también puedes arrastrar ficheros aquí</span>
+        </div>
+        {excede && <p className="correo-red__error">Los adjuntos suman {fmtTamano(total)} y el límite es 25 MB por correo. Quita alguno para poder enviar.</p>}
+      </div>
+      {malos.length > 0 && <p className="correo-red__error">Email no válido: {malos.join(", ")}</p>}
+    </div>
+    {elegirDocs && <ElegirDocumentos empresaId={empresaId} elegidos={docs.map((d) => d.id)} onClose={() => setElegirDocs(false)}
+      onElegir={(xs) => { setDocs(xs); setElegirDocs(false); }} />}
+    {editarFirma && <EditarFirma html={firma} yo={yo} toast={toast} onClose={() => setEditarFirma(false)} onGuardada={ponerFirma} />}
   </Modal>;
 }
 
@@ -410,7 +759,7 @@ export function Inbox({ nav, toast, NewContact }) {
         {activa ? <Conversacion key={activa} convId={activa} incluirFuera={false} nav={nav} toast={toast} onCambio={cargar} NewContact={NewContact} />
           : <div className="muted" style={{ margin: "auto", fontSize: 13 }}>Selecciona un correo</div>}
       </div>
-      {redactar && <Redactar onClose={() => setRedactar(false)} toast={toast} onEnviado={() => { setFiltro("sentitems"); cargar(); }} />}
+      {redactar && <Redactor tipo="nuevo" onClose={() => setRedactar(false)} toast={toast} onEnviado={() => { setFiltro("sentitems"); cargar(); }} />}
     </div>
   );
 }
@@ -447,6 +796,7 @@ export function CorreosFicha({ campo, id, nav, toast, NewContact, paraInicial = 
         ? <div className="correo-ficha"><Conversacion convId={c.id} incluirFuera nav={nav} toast={toast} onCambio={cargar} NewContact={NewContact} /></div>
         : <div className="card__body muted" style={{ paddingTop: 12, fontSize: 12.5 }}>{c.ultimo.extracto}</div>}
     </div>)}
-    {redactar && <Redactar onClose={() => setRedactar(false)} toast={toast} para={paraInicial} onEnviado={cargar} />}
+    {redactar && <Redactor tipo="nuevo" onClose={() => setRedactar(false)} toast={toast} para={paraInicial} onEnviado={cargar}
+      empresaId={campo === "empresa_id" ? id : (CRM.empresaPrincipalDe(id)?.id || null)} />}
   </div>;
 }

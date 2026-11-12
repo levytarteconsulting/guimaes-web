@@ -4,6 +4,8 @@ const { useState, useMemo, useRef, useEffect } = React;
 
 /* ---------------- Icons (stroke, currentColor) ---------------- */
 const ICONS = {
+  paperclip:'M21 11.5 12.6 19.9a5.2 5.2 0 0 1-7.4-7.4l8.4-8.4a3.5 3.5 0 0 1 4.9 4.9L10.1 17.4a1.7 1.7 0 0 1-2.5-2.5l7.7-7.7',
+  reply:'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5V20',
   home:'M3 11.5 12 4l9 7.5M5 10v10h14V10',
   contacts:'M16 20v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6M20 20v-1a3 3 0 0 0-2.5-2.9M15 5.1a3 3 0 0 1 0 5.8',
   pipeline:'M4 5h16M4 5v14M9 5v14M9 9h5M9 14h8M9 5h6',
