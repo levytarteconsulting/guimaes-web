@@ -2028,7 +2028,7 @@ function ContactDetail({id, nav, toast, user}){
             </div>}
             <div style={{marginTop:16}}>
               <KV k="Email">{c.email}</KV><KV k="Teléfono">{c.phone}</KV><KV k="CIF/NIF">{c.dni}</KV>
-              <KV k="Ciudad">{c.city} ({c.province})</KV><KV k="Empleados">{c.employees}</KV>
+              <KV k="Ciudad">{[c.city, c.province].every(x=>!x) ? "—" : c.city ? (c.city+(c.province?" ("+c.province+")":"")) : c.province}</KV><KV k="Empleados">{c.employees}</KV>
               <KV k="Owner"><span className="row" style={{gap:6}}>{ownerAvatar(c.owner)}{CRM.userById(c.owner)?.name}</span></KV>
               <KV k="Origen">{c.source}</KV>
               {c.service_interest && <KV k="Servicio de interés">{c.service_interest}</KV>}
@@ -3110,7 +3110,9 @@ function LinkWhatsapp({conv, onClose, onSave}){
 function WhatsApp({nav, toast, focusId}){
   const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
   const [filter,setFilter]=uState("active");
-  const [active,setActive]=uState(convs.find(w=>!w.archived)?.id || null);
+  // Se entra con la lista y ninguna abierta; solo se abre una al pincharla o
+  // si llega su id (botón WhatsApp de la ficha de un contacto, "Nueva conversación").
+  const [active,setActive]=uState(focusId || null);
   const [showStart,setShowStart]=uState(false);
   const isMobile = useIsMobile();
   useWaToday(); // vuelve a pintar las fechas del listado al cambiar el día
@@ -3143,13 +3145,14 @@ function WhatsApp({nav, toast, focusId}){
     }
   };
   uEffect(()=>{
-    if(!visible.find(w=>w.id===active)) setActive(visible[0]?.id || null);
+    if(!visible.find(w=>w.id===active)) setActive(null);
   },[filter]);
   // Enfocar una conversación por id al llegar desde fuera (p. ej. "Nueva
   // conversación" o el botón de WhatsApp en la ficha de contacto). Si aún no
   // está cargada en esta sesión (se acaba de crear), se trae de Supabase.
   uEffect(()=>{
-    if(!focusId) return;
+    // Sin id (desde el menú, o "volver"): la lista, sin conversación abierta.
+    if(!focusId){ setActive(null); return; }
     const existing = convs.find(w=>w.id===focusId);
     if(existing){ setFilter(existing.archived?"archived":"active"); setActive(focusId); return; }
     if(!Auth.client || !CRM.loadWhatsappConversationById) return;
@@ -3213,7 +3216,9 @@ function WhatsApp({nav, toast, focusId}){
         onConvChange={updated=>setConvs(cs=>cs.map(w=>w.id===updated.id?updated:w))}
         onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}
         onBack={isMobile?()=>{setActive(null);nav("whatsapp",null);}:undefined}/>
-      : <div className="wa__thread"><div className="muted" style={{margin:"auto",fontSize:13}}>{filter==="archived"?"Selecciona una conversación archivada.":"Sin conversaciones."}</div></div>)}
+      : <div className="wa__thread"><div style={{margin:"auto"}}>{visible.length
+          ? <Empty icon="whatsapp" title={filter==="archived"?"Selecciona una conversación archivada":"Selecciona una conversación"}/>
+          : <div className="muted" style={{fontSize:13}}>{filter==="archived"?"No hay conversaciones archivadas.":"Sin conversaciones."}</div>}</div></div>)}
       {showStart && <StartWhatsappModal onClose={()=>setShowStart(false)} nav={nav} toast={toast}/>}
     </div>
   );
