@@ -25,6 +25,11 @@
 --         (lower(btrim())), sin info@ ni administracion@ (el propio buzón);
 --         lo rellena el trigger.
 --       - contact_id / empresa_id: vínculo automático (ver abajo).
+--       - enviado_por: usuario del CRM que lo envió desde el CRM. La función
+--         envía siempre por borrador con ids inmutables (Prefer:
+--         IdType="ImmutableId"): inserta la fila con el id del borrador, que
+--         es el mismo que tendrá en Enviados, y la sincronización la completa
+--         sin duplicar (no toca enviado_por).
 --   * correo_adjuntos: solo metadatos (los ficheros no se guardan; la
 --     función los descarga de Graph bajo demanda).
 --   * correo_sync: estado de la sincronización por carpeta (deltaLink,
@@ -129,6 +134,7 @@ begin
     emails_norm        text[] not null default '{}',
     contact_id         uuid references public.contactos(id) on delete set null,
     empresa_id         uuid references public.empresas(id) on delete set null,
+    enviado_por        uuid references public.admins(id) on delete set null,
     constraint correo_mensajes_graph_id_key unique (graph_id),
     constraint correo_mensajes_carpeta_chk check (carpeta in ('inbox', 'sentitems')),
     constraint correo_mensajes_fuera_chk check (fuera_bandeja = (fuera_bandeja_at is not null)),
@@ -142,6 +148,7 @@ begin
   create index correo_mensajes_empresa_idx on public.correo_mensajes (empresa_id, fecha desc) where empresa_id is not null;
   create index correo_mensajes_sin_vincular_idx on public.correo_mensajes (fecha desc) where contact_id is null;
   create index correo_mensajes_emails_idx on public.correo_mensajes using gin (emails_norm);
+  create index correo_mensajes_internet_id_idx on public.correo_mensajes (internet_message_id) where internet_message_id is not null;
 
   create table public.correo_adjuntos (
     id          uuid primary key default gen_random_uuid(),
@@ -359,6 +366,7 @@ notify pgrst, 'reload schema';
 --     correo_sync.delta_link/next_link no; ultimo_error sí
 --   anon: select en mensajes no
 --   correo_sync_reservar: authenticated no, service_role sí
+--   columna enviado_por → admins: sí
 --   migración registrada: 20261112120000
 -- ============================================================
 select 'tablas' as comprobacion, count(*)::text as valor
@@ -399,6 +407,10 @@ union all
 select 'correo_sync_reservar authenticated/service_role',
        has_function_privilege('authenticated', 'public.correo_sync_reservar(text, integer)', 'EXECUTE') || '/'
        || has_function_privilege('service_role', 'public.correo_sync_reservar(text, integer)', 'EXECUTE')
+union all
+select 'columna enviado_por → admins',
+       case when exists (select 1 from pg_constraint where conrelid = 'public.correo_mensajes'::regclass
+                         and contype = 'f' and confrelid = 'public.admins'::regclass) then 'sí' else 'NO' end
 union all
 select 'migración registrada', string_agg(version || ' ' || name, ', ')
 from supabase_migrations.schema_migrations where version = '20261112120000';
