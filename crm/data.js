@@ -629,54 +629,8 @@
     if(patch.empresa_id!==undefined) d.empresa = patch.empresa_id || null;
     return d;
   }
-  // ---- Bandeja de entrada (Gmail — info@guimaes.es) ----
+  // ---- Correo (Microsoft 365 — info@guimaes.es): crm/correo.jsx ----
   var MAILBOX = "info@guimaes.es";
-  var FOLDERS = [
-    {id:"inbox", label:"Bandeja de entrada", color:"#1F6FEB", system:true},
-    {id:"fiscal", label:"Fiscal", color:"#16B8A6"},
-    {id:"legal", label:"Legal", color:"#7C5CFC"},
-    {id:"facturas", label:"Facturas", color:"#D9822B"}
-  ];
-  var folderById={}; FOLDERS.forEach(function(f){folderById[f.id]=f;});
-
-  var EMAILS = [];
-
-  function unreadOf(e){ return e.messages.length && e.messages[e.messages.length-1].dir==="in" ? 1 : 0; }
-
-  function addFolder(label){
-    var id = "f"+Date.now().toString(36);
-    var colors=["#1F6FEB","#16B8A6","#C8A24B","#7C5CFC","#E0518A","#D9822B","#2E8B57"];
-    var f = {id:id, label:label, color:colors[FOLDERS.length%colors.length]};
-    FOLDERS.push(f);
-    return f;
-  }
-  function removeFolder(id){
-    var f = folderById[id]; if(!f || f.system) return;
-    var idx = FOLDERS.findIndex(function(x){return x.id===id;});
-    if(idx>-1) FOLDERS.splice(idx,1);
-    delete folderById[id];
-    EMAILS.forEach(function(e){ if(e.folder===id) e.folder="inbox"; });
-  }
-  function moveEmailToFolder(id, folder){
-    var e = EMAILS.find(function(x){return x.id===id;}); if(e) e.folder=folder;
-  }
-  function setEmailArchived(id, val){
-    var e = EMAILS.find(function(x){return x.id===id;}); if(e) e.archived=val;
-  }
-  function linkEmail(id, patch){
-    var e = EMAILS.find(function(x){return x.id===id;}); if(e) Object.assign(e, patch);
-  }
-  function addEmailReply(id, body){
-    var e = EMAILS.find(function(x){return x.id===id;}); if(!e) return;
-    e.messages.push({dir:"out", from:MAILBOX, to:e.messages[e.messages.length-1]?.from || "", date:"Ahora", body:body});
-    e.updated = "Ahora";
-  }
-  function addEmailThread(thread){
-    var id = "e"+Date.now().toString(36);
-    var full = Object.assign({id:id, folder:"inbox", archived:false, contact:null, deal:null, updated:"Ahora"}, thread);
-    EMAILS.unshift(full);
-    return full;
-  }
 
   // ---- Contactos reales (tabla "contactos" de Supabase) ----
   function rowToContact(row){
@@ -2236,8 +2190,6 @@
     loadWhatsappConversationById:loadWhatsappConversationById,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
     savePushSubscription:savePushSubscription, removePushSubscription:removePushSubscription,
-    MAILBOX:MAILBOX, FOLDERS:FOLDERS, folderById:folderById, EMAILS:EMAILS, unreadOf:unreadOf,
-    addFolder:addFolder, removeFolder:removeFolder, moveEmailToFolder:moveEmailToFolder,
-    setEmailArchived:setEmailArchived, linkEmail:linkEmail, addEmailReply:addEmailReply, addEmailThread:addEmailThread
+    MAILBOX:MAILBOX
   };
 })();
