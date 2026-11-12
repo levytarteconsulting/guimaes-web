@@ -25,7 +25,6 @@
 --         (lower(btrim())), sin info@ ni administracion@ (el propio buzón);
 --         lo rellena el trigger.
 --       - contact_id / empresa_id: vínculo automático (ver abajo).
---       - enviado_por: usuario del CRM que lo envió desde el CRM.
 --   * correo_adjuntos: solo metadatos (los ficheros no se guardan; la
 --     función los descarga de Graph bajo demanda).
 --   * correo_sync: estado de la sincronización por carpeta (deltaLink,
@@ -130,7 +129,6 @@ begin
     emails_norm        text[] not null default '{}',
     contact_id         uuid references public.contactos(id) on delete set null,
     empresa_id         uuid references public.empresas(id) on delete set null,
-    enviado_por        uuid references public.admins(id) on delete set null,
     constraint correo_mensajes_graph_id_key unique (graph_id),
     constraint correo_mensajes_carpeta_chk check (carpeta in ('inbox', 'sentitems')),
     constraint correo_mensajes_fuera_chk check (fuera_bandeja = (fuera_bandeja_at is not null)),
