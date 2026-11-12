@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test, beforeEach } from "node:test";
 import {
-  ALIAS, buscarCid, conCita, createHandler, DIAS_IMPORTACION, esDeInfo, GRAPH, limpiarBorradores, MAX_DIRECTO, nombreFichero,
+  ALIAS, buscarCid, infoEnCabeceras, conCita, createHandler, DIAS_IMPORTACION, esDeInfo, GRAPH, limpiarBorradores, MAX_DIRECTO, nombreFichero,
   olvidarToken, PRESUPUESTO_MS, TROZO, urlSubidaValida,
 } from "./correo.ts";
 import type { AdjuntoDb, Carpeta, Db, Deps, Estado, Fila } from "./correo.ts";
@@ -62,6 +62,7 @@ class FakeDb implements Db {
     for (const g of ids) { const m = this.mensajes.get(g); if (m && !m.fuera_bandeja) { m.fuera_bandeja = true; m.fuera_bandeja_at = en; n++; } }
     return n;
   }
+  async existentes(gs: string[]) { return gs.filter((g) => this.mensajes.has(g)); }
   async leidoSiExiste(g: string, leido: boolean) { const m = this.mensajes.get(g); if (m) m.leido = leido; }
   async guardarAdjuntos(filas: Fila[]) {
     for (const f of filas) {
@@ -108,11 +109,13 @@ type Graph = {
   subidas: { url: string; headers: Record<string, string>; largo: number }[];
   borrados: string[];
   uploadUrl?: (draft: string, n: number) => string;
+  cabeceras: Record<string, { name: string; value: string }[]>; // graph_id → internetMessageHeaders
+  completos: Record<string, any>;                                // graph_id → mensaje con SELECT
 };
 const resp = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 
 function fakeGraph(): Graph {
-  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, borradores: {}, sesiones: {}, subidas: [], borrados: [], fetch: null as any };
+  const g: Graph = { llamadas: [], tokens: 0, paginas: {}, adjuntos: {}, borradores: {}, sesiones: {}, subidas: [], borrados: [], cabeceras: {}, completos: {}, fetch: null as any };
   let n = 0;
   g.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -169,6 +172,16 @@ function fakeGraph(): Graph {
       g.borradores["fw1"] = { id: "fw1", conversationId: "conv-" + origen, internetMessageId: "<fw1@x>", subject: "RV: hola", body: { contentType: "html", content: "<html><body><div>original reenviado</div></body></html>" }, toRecipients: [], ccRecipients: [], isDraft: true };
       g.adjuntos["fw1"] = (g.adjuntos[origen] ?? []).map((a) => ({ ...a }));
       return resp(201, g.borradores["fw1"]);
+    }
+    const ch = ruta.match(/^\/messages\/([^/?]+)\?\$select=internetMessageHeaders$/);
+    if (method === "GET" && ch) {
+      const h = g.cabeceras[decodeURIComponent(ch[1])];
+      return h ? resp(200, { id: decodeURIComponent(ch[1]), internetMessageHeaders: h }) : resp(404, { error: { code: "ErrorItemNotFound" } });
+    }
+    const cm = ruta.match(/^\/messages\/([^/?]+)\?\$select=id,/);
+    if (method === "GET" && cm) {
+      const m = g.completos[decodeURIComponent(cm[1])];
+      return m ? resp(200, m) : resp(404, { error: { code: "ErrorItemNotFound" } });
     }
     const gb = ruta.match(/^\/messages\/([^/?]+)\?\$select=body$/);
     if (method === "GET" && gb) return resp(200, { body: g.borradores[decodeURIComponent(gb[1])]?.body ?? { content: "" } });
@@ -302,7 +315,8 @@ test("sincronizar: lo de administracion@ no se guarda en ninguna tabla ni sale e
   assert.equal(r.status, 200);
   assert.deepEqual([...db.mensajes.keys()].sort(), ["in-cc", "in-info", "out-info"]);
   assert.equal(db.adjuntos.length, 0);
-  assert.ok(!g.llamadas.some((c) => c.url.includes("in-admin")), "ni siquiera se piden sus adjuntos");
+  assert.deepEqual(g.llamadas.filter((c) => c.url.includes("in-admin")).map((c) => c.url), [`${U}/messages/in-admin?$select=internetMessageHeaders`],
+    "de lo descartado solo se piden las cabeceras (respaldo), ni adjuntos ni cuerpo");
   assert.equal(db.sync.inbox.descartados, 1);
   assert.equal(db.sync.sentitems.descartados, 1);
   const todo = texto + JSON.stringify(db.sync) + logs.join("\n") + JSON.stringify([...db.mensajes.values()]);
@@ -892,4 +906,120 @@ test("diagnostico: carpetas con su madre y recuento por carpeta y mes; sin ids, 
   assert.ok(!/m1|f-in/.test(JSON.stringify(r.body)), "sin ids");
   assert.equal(db.mensajes.size, 0); assert.equal(logs.length, 0);
   assert.ok(g.llamadas.every((c) => c.method === "GET"));
+});
+
+// ---------------------------------------------------------------- cabeceras originales (destinatario reescrito)
+const H = (to: string, cc = "") => [
+  { name: "Received", value: "from x by y for <info@guimaes.es>" },
+  { name: "From", value: "Cliente <cliente@ejemplo.invalid>" },
+  { name: "To", value: to }, ...(cc ? [{ name: "Cc", value: cc }] : []),
+  { name: "Subject", value: SECRETO_ASUNTO },
+];
+
+test("infoEnCabeceras: solo To/Cc originales con la dirección exacta", () => {
+  assert.equal(infoEnCabeceras(H('"Guimaes" <INFO@guimaes.es>')), true);
+  assert.equal(infoEnCabeceras(H("otra@ejemplo.invalid", "a@b.es, info@guimaes.es")), true);
+  assert.equal(infoEnCabeceras(H("info@guimaes.es")), true);
+  assert.equal(infoEnCabeceras(H("administracion@guimaes.es")), false, "Received con info@ no cuenta");
+  assert.equal(infoEnCabeceras(H("noinfo@guimaes.es")), false);
+  assert.equal(infoEnCabeceras(H("info@guimaes.es.otro.invalid")), false);
+  assert.equal(infoEnCabeceras(undefined), false);
+});
+
+test("sincronizar: To reescrito a administracion@ con cabecera To original info@ → entra; solo administracion@ → se descarta", async () => {
+  const g = fakeGraph(); const db = new FakeDb();
+  g.paginas[inicial("inbox")] = {
+    value: [
+      msg("in-directo", { toRecipients: [dir(ALIAS)] }),
+      msg("in-reescrito", { toRecipients: [dir("administracion@guimaes.es")] }),
+      msg("in-admin", { subject: SECRETO_ASUNTO, toRecipients: [dir("administracion@guimaes.es")] }),
+    ],
+    "@odata.deltaLink": `${U}/mailFolders/inbox/messages/delta?$deltatoken=i1`,
+  };
+  g.paginas[inicial("sentitems")] = { value: [], "@odata.deltaLink": `${U}/mailFolders/sentitems/messages/delta?$deltatoken=s1` };
+  g.cabeceras["in-reescrito"] = H("Guimaes <info@guimaes.es>");
+  g.cabeceras["in-admin"] = H("administracion@guimaes.es");
+  const r = await jsonDe(deps(g, db), { accion: "sincronizar" });
+  assert.equal(r.status, 200);
+  assert.deepEqual([...db.mensajes.keys()].sort(), ["in-directo", "in-reescrito"]);
+  assert.equal(db.sync.inbox.descartados, 1);
+  const pedidas = g.llamadas.filter((c) => c.url.endsWith("?$select=internetMessageHeaders")).map((c) => c.url.slice(U.length));
+  assert.deepEqual(pedidas, ["/messages/in-reescrito?$select=internetMessageHeaders", "/messages/in-admin?$select=internetMessageHeaders"],
+    "cabeceras solo de lo que el filtro descarta");
+  const todo = JSON.stringify(r.body) + JSON.stringify(db.sync) + logs.join("\n") + JSON.stringify([...db.mensajes.values()]);
+  assert.ok(!todo.includes(SECRETO_ASUNTO));
+});
+
+function historico(g: Graph, db: FakeDb) {
+  const desde = "2026-08-14T12:00:00Z";
+  db.sync.inbox.importacion_desde = desde;
+  const p1 = `${U}/mailFolders/inbox/messages?$select=id,receivedDateTime,isDraft&$filter=${encodeURIComponent("receivedDateTime ge " + desde)}&$top=25`;
+  const p2 = `${U}/mailFolders/inbox/messages?$skiptoken=2`;
+  g.paginas[p1] = { value: [
+    { id: "h-ya", receivedDateTime: "2026-11-12T10:00:00Z" },
+    { id: "h-info-oct", receivedDateTime: "2026-10-02T10:00:00Z" },
+    { id: "h-admin", receivedDateTime: "2026-10-03T10:00:00Z" },
+  ], "@odata.nextLink": p2 };
+  g.paginas[p2] = { value: [
+    { id: "h-info-sep", receivedDateTime: "2026-09-05T10:00:00Z" },
+    { id: "h-borrador", receivedDateTime: "2026-09-06T10:00:00Z", isDraft: true },
+  ] };
+  g.cabeceras["h-info-oct"] = H("administracion@guimaes.es", "Info <info@guimaes.es>");
+  g.cabeceras["h-admin"] = H("administracion@guimaes.es");
+  g.cabeceras["h-info-sep"] = H("info@guimaes.es");
+  g.completos["h-info-oct"] = msg("h-info-oct", { toRecipients: [dir("administracion@guimaes.es")], receivedDateTime: "2026-10-02T10:00:00Z", hasAttachments: true });
+  g.completos["h-info-sep"] = msg("h-info-sep", { toRecipients: [dir("administracion@guimaes.es")], receivedDateTime: "2026-09-05T10:00:00Z" });
+  g.adjuntos["h-info-oct"] = [{ id: "a1", name: "f.pdf", contentType: "application/pdf", size: 10, isInline: false }];
+  return { p1, p2 };
+}
+
+test("importar_historico: simular solo cuenta por mes, sin guardar nada ni pedir cuerpos", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); historico(g, db);
+  await db.guardarMensajes([{ graph_id: "h-ya", carpeta: "inbox" }]);
+  const r = await jsonDe(deps(g, db), { accion: "importar_historico", simular: true }, { "x-hook-secret": CRON });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { simular: true, revisados: 5, ya_estaban: 1, pasan: 2, descartados: 2, importados: 0, adjuntos: 0, por_mes: { "2026-10": 1, "2026-09": 1 }, cursor: null });
+  assert.equal(db.mensajes.size, 1);
+  assert.ok(!g.llamadas.some((c) => /\$select=id,internetMessageId|attachments/.test(c.url)), "sin cuerpos ni adjuntos");
+  assert.ok(!g.llamadas.some((c) => c.url.includes("h-ya?") || c.url.includes("h-borrador?")), "ni cabeceras de lo que ya está o es borrador");
+  assert.ok(g.llamadas.every((c) => c.method === "GET"));
+  assert.ok(!JSON.stringify(r.body).includes(SECRETO_ASUNTO));
+  assert.equal(logs.length, 0);
+  // Por defecto simula.
+  assert.equal((await jsonDe(deps(g, db), { accion: "importar_historico" }, { "x-hook-secret": CRON })).body.simular, true);
+});
+
+test("importar_historico: importa como mensaje normal (con adjuntos) solo lo que pasa; descarta el resto sin guardar", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); historico(g, db);
+  const r = await jsonDe(deps(g, db), { accion: "importar_historico", simular: false }, { "x-hook-secret": CRON });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.importados, 2); assert.equal(r.body.adjuntos, 1); assert.equal(r.body.cursor, null);
+  assert.deepEqual([...db.mensajes.keys()].sort(), ["h-info-oct", "h-info-sep"]);
+  const f = db.mensajes.get("h-info-oct")!;
+  assert.equal(f.carpeta, "inbox"); assert.equal(f.fecha, "2026-10-02T10:00:00Z"); assert.equal(f.asunto, "Asunto h-info-oct");
+  assert.deepEqual(db.adjuntos.map((a) => a.graph_id), ["a1"]);
+  assert.ok(!JSON.stringify([...db.mensajes.values()]).includes(SECRETO_ASUNTO));
+  const full = g.llamadas.find((c) => c.url.includes("/messages/h-info-oct?$select=id,"))!;
+  assert.match(full.headers["Prefer"], /outlook\.body-content-type="html"/);
+  // Repetir no duplica ni vuelve a pedir cabeceras de lo importado.
+  const antes = g.llamadas.length;
+  const r2 = await jsonDe(deps(g, db), { accion: "importar_historico", simular: false }, { "x-hook-secret": CRON });
+  assert.equal(r2.body.importados, 0); assert.equal(r2.body.ya_estaban, 2);
+  assert.ok(!g.llamadas.slice(antes).some((c) => c.url.includes("h-info-oct?")));
+});
+
+test("importar_historico: corta por tiempo con un cursor y reanuda; cursor ajeno → 400; usuario inactivo no", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const { p2 } = historico(g, db);
+  let t = reloj.getTime();
+  const orig = g.fetch;
+  g.fetch = (async (u: any, i: any) => { if (String(u).includes("/mailFolders/inbox/messages?")) t += 80_000; return orig(u, i); }) as typeof fetch;
+  const d = deps(g, db, { now: () => new Date(t) });
+  const r = await jsonDe(d, { accion: "importar_historico", simular: false }, { "x-hook-secret": CRON });
+  assert.equal(r.body.cursor, p2);
+  assert.equal(r.body.importados, 1);
+  const r2 = await jsonDe(d, { accion: "importar_historico", simular: false, cursor: r.body.cursor }, { "x-hook-secret": CRON });
+  assert.equal(r2.body.cursor, null); assert.equal(r2.body.importados, 1);
+  assert.equal(db.mensajes.size, 2);
+  assert.equal((await jsonDe(d, { accion: "importar_historico", cursor: "https://graph.microsoft.com/v1.0/users/otro/messages?x" }, { "x-hook-secret": CRON })).status, 400);
+  assert.equal((await jsonDe(d, { accion: "importar_historico" }, { authorization: "Bearer jwt-inactivo" })).status, 403);
 });
