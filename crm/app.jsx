@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Instagram } from "./instagram.jsx";
-import { Asistente, AsistenteBoton } from "./agente.jsx";
+import { Asistente, AsistenteBoton, AgenteVista } from "./agente.jsx";
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
@@ -179,6 +179,7 @@ function PasswordRecovery({onDone}){
 /* ============ SHELL ============ */
 const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
+  {id:"agente", label:"Agente IA", icon:"sparkles"},
   {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.EMPRESAS.filter(e=>!e.archived_at).length},
   {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.CONTACTS.length},
   {id:"cuentas", label:"Área cliente", icon:"users", badge:()=>CRM.CUENTAS_PENDIENTES.length + CRM.ALTAS_PROVISIONALES.length},
@@ -196,6 +197,9 @@ function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
   // Asistente (crm/agente.jsx): cajón a la derecha; se mantiene montado al
   // cambiar de vista para no perder la conversación.
   const [asistente,setAsistente]=uState(false);
+  // En la vista "Agente IA" no se abre el cajón: un solo chat a la vez.
+  const enAgente = view==="agente";
+  uEffect(()=>{ if(enAgente) setAsistente(false); },[enAgente]);
   // Contador de correos no leídos del menú (crm/correo.jsx): al entrar y cada 2 min.
   const [,setCorreoTick]=uState(0);
   uEffect(()=>{
@@ -250,12 +254,12 @@ function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
           {/* Provisional: hasta que exista un panel de notificaciones real, el
               icono solo abre Configuración → Notificaciones (donde ya se
               gestiona la suscripción push). */}
-          <AsistenteBoton abierto={asistente} onClick={()=>setAsistente(a=>!a)}/>
+          <AsistenteBoton abierto={asistente} deshabilitado={enAgente} onClick={()=>setAsistente(a=>!a)}/>
           <button className="topbar__icon" title="Notificaciones" onClick={()=>nav("config","notificaciones")}><Icon name="bell" size={18}/></button>
         </header>
         {children}
       </div>
-      <Asistente abierto={asistente} onCerrar={()=>setAsistente(false)} view={vista} titulo={title} nav={nav}/>
+      <Asistente abierto={asistente && !enAgente} onCerrar={()=>setAsistente(false)} view={vista} titulo={title} nav={nav}/>
     </div>
   );
 }
@@ -3842,7 +3846,7 @@ function InstallPrompt(){
 //   la URL para el login con Google y para los enlaces de recuperación de
 //   contraseña (#access_token=...). Dos usos del hash a la vez es fuente
 //   garantizada de bugs.
-const ROUTABLE_VIEWS = ["home","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","documents","instagram","automations","config"];
+const ROUTABLE_VIEWS = ["home","agente","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","documents","instagram","automations","config"];
 function viewToSearch(name, id){
   const params = new URLSearchParams();
   params.set("view", name);
@@ -3950,10 +3954,11 @@ function App(){
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user) return <><Login onLogin={u=>setUser(u)}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],agente:["Agente IA","Consultas sobre el CRM"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
+  else if(view.name==="agente") screen=<AgenteVista nav={nav}/>;
   else if(view.name==="empresas") screen=<Empresas nav={nav} toast={fireToast}/>;
   else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
@@ -3968,7 +3973,7 @@ function App(){
   else if(view.name==="instagram") screen=<Instagram user={user} toast={fireToast}/>;
   else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
   else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
-  const flush = view.name==="pipeline"||view.name==="whatsapp";
+  const flush = view.name==="pipeline"||view.name==="whatsapp"||view.name==="agente";
   const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
   return <>
     <Shell user={user} view={activeNav} vista={view} nav={nav} onLogout={logout} title={title} crumb={crumb}>

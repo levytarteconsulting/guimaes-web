@@ -80,45 +80,31 @@ function Burbuja({ b, onNav }) {
   );
 }
 
-/* ---------------- Panel ---------------- */
-export function AsistenteBoton({ abierto, onClick }) {
-  return (
-    <button className={"topbar__icon topbar__icon--ag" + (abierto ? " topbar__icon--on" : "")} title="Asistente" aria-label="Asistente"
-      aria-expanded={abierto} onClick={onClick}>
-      <Icon name="star" size={18} />
-    </button>
-  );
-}
-
-export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
-  const [lista, setLista] = useState(false); // vista de "mis conversaciones"
-  const [convs, setConvs] = useState(null);
+/* ---------------- Estado y streaming (común al cajón y a la vista) ---------------- */
+// Un chat: conversación abierta, burbujas, envío por SSE y cancelación.
+// Lo usan el cajón (Asistente) y la vista "Agente IA" (AgenteVista).
+export function useChatAgente({ view } = {}) {
+  const [convs, setConvs] = useState(null); // null = sin cargar
   const [convId, setConvId] = useState(null);
   const [burbujas, setBurbujas] = useState([]);
   const [entrada, setEntrada] = useState("");
   const [enCurso, setEnCurso] = useState(false);
   const [cargando, setCargando] = useState(false);
-  const [aviso, setAviso] = useState(null); // errores del panel (no de una respuesta)
+  const [aviso, setAviso] = useState(null); // errores del chat (no de una respuesta)
   const abortRef = useRef(null);
   const finRef = useRef(null);
   const textoRef = useRef(null);
   const cargaRef = useRef(0);
+  const listaPedida = useRef(false);
 
-  // Móvil: pantalla completa, sin scroll del body detrás. Escape cierra.
-  useEffect(() => {
-    if (!abierto) return;
-    const onKey = (e) => { if (e.key === "Escape") onCerrar(); };
-    window.addEventListener("keydown", onKey);
-    const movil = window.innerWidth <= MOVIL;
-    if (movil) document.body.classList.add("no-scroll");
-    setTimeout(() => textoRef.current && textoRef.current.focus(), 50);
-    return () => { window.removeEventListener("keydown", onKey); if (movil) document.body.classList.remove("no-scroll"); };
-  }, [abierto]);
-  // Si se desmonta (cerrar sesión), se corta la petición en curso.
+  // Si se desmonta (cerrar sesión, cambiar de vista), se corta la petición en curso.
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
   useEffect(() => { if (finRef.current) finRef.current.scrollIntoView({ block: "end" }); }, [burbujas]);
 
+  const enfocar = () => setTimeout(() => textoRef.current && textoRef.current.focus(), 0);
+
   const cargarConvs = useCallback(async () => {
+    listaPedida.current = true;
     try {
       const s = await sesion();
       if (!s) return;
@@ -129,15 +115,14 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
       if (error) throw error;
       setConvs(data || []);
     } catch (e) {
-      setConvs([]); setAviso("No se han podido cargar tus conversaciones.");
+      setConvs((c) => c || []); setAviso("No se han podido cargar tus conversaciones.");
     }
   }, []);
-  useEffect(() => { if (abierto && lista) cargarConvs(); }, [abierto, lista]);
 
   const abrirConv = async (id) => {
-    if (enCurso) return;
+    if (enCurso) return false;
     const n = ++cargaRef.current;
-    setLista(false); setConvId(id); setBurbujas([]); setAviso(null); setCargando(true);
+    setConvId(id); setBurbujas([]); setAviso(null); setCargando(true);
     try {
       const { data, error } = await Auth.client.from("agente_mensajes")
         .select("orden,rol,tipo,texto,stop_reason").eq("conversacion_id", id)
@@ -149,12 +134,14 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
     } finally {
       if (n === cargaRef.current) setCargando(false);
     }
+    return true;
   };
   const nueva = () => {
-    if (enCurso) return;
+    if (enCurso) return false;
     cargaRef.current++;
-    setConvId(null); setBurbujas([]); setLista(false); setAviso(null); setCargando(false); setEntrada("");
-    setTimeout(() => textoRef.current && textoRef.current.focus(), 0);
+    setConvId(null); setBurbujas([]); setAviso(null); setCargando(false); setEntrada("");
+    enfocar();
+    return true;
   };
 
   // Actualiza la última burbuja (la respuesta en curso).
@@ -223,9 +210,90 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
       tocarUltima((b) => ({ ...b, pendiente: false, partes: b.partes.map((p) => p.tipo === "herramienta" && p.estado === "inicio" ? { ...p, estado: "fin", error: true } : p) }));
       abortRef.current = null;
       setEnCurso(false);
+      // Si la lista está a la vista, se refresca (conversación nueva o reordenada).
+      if (listaPedida.current) cargarConvs();
     }
   };
   const cancelar = () => { if (abortRef.current) abortRef.current.abort(); };
+
+  return { convs, cargarConvs, convId, burbujas, entrada, setEntrada, enCurso, cargando, aviso,
+           abrirConv, nueva, enviar, cancelar, finRef, textoRef, enfocar };
+}
+
+/* ---------------- Piezas comunes ---------------- */
+function ListaConversaciones({ chat, onAbrir }) {
+  const { convs, convId, aviso } = chat;
+  return <>
+    {convs === null ? <div className="ag-vacio">Cargando…</div>
+      : convs.length === 0 ? <div className="ag-vacio">Todavía no has hecho ninguna pregunta.</div>
+      : convs.map((c) => (
+        <button key={c.id} className={"ag-conv" + (c.id === convId ? " active" : "")} disabled={chat.enCurso}
+          onClick={() => onAbrir(c.id)}>
+          <span className="ag-conv__t">{c.titulo || "Sin título"}</span>
+          <span className="ag-conv__f">{new Date(c.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}</span>
+        </button>
+      ))}
+    {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
+  </>;
+}
+function Hilo({ chat, onNav }) {
+  const { cargando, burbujas, aviso, finRef } = chat;
+  return <>
+    {cargando && <div className="ag-vacio">Cargando la conversación…</div>}
+    {!cargando && burbujas.length === 0 && (
+      <div className="ag-intro">
+        <p>Pregunta lo que necesites sobre clientes, empresas, el pipeline, tareas, documentos, WhatsApp o el correo.</p>
+        <p className="ag-intro__nota">Solo consulta: no cambia ni envía nada. Puede equivocarse; comprueba los datos importantes en la ficha.</p>
+      </div>
+    )}
+    {burbujas.map((b, i) => <Burbuja key={i} b={b} onNav={onNav} />)}
+    {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
+    <div ref={finRef}></div>
+  </>;
+}
+function Entrada({ chat, nota }) {
+  const { textoRef, entrada, setEntrada, enviar, enCurso, cancelar } = chat;
+  return (
+    <footer className="ag-foot">
+      {nota ? <div className="ag-ctx">{nota}</div> : null}
+      <div className="ag-input">
+        <textarea ref={textoRef} rows={2} maxLength={MAX_PREGUNTA} value={entrada} placeholder="Escribe tu pregunta…"
+          onChange={(e) => setEntrada(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }} />
+        {enCurso
+          ? <button className="btn ag-send ag-send--stop" onClick={cancelar} title="Cancelar" aria-label="Cancelar"><Icon name="x" size={16} /></button>
+          : <button className="btn btn--primary ag-send" onClick={enviar} disabled={!entrada.trim()} title="Enviar" aria-label="Enviar"><Icon name="send" size={16} /></button>}
+      </div>
+    </footer>
+  );
+}
+
+/* ---------------- Cajón (botón de la topbar) ---------------- */
+export function AsistenteBoton({ abierto, onClick, deshabilitado }) {
+  return (
+    <button className={"topbar__icon topbar__icon--ag" + (abierto ? " topbar__icon--on" : "")}
+      title={deshabilitado ? "Ya estás en Agente IA" : "Asistente"} aria-label="Asistente"
+      aria-expanded={abierto} aria-disabled={deshabilitado || undefined} onClick={deshabilitado ? undefined : onClick}>
+      <Icon name="sparkles" size={18} />
+    </button>
+  );
+}
+
+export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
+  const [lista, setLista] = useState(false); // vista de "mis conversaciones"
+  const chat = useChatAgente({ view });
+
+  // Móvil: pantalla completa, sin scroll del body detrás. Escape cierra.
+  useEffect(() => {
+    if (!abierto) return;
+    const onKey = (e) => { if (e.key === "Escape") onCerrar(); };
+    window.addEventListener("keydown", onKey);
+    const movil = window.innerWidth <= MOVIL;
+    if (movil) document.body.classList.add("no-scroll");
+    setTimeout(() => chat.textoRef.current && chat.textoRef.current.focus(), 50);
+    return () => { window.removeEventListener("keydown", onKey); if (movil) document.body.classList.remove("no-scroll"); };
+  }, [abierto]);
+  useEffect(() => { if (abierto && lista) chat.cargarConvs(); }, [abierto, lista]);
 
   const irA = (d) => {
     nav(d.name, d.id);
@@ -237,53 +305,71 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
   return (
     <aside className="ag-panel" role="dialog" aria-label="Asistente">
       <header className="ag-head">
-        <div className="ag-head__t"><Icon name="star" size={16} /> Asistente</div>
-        <button className="ag-hbtn" title="Mis conversaciones" aria-label="Mis conversaciones" disabled={enCurso}
+        <div className="ag-head__t"><Icon name="sparkles" size={16} /> Asistente</div>
+        <button className="ag-hbtn" title="Mis conversaciones" aria-label="Mis conversaciones" disabled={chat.enCurso}
           onClick={() => setLista((v) => !v)}><Icon name="clock" size={17} /></button>
-        <button className="ag-hbtn" title="Nueva conversación" aria-label="Nueva conversación" disabled={enCurso}
-          onClick={nueva}><Icon name="plus" size={17} /></button>
+        <button className="ag-hbtn" title="Nueva conversación" aria-label="Nueva conversación" disabled={chat.enCurso}
+          onClick={() => { if (chat.nueva()) setLista(false); }}><Icon name="plus" size={17} /></button>
         <button className="ag-hbtn" title="Cerrar" aria-label="Cerrar" onClick={onCerrar}><Icon name="x" size={17} /></button>
       </header>
-
-      {lista ? (
-        <div className="ag-body">
-          <div className="ag-lista__t">Mis conversaciones</div>
-          {convs === null ? <div className="ag-vacio">Cargando…</div>
-            : convs.length === 0 ? <div className="ag-vacio">Todavía no has hecho ninguna pregunta.</div>
-            : convs.map((c) => (
-              <button key={c.id} className={"ag-conv" + (c.id === convId ? " active" : "")} onClick={() => abrirConv(c.id)}>
-                <span className="ag-conv__t">{c.titulo || "Sin título"}</span>
-                <span className="ag-conv__f">{new Date(c.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}</span>
-              </button>
-            ))}
-          {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
-        </div>
-      ) : (
-        <div className="ag-body">
-          {cargando && <div className="ag-vacio">Cargando la conversación…</div>}
-          {!cargando && burbujas.length === 0 && (
-            <div className="ag-intro">
-              <p>Pregunta lo que necesites sobre clientes, empresas, el pipeline, tareas, documentos, WhatsApp o el correo.</p>
-              <p className="ag-intro__nota">Solo consulta: no cambia ni envía nada. Puede equivocarse; comprueba los datos importantes en la ficha.</p>
-            </div>
-          )}
-          {burbujas.map((b, i) => <Burbuja key={i} b={b} onNav={irA} />)}
-          {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
-          <div ref={finRef}></div>
-        </div>
-      )}
-
-      <footer className="ag-foot">
-        {ctx && titulo ? <div className="ag-ctx">Desde: {titulo}</div> : null}
-        <div className="ag-input">
-          <textarea ref={textoRef} rows={2} maxLength={MAX_PREGUNTA} value={entrada} placeholder="Escribe tu pregunta…"
-            onChange={(e) => setEntrada(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }} />
-          {enCurso
-            ? <button className="btn ag-send ag-send--stop" onClick={cancelar} title="Cancelar" aria-label="Cancelar"><Icon name="x" size={16} /></button>
-            : <button className="btn btn--primary ag-send" onClick={enviar} disabled={!entrada.trim()} title="Enviar" aria-label="Enviar"><Icon name="send" size={16} /></button>}
-        </div>
-      </footer>
+      <div className="ag-body">
+        {lista
+          ? <><div className="ag-lista__t">Mis conversaciones</div>
+              <ListaConversaciones chat={chat} onAbrir={(id) => { setLista(false); chat.abrirConv(id); }} /></>
+          : <Hilo chat={chat} onNav={irA} />}
+      </div>
+      <Entrada chat={chat} nota={ctx && titulo ? `Desde: ${titulo}` : null} />
     </aside>
   );
+}
+
+/* ---------------- Vista "Agente IA" (menú lateral) ---------------- */
+// Escritorio: lista a la izquierda y chat a la derecha. Móvil: primero la
+// lista; al abrir o empezar una conversación, el chat con botón de volver.
+function useMovil() {
+  const [m, setM] = useState(() => window.innerWidth <= MOVIL);
+  useEffect(() => {
+    const f = () => setM(window.innerWidth <= MOVIL);
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
+  return m;
+}
+export function AgenteVista({ nav }) {
+  const chat = useChatAgente({}); // sin contexto de vista: aquí no hay ficha
+  const movil = useMovil();
+  const [verChat, setVerChat] = useState(false); // solo cuenta en móvil
+  useEffect(() => { chat.cargarConvs(); }, []);
+  useEffect(() => { if (!movil) chat.enfocar(); }, [movil]);
+
+  const abrir = (id) => { chat.abrirConv(id).then((ok) => { if (ok) setVerChat(true); }); };
+  const nueva = () => { if (chat.nueva()) setVerChat(true); };
+  const volver = () => { if (!chat.enCurso) setVerChat(false); };
+  const conv = chat.convId && chat.convs && chat.convs.find((c) => c.id === chat.convId);
+  const tituloChat = chat.convId ? (conv && conv.titulo) || "Conversación" : "Nueva conversación";
+
+  const lista = (
+    <section className="agv__lista">
+      <div className="agv__lista-head">
+        <div className="ag-lista__t">Mis conversaciones</div>
+        <button className="btn btn--primary agv__nueva" onClick={nueva} disabled={chat.enCurso}>
+          <Icon name="plus" size={16} />Nueva conversación
+        </button>
+      </div>
+      <div className="agv__lista-body"><ListaConversaciones chat={chat} onAbrir={abrir} /></div>
+    </section>
+  );
+  const hilo = (
+    <section className="agv__chat">
+      <header className="agv__chat-head">
+        {movil && <button className="ag-hbtn" onClick={volver} disabled={chat.enCurso} title="Volver" aria-label="Volver a mis conversaciones">
+          <Icon name="chevronR" size={18} style={{ transform: "rotate(180deg)" }} /></button>}
+        <div className="agv__chat-t">{tituloChat}</div>
+      </header>
+      <div className="ag-body"><Hilo chat={chat} onNav={(d) => nav(d.name, d.id)} /></div>
+      <Entrada chat={chat} />
+    </section>
+  );
+  if (movil) return <div className="agv agv--movil">{verChat ? hilo : lista}</div>;
+  return <div className="agv">{lista}{hilo}</div>;
 }
