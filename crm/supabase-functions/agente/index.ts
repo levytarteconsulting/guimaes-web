@@ -63,7 +63,7 @@ function db(jwt: string): Db {
       return !!d;
     },
     async mensajes(conversacionId) {
-      return ok(await c.from("agente_mensajes").select("orden, rol, tipo, contenido")
+      return ok(await c.from("agente_mensajes").select("orden, rol, tipo, contenido, stop_reason")
         .eq("conversacion_id", conversacionId).order("orden")) ?? [];
     },
     async crearConversacion(titulo, modelo) {

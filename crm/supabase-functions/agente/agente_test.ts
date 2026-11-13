@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fs from "node:fs";
 import {
-  BETA_FALLBACK, createHandler, inicioDiaMadrid, MAX_PREGUNTAS_CONVERSACION, MAX_RESULTADO, MAX_VUELTAS,
+  createHandler, historialDe, inicioDiaMadrid, MAX_PREGUNTAS_CONVERSACION, MAX_RESULTADO, MAX_VUELTAS,
   MODELO_POR_DEFECTO, serializarResultado, TOPE_DIARIO_POR_DEFECTO,
 } from "./agente.ts";
 import type { Db, MensajeGuardado, Modelo, NuevaLlamada, NuevoMensaje, ParamsModelo, StreamModelo } from "./agente.ts";
@@ -37,7 +37,7 @@ class FakeDb implements Db {
   async conversacionPropia(id: string, uid: string) { return this.convs.some((c) => c.id === id && c.auth_user_id === uid); }
   async mensajes(id: string): Promise<MensajeGuardado[]> {
     return this.msgs.filter((m) => m.conversacion_id === id).sort((a, b) => a.orden - b.orden)
-      .map((m) => ({ orden: m.orden, rol: m.rol, tipo: m.tipo, contenido: structuredClone(m.contenido) }));
+      .map((m) => ({ orden: m.orden, rol: m.rol, tipo: m.tipo, contenido: structuredClone(m.contenido), stop_reason: m.stop_reason ?? null }));
   }
   async crearConversacion(titulo: string, modelo: string) {
     const id = `c0000000-0000-0000-0000-00000000000${++this.n}`;
@@ -141,9 +141,10 @@ const finDe = (ev: Evento[]) => ev.find((e) => e.evento === "fin")!.datos;
  *  tool_use va seguido de un mensaje user con un tool_result por id, y los
  *  órdenes son consecutivos. */
 function historialValido(db: FakeDb, conv: string) {
-  const ms = db.msgs.filter((m) => m.conversacion_id === conv).sort((a, b) => a.orden - b.orden);
+  const todos = db.msgs.filter((m) => m.conversacion_id === conv).sort((a, b) => a.orden - b.orden);
+  todos.forEach((m, i) => assert.equal(m.orden, i));
+  const ms = todos.filter((m) => !(m.rol === "assistant" && m.stop_reason === "refusal"));
   assert.equal(ms[0].rol, "user");
-  ms.forEach((m, i) => assert.equal(m.orden, i));
   ms.forEach((m, i) => {
     const usos = Array.isArray(m.contenido) ? (m.contenido as Msg[]).filter((b) => b.type === "tool_use").map((b) => b.id) : [];
     if (m.rol === "assistant" && usos.length) {
@@ -287,8 +288,8 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   const params = modelo.llamadas[0];
   assert.equal(params.model, MODELO_POR_DEFECTO);
   assert.equal(params.model, "claude-sonnet-5-5");
-  assert.deepEqual(params.betas, [BETA_FALLBACK]);
-  assert.equal(params.fallbacks, "default");
+  assert.equal("fallbacks" in params, false);         // sin fallbacks: un rechazo queda como rechazo
+  assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
   assert.equal(params.tools!.length, 12);
@@ -304,17 +305,10 @@ test("AGENTE_MODELO cambia el modelo sin tocar código (Opus 5.5) y AGENTE_ESFUE
   await eventos(await h(peticion({ pregunta: "hola" })));
   assert.equal(modelo.llamadas[0].model, "claude-opus-5-5");
   assert.deepEqual(modelo.llamadas[0].output_config, { effort: "high" });
-  assert.equal(modelo.llamadas[0].fallbacks, "default");
+  assert.equal("fallbacks" in modelo.llamadas[0], false);
   const { h: h2, modelo: m2 } = montar({ env: { AGENTE_ESFUERZO: "muchisimo" } });
   await eventos(await h2(peticion({ pregunta: "hola" })));
   assert.deepEqual(m2.llamadas[0].output_config, { effort: "medium" });
-});
-
-test("con un modelo Haiku no se piden fallbacks (no existen)", async () => {
-  const { h, modelo } = montar({ env: { AGENTE_MODELO: "claude-haiku-5-5" } });
-  await eventos(await h(peticion({ pregunta: "hola" })));
-  assert.equal("fallbacks" in modelo.llamadas[0], false);
-  assert.equal("betas" in modelo.llamadas[0], false);
 });
 
 // ================================================================= herramientas
@@ -352,9 +346,8 @@ test("bucle con herramientas en paralelo: RPC con p_*, resultados en un solo men
   soloCrece(modelo);
 });
 
-test("los bloques de thinking (y fallback) se guardan y se reenvían intactos; el historial solo crece", async () => {
-  const fb = { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" } };
-  const r1 = respuesta([pensar(), fb, usar("resumen_actividad", { desde: "2026-11-01" })], "tool_use");
+test("los bloques de thinking se guardan y se reenvían intactos; el historial solo crece", async () => {
+  const r1 = respuesta([pensar(), usar("resumen_actividad", { desde: "2026-11-01" })], "tool_use");
   const r2 = respuesta([pensar(), texto("Resumen listo.")]);
   const modelo = new FakeModelo([r1, r2]);
   const { h, db } = montar({ modelo });
@@ -486,17 +479,47 @@ test("max_tokens con un tool_use a medias: no se ejecuta y se cierra con error",
   historialValido(db, db.convs[0].id);
 });
 
-test("rechazo (refusal): no se ejecutan herramientas", async () => {
-  const modelo = new FakeModelo([respuesta([usar("buscar", { q: "xx" })], "refusal")]);
+test("rechazo (refusal): queda en la auditoría, no se ejecuta nada y no se reenvía después", async () => {
+  const detalles = { type: "refusal", category: "cyber", explanation: "x" };
+  const rechazo = { ...respuesta([texto("Puedo ayudar con"), usar("buscar", { q: "xx" })], "refusal"), stop_details: detalles };
+  const modelo = new FakeModelo([rechazo]);
   const { h, db } = montar({ modelo });
   const ev = await eventos(await h(peticion({ pregunta: "x" })));
   assert.equal(finDe(ev).motivo, "rechazo");
+  assert.equal(modelo.llamadas.length, 1);                 // sin reintentos ni fallbacks
   assert.equal(db.rpcs.length, 0);
+  assert.equal(db.llamadas.length, 0);
+  const m = db.msgs.find((x) => x.tipo === "modelo")!;
+  assert.equal(m.stop_reason, "refusal");
+  assert.deepEqual((m.uso as Msg).stop_details, detalles);
+  assert.deepEqual(db.msgs.map((x) => x.tipo), ["pregunta", "modelo"]);   // sin tool_result tras el rechazo
   historialValido(db, db.convs[0].id);
+
+  // La pregunta siguiente no reenvía el turno rechazado.
+  const conv = db.convs[0].id;
+  const modelo2 = new FakeModelo([fin("Vale.")]);
+  await eventos(await montar({ db, modelo: modelo2 }).h(peticion({ pregunta: "otra cosa", conversacion_id: conv })));
+  const enviados = modelo2.llamadas[0].messages;
+  assert.deepEqual(enviados.map((x) => x.role), ["user", "user"]);
+  assert.doesNotMatch(JSON.stringify(enviados), /Puedo ayudar con/);
+  historialValido(db, conv);
+
+  // Rechazo sin contenido: también queda en la auditoría.
   const vacio = montar({ modelo: new FakeModelo([respuesta([], "refusal")]) });
   const ev2 = await eventos(await vacio.h(peticion({ pregunta: "x" })));
   assert.equal(finDe(ev2).motivo, "rechazo");
-  assert.deepEqual(vacio.db.msgs.map((m) => m.tipo), ["pregunta"]);
+  assert.deepEqual(vacio.db.msgs.map((x) => [x.tipo, x.stop_reason ?? null]), [["pregunta", null], ["modelo", "refusal"]]);
+});
+
+test("historialDe omite rechazos y respuestas vacías y respeta el orden", () => {
+  const h = historialDe([
+    { orden: 2, rol: "user", tipo: "pregunta", contenido: [texto("b")] },
+    { orden: 0, rol: "user", tipo: "pregunta", contenido: [texto("a")] },
+    { orden: 1, rol: "assistant", tipo: "modelo", contenido: [texto("no")], stop_reason: "refusal" },
+    { orden: 3, rol: "assistant", tipo: "modelo", contenido: [] },
+    { orden: 4, rol: "assistant", tipo: "modelo", contenido: [texto("sí")], stop_reason: "end_turn" },
+  ]);
+  assert.deepEqual(h.map((m) => (m.content as Msg[])[0].text), ["a", "b", "sí"]);
 });
 
 test("error de la API: evento error y fin; la pregunta queda guardada", async () => {

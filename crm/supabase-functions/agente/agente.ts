@@ -15,6 +15,10 @@
 //     guardado va seguido de su tool_result (real o de error), pase lo que
 //     pase. Una respuesta cortada a medias (plazo, cancelación, error) no se
 //     guarda.
+//   * Sin fallbacks: un rechazo del modelo (stop_reason "refusal") queda como
+//     rechazo. Se guarda en la auditoría (con stop_details en "uso"), no se
+//     ejecutan sus herramientas y no se reenvía al modelo en las preguntas
+//     siguientes (historialDe lo omite).
 //   * Respuesta en streaming (Server-Sent Events): conversacion, texto,
 //     herramienta, fin, error.
 
@@ -34,7 +38,6 @@ export const MAX_PREGUNTA = 4_000;
 export const MAX_PREGUNTAS_CONVERSACION = 40;
 export const MAX_RESULTADO = 12_000;           // caracteres de cada tool_result
 export const MAX_TOKENS = 16_000;
-export const BETA_FALLBACK = "server-side-fallback-2026-07-01";
 // Solo la web (www.guimaes.es redirige a guimaes.es y no sirve contenido).
 export const ORIGENES = ["https://guimaes.es"];
 const ESFUERZOS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -48,7 +51,10 @@ type ToolResult = Anthropic.Beta.BetaToolResultBlockParam;
 export type ParamsModelo = Parameters<Anthropic["beta"]["messages"]["stream"]>[0];
 
 // ---------------------------------------------------------------- dependencias
-export type MensajeGuardado = { orden: number; rol: "user" | "assistant"; tipo: "pregunta" | "herramientas" | "modelo"; contenido: unknown };
+export type MensajeGuardado = {
+  orden: number; rol: "user" | "assistant"; tipo: "pregunta" | "herramientas" | "modelo"; contenido: unknown;
+  stop_reason?: string | null;
+};
 export type NuevoMensaje = MensajeGuardado & {
   conversacion_id: string; texto: string | null; modelo?: string | null; stop_reason?: string | null;
   uso?: unknown; request_id?: string | null; latencia_ms?: number | null;
@@ -153,6 +159,14 @@ export function serializarResultado(v: unknown): string {
     : s.slice(0, MAX_RESULTADO) + `\n[Resultado recortado a ${MAX_RESULTADO} caracteres: pide menos filas o filtra más.]`;
 }
 
+/** Historial que se reenvía al modelo: lo guardado, en orden, sin los
+ *  rechazos ni respuestas vacías (que solo quedan en la auditoría). */
+export function historialDe(previos: MensajeGuardado[]): Param[] {
+  return [...previos].sort((a, b) => a.orden - b.orden)
+    .filter((m) => !(m.rol === "assistant" && (m.stop_reason === "refusal" || (Array.isArray(m.contenido) && m.contenido.length === 0))))
+    .map((m) => ({ role: m.rol, content: m.contenido }) as Param);
+}
+
 class Cortado extends Error {
   readonly motivo: "plazo" | "cancelado";
   constructor(motivo: "plazo" | "cancelado") { super(motivo); this.motivo = motivo; }
@@ -228,7 +242,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         if (previos.filter((m) => m.tipo === "pregunta").length >= MAX_PREGUNTAS_CONVERSACION) {
           return json(req, 409, { error: "Esta conversación ya es muy larga: empieza una nueva." });
         }
-        historial = previos.map((m) => ({ role: m.rol, content: m.contenido }) as Param);
+        historial = historialDe(previos);
         orden = previos.length ? Math.max(...previos.map((m) => m.orden)) + 1 : 0;
         conversacionId = convPedida;
       } else {
@@ -241,7 +255,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
     }
 
     const params = (mensajes: Param[]): ParamsModelo => {
-      const p: ParamsModelo = {
+      return {
         model: modeloId,
         max_tokens: MAX_TOKENS,
         system: [{ type: "text", text: construirSistema(admins) }],
@@ -250,13 +264,6 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         output_config: { effort: esfuerzo as "medium" },
         cache_control: { type: "ephemeral" },
       };
-      // Rechazos del modelo: reintento en el servidor con el modelo que
-      // recomienda Anthropic. Haiku no tiene fallback.
-      if (!/haiku/.test(modeloId)) {
-        p.betas = [BETA_FALLBACK];
-        p.fallbacks = "default";
-      }
-      return p;
     };
 
     // ---- streaming
@@ -344,7 +351,20 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
           for (const k of Object.keys(uso) as (keyof typeof uso)[]) uso[k] += Number(respuesta.usage?.[k] ?? 0);
           const contenido = respuesta.content;
           const usos = toolUses(contenido);
-          if (contenido.length === 0) { motivo = respuesta.stop_reason === "refusal" ? "rechazo" : "fin"; break; }
+
+          // Rechazo: queda en la auditoría tal cual, sin ejecutar nada y sin
+          // pasar al historial que se reenvía (una respuesta rechazada, a
+          // veces parcial, no se le devuelve al modelo).
+          if (respuesta.stop_reason === "refusal") {
+            await guardar({
+              rol: "assistant", tipo: "modelo", contenido, texto: textoDe(contenido) || null, modelo: respuesta.model,
+              stop_reason: "refusal", uso: { ...respuesta.usage, stop_details: respuesta.stop_details ?? null },
+              request_id: requestId, latencia_ms: ahora() - t0,
+            });
+            motivo = "rechazo";
+            break;
+          }
+          if (contenido.length === 0) { motivo = "fin"; break; }
 
           const mensajeModeloId = await guardar({
             rol: "assistant", tipo: "modelo", contenido, texto: textoDe(contenido) || null, modelo: respuesta.model,
@@ -353,14 +373,14 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
           historial.push({ role: "assistant", content: contenido });
 
           if (respuesta.stop_reason !== "tool_use" || usos.length === 0) {
-            // Respuesta final, cortada por max_tokens o rechazada: si dejó
-            // algún tool_use, no se ejecuta, pero se cierra con un error para
-            // que el historial siga siendo válido.
+            // Respuesta final o cortada por max_tokens: si dejó algún
+            // tool_use, no se ejecuta, pero se cierra con un error para que
+            // el historial siga siendo válido.
             if (usos.length) {
               const s = sinEjecutar(usos, "la respuesta se cortó antes de terminar");
               await guardarResultados(s.resultados, s.llamadas, mensajeModeloId);
             }
-            motivo = respuesta.stop_reason === "refusal" ? "rechazo" : respuesta.stop_reason === "max_tokens" ? "max_tokens" : "fin";
+            motivo = respuesta.stop_reason === "max_tokens" ? "max_tokens" : "fin";
             break;
           }
 
