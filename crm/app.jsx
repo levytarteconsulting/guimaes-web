@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Instagram } from "./instagram.jsx";
+import { Asistente, AsistenteBoton } from "./agente.jsx";
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
@@ -190,8 +191,11 @@ const NAV = [
   {id:"automations", label:"Automatizaciones", icon:"automations"},
   {id:"config", label:"Configuración", icon:"settings"}
 ];
-function Shell({user, view, nav, onLogout, children, title, crumb}){
+function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
   const [drawerOpen,setDrawerOpen]=uState(false);
+  // Asistente (crm/agente.jsx): cajón a la derecha; se mantiene montado al
+  // cambiar de vista para no perder la conversación.
+  const [asistente,setAsistente]=uState(false);
   // Contador de correos no leídos del menú (crm/correo.jsx): al entrar y cada 2 min.
   const [,setCorreoTick]=uState(0);
   uEffect(()=>{
@@ -246,10 +250,12 @@ function Shell({user, view, nav, onLogout, children, title, crumb}){
           {/* Provisional: hasta que exista un panel de notificaciones real, el
               icono solo abre Configuración → Notificaciones (donde ya se
               gestiona la suscripción push). */}
+          <AsistenteBoton abierto={asistente} onClick={()=>setAsistente(a=>!a)}/>
           <button className="topbar__icon" title="Notificaciones" onClick={()=>nav("config","notificaciones")}><Icon name="bell" size={18}/></button>
         </header>
         {children}
       </div>
+      <Asistente abierto={asistente} onCerrar={()=>setAsistente(false)} view={vista} titulo={title} nav={nav}/>
     </div>
   );
 }
@@ -3965,7 +3971,7 @@ function App(){
   const flush = view.name==="pipeline"||view.name==="whatsapp";
   const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
   return <>
-    <Shell user={user} view={activeNav} nav={nav} onLogout={logout} title={title} crumb={crumb}>
+    <Shell user={user} view={activeNav} vista={view} nav={nav} onLogout={logout} title={title} crumb={crumb}>
       <InstallPrompt/>
       {flush ? screen : screen}
     </Shell>
