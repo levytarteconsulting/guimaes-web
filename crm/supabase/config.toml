@@ -90,3 +90,10 @@ verify_jwt = false
 [functions.correo]
 entrypoint = "../supabase-functions/correo/index.ts"
 verify_jwt = false
+
+# Asistente de IA del CRM (crm/supabase-agente.sql): la llama el CRM con el
+# JWT del usuario. Todo (herramientas y auditoría) va con ese JWT; nunca la
+# service role. Además del gateway, el código exige is_admin().
+[functions.agente]
+entrypoint = "../supabase-functions/agente/index.ts"
+verify_jwt = true
