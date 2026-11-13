@@ -356,5 +356,54 @@ ok((await q(`select count(*)::int n from public.agente_mensajes where conversaci
    "mensajes y llamadas en cascada");
 ok((await q(`select count(*)::int n from public.agente_conversaciones`))[0].n === 1, "la reciente se conserva");
 
+// ---------------------------------------------------------------- archivar (crm/supabase-agente-archivar.sql)
+console.log("Archivar (supabase-agente-archivar.sql):");
+const migArch = fs.readFileSync(new URL("../../supabase-agente-archivar.sql", import.meta.url), "utf8");
+const parteArch = (id) => {
+  const m = migArch.match(new RegExp(`-- ${id} [\\s\\S]*?(?=\\n-- =+\\n-- 2[A-Z] |$)`));
+  if (!m) throw new Error("sin parte " + id);
+  return m[0];
+};
+const filas = async (sql) => Object.fromEntries((await db.exec(sql)).at(-1).rows.map(r => [r.comprobacion, r.valor]));
+const A2 = await filas(parteArch("2A"));
+console.log("   ", JSON.stringify(A2));
+ok(A2["trigger set_updated_at en agente_conversaciones"] === "1" && A2["trigger de mensajes (toca conversación)"] === "1"
+   && A2["UPDATE de authenticated en titulo/archivada"] === "true/true" && A2["UPDATE de authenticated en updated_at"] === "false"
+   && A2["migración 20261113140000"] === "no", "2A: estado previo esperado");
+await db.exec(parteArch("2B"));
+ok(true, "2B aplicado");
+try { await db.exec(parteArch("2B")); ok(false, "2B dos veces debería fallar"); }
+catch (e) { ok(/ya está aplicada/.test(e.message), "2B se niega a repetirse"); }
+const Cv2 = await filas(parteArch("2C"));
+console.log("   ", JSON.stringify(Cv2));
+ok(Cv2["trigger set_updated_at en agente_conversaciones"] === "0" && Cv2["trigger de mensajes (toca conversación)"] === "1"
+   && Cv2["UPDATE de authenticated en titulo/archivada"] === "true/true" && Cv2["UPDATE de authenticated en updated_at"] === "false"
+   && Cv2["políticas agente_conversaciones"] === "3" && /^20261113140000 /.test(Cv2["migración registrada"] || ""), "2C: verificación");
+
+const envejecer2 = (id, dias) => db.exec(`update public.agente_conversaciones set updated_at = now() - interval '${dias} days' where id = '${id}'`);
+const edad = async (id) => (await q(`select extract(day from now() - updated_at)::int d from public.agente_conversaciones where id = '${id}'`))[0]?.d;
+let cArch = await ins("miembro", `insert into public.agente_conversaciones (titulo, modelo) values ('para archivar', 'm') returning id`);
+const convArch = cArch.rows[0].id;
+await ins("miembro", msg(convArch, 0, "user", "pregunta"));
+await envejecer2(convArch, 80);
+r = await ins("miembro", `update public.agente_conversaciones set archivada = true where id = '${convArch}' returning archivada`);
+ok(!r.error && r.rows[0]?.archivada === true, "el miembro archiva la suya");
+ok(await edad(convArch) === 80, "archivar no cambia updated_at (sigue contando desde el último mensaje)");
+r = await ins("miembro", `update public.agente_conversaciones set titulo = 'renombrada' where id = '${convArch}' returning id`);
+ok(!r.error && await edad(convArch) === 80, "renombrar tampoco");
+ok(!!(await ins("miembro", `update public.agente_conversaciones set updated_at = now() where id = '${convArch}'`)).error,
+   "el usuario no puede mover updated_at");
+ok((await como("miembro", `select count(*)::int n from public.agente_conversaciones where archivada`)).rows[0].n === 1,
+   "la archivada se sigue pudiendo leer");
+r = await ins("miembro", `update public.agente_conversaciones set archivada = false where id = '${convArch}' returning archivada`);
+ok(!r.error && r.rows[0]?.archivada === false && await edad(convArch) === 80, "desarchivar: tampoco cambia updated_at");
+await ins("miembro", `update public.agente_conversaciones set archivada = true where id = '${convArch}'`);
+await ins("miembro", msg(convArch, 1, "assistant", "modelo"));
+ok(await edad(convArch) === 0, "un mensaje nuevo sí la reactiva (trigger de mensajes)");
+await envejecer2(convArch, 89);
+ok((await q(`select public.agente_retencion(90) n`))[0].n === 0, "retención: archivada de 89 días se conserva");
+await envejecer2(convArch, 91);
+ok((await q(`select public.agente_retencion(90) n`))[0].n === 1, "retención: archivada de 91 días se borra");
+
 console.log(`\n${total - fallos}/${total} ok${fallos ? `, ${fallos} FALLOS` : ""}`);
 process.exit(fallos ? 1 : 0);

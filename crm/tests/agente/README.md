@@ -10,6 +10,8 @@ Comprueban la migración del agente (bloques 1A, 1B y 1C) en un Postgres en memo
 - Auditoría: cada usuario ve lo suyo, el rol admin lo de todos; nadie escribe en
   conversaciones ajenas; mensajes y llamadas no se cambian ni se borran.
 - Retención: borra solo lo de más de 90 días.
+- `crm/supabase-agente-archivar.sql` (2A/2B/2C): archivar, desarchivar o renombrar no mueve
+  `updated_at`; un mensaje nuevo sí; las archivadas se borran igual a los 90 días.
 
 ## Ejecutar
 
