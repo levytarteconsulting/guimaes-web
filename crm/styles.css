@@ -756,3 +756,29 @@ body.no-scroll{overflow:hidden;}
   .ag-foot{padding-bottom:calc(12px + env(safe-area-inset-bottom));}
   .ag-input textarea{font-size:16px;} /* sin zoom automático en iOS */
 }
+
+/* Vista "Agente IA" (crm/agente.jsx → AgenteVista): misma cadena flex:1 +
+   min-height:0 que WhatsApp (.wa) para ocupar el hueco bajo la topbar.
+   Escritorio: lista | chat. Móvil: un panel cada vez (lo decide el JSX). */
+.agv{display:grid;grid-template-columns:320px 1fr;flex:1;min-height:0;background:var(--paper);}
+.agv--movil{grid-template-columns:1fr;}
+.agv__lista{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--mist);}
+.agv__lista-head{flex:none;display:flex;flex-direction:column;gap:10px;padding:16px 16px 12px;}
+.agv__nueva{width:100%;}
+.agv__lista-body{flex:1;overflow-y:auto;min-height:0;padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;overscroll-behavior:contain;}
+.agv__chat{display:flex;flex-direction:column;min-height:0;min-width:0;}
+.agv__chat-head{flex:none;display:flex;align-items:center;gap:6px;min-height:52px;padding:0 18px;border-bottom:1px solid var(--line);}
+.agv__chat-t{font-family:var(--display);font-weight:700;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.agv .ag-body{padding:20px 24px;}
+/* Columna de lectura de 820 px como mucho, centrada (el % del padding es del ancho). */
+.agv__chat .ag-body{padding-left:max(24px, calc((100% - 820px) / 2));padding-right:max(24px, calc((100% - 820px) / 2));}
+.agv .ag-foot{padding:12px 24px 16px;}
+.agv .ag-input{max-width:820px;width:100%;margin:0 auto;}
+.ag-conv:disabled{opacity:.55;cursor:default;}
+.topbar__icon[aria-disabled]{opacity:.45;cursor:default;}
+@media(max-width:820px){
+  .agv__lista{border-right:none;}
+  .agv__chat-head{padding:0 8px;}
+  .agv .ag-body{padding:14px 14px;}
+  .agv .ag-foot{padding:10px 12px calc(12px + env(safe-area-inset-bottom));}
+}
