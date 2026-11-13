@@ -187,9 +187,7 @@ const NAV = [
   {id:"tareas", label:"Tareas", icon:"task"},
   {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.WHATSAPP.reduce((a,w)=>a+w.unread,0)},
   {id:"inbox", label:"Bandeja de entrada", icon:"mail", badge:()=>noLeidosCache()},
-  {id:"documents", label:"Documentos", icon:"documents"},
   {id:"instagram", label:"Instagram", icon:"instagram"},
-  {id:"automations", label:"Automatizaciones", icon:"automations"},
   {id:"config", label:"Configuración", icon:"settings"}
 ];
 function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
@@ -3414,7 +3412,8 @@ function Documents({nav, toast}){
     return ownerAvatar(d.uploaded_by) || <span className="muted" style={{fontSize:12.5}}>Manual</span>;
   };
 
-  return <div className="content">
+  // Va dentro de Configuración → Documentos (su .content pone el padding).
+  return <div>
     <div className="toolbar doc-toolbar">
       <div className="searchbox"><Icon name="search" size={16}/><input placeholder="Buscar documento, empresa, contacto o carpeta…" value={q} onChange={e=>setQ(e.target.value)}/></div>
       <select className="inp doc-filter" value={empresaF} onChange={e=>setEmpresaF(e.target.value)} aria-label="Filtrar por empresa">
@@ -3491,7 +3490,8 @@ function Automations({toast}){
     setRules(rs=>rs.filter(x=>x.id!==r.id));
     toast("Automatización eliminada");
   };
-  return <div className="content">
+  // Va dentro de Configuración → Automatizaciones (su .content pone el padding).
+  return <div>
     <div className="toolbar"><div><div className="muted" style={{fontSize:13}}>Reglas que se ejecutan solas cuando ocurre un evento en el CRM.</div></div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNew(true)}><Icon name="plus" size={16}/>Nueva automatización</button></div>
     <div className="wrap-gap">
       {rules.map(r=>(
@@ -3664,7 +3664,7 @@ function MyAccount({toast}){
 }
 
 /* ============ CONFIG ============ */
-function Config({toast, initialTab}){
+function Config({toast, initialTab, nav}){
   const [tab,setTab]=uState(initialTab||"servicios");
   const [services,setServices]=uState(CRM.SERVICES.map(s=>({...s}))); const [showNewSvc,setNewSvc]=uState(false);
   const [users,setUsers]=uState(CRM.USERS.map(u=>({...u}))); const [showNewUser,setNewUser]=uState(false); const [delUser,setDelUser]=uState(null);
@@ -3688,7 +3688,9 @@ function Config({toast, initialTab}){
     toast("Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
-    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"notificaciones",label:"Notificaciones"},{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
+    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"documentos",label:"Documentos"},{id:"automatizaciones",label:"Automatizaciones"},{id:"notificaciones",label:"Notificaciones"},{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
+    {tab==="documentos" && <Documents nav={nav} toast={toast}/>}
+    {tab==="automatizaciones" && <Automations toast={toast}/>}
     {tab==="servicios" && <>
       <div className="toolbar"><div className="muted" style={{fontSize:13}}>Catálogo de servicios que ofrece el despacho. Puedes crear nuevos.</div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNewSvc(true)}><Icon name="plus" size={16}/>Nuevo servicio</button></div>
       <div className="svc-grid">{services.map(s=><div key={s.id} className="card"><div className="card__body"><div className="row" style={{gap:10}}><div className="lrow__ico" style={{background:s.color+"1A",color:s.color}}><Icon name="briefcase" size={18}/></div><div style={{flex:1}}><div style={{fontWeight:700,fontFamily:"var(--display)"}}>{s.name}</div><div className="muted" style={{fontSize:12}}>{s.recurring?"Recurrente":"Puntual"} · {s.frequency}</div></div></div></div></div>)}</div>
@@ -3846,7 +3848,11 @@ function InstallPrompt(){
 //   la URL para el login con Google y para los enlaces de recuperación de
 //   contraseña (#access_token=...). Dos usos del hash a la vez es fuente
 //   garantizada de bugs.
-const ROUTABLE_VIEWS = ["home","agente","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","documents","instagram","automations","config"];
+const ROUTABLE_VIEWS = ["home","agente","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","instagram","config"];
+// Antiguas secciones del menú que ahora son pestañas de Configuración. Se
+// siguen aceptando en la URL (marcadores y el aviso push de portal-subir,
+// que abre /crm?view=documents).
+const VISTAS_MOVIDAS = {documents:["config","documentos"], automations:["config","automatizaciones"]};
 function viewToSearch(name, id){
   const params = new URLSearchParams();
   params.set("view", name);
@@ -3860,6 +3866,7 @@ function parseViewFromSearch(search){
   const params = new URLSearchParams(search);
   const name = params.get("view");
   const id = params.get("id");
+  if(name && VISTAS_MOVIDAS[name]){ const [n,tab]=VISTAS_MOVIDAS[name]; return {name:n, id:tab}; }
   if(name && ROUTABLE_VIEWS.includes(name)) return {name, id:id||null};
   return {name:"home", id:null};
 }
@@ -3954,7 +3961,7 @@ function App(){
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user) return <><Login onLogin={u=>setUser(u)}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],agente:["Agente IA","Consultas sobre el CRM"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],documents:["Documentos",""],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],automations:["Automatizaciones","Reglas del CRM"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],agente:["Agente IA","Consultas sobre el CRM"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
@@ -3969,10 +3976,8 @@ function App(){
   else if(view.name==="deal") screen=<DealDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast} NewContact={NewContact}/>;
-  else if(view.name==="documents") screen=<Documents nav={nav} toast={fireToast}/>;
   else if(view.name==="instagram") screen=<Instagram user={user} toast={fireToast}/>;
-  else if(view.name==="automations") screen=<Automations toast={fireToast}/>;
-  else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id}/>;
+  else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id} nav={nav}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp"||view.name==="agente";
   const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
   return <>
