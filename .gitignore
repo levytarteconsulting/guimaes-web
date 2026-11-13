@@ -2,3 +2,4 @@ crm/supabase/.temp/
 crm/supabase/functions/
 crm/node_modules/
 area-cliente/node_modules/
+crm/tests/*/node_modules/
