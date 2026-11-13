@@ -298,6 +298,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
   assert.match(sistema, /a1: Ana/);
   assert.match(sistema, /cliente_activo = Cliente activo/);
+  assert.match(sistema, /\[nombre del fichero\]\(doc:ID\)/);  // enlaces a documentos para el panel
 });
 
 test("AGENTE_MODELO cambia el modelo sin tocar código (Opus 5.5) y AGENTE_ESFUERZO el esfuerzo", async () => {

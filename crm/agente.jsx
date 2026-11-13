@@ -2,13 +2,15 @@ import React from "react";
 import {
   crearLectorSSE, mensajeDeError, MENSAJE_RED, MENSAJE_CORTE, avisoDeFin, etiquetaHerramienta,
   contextoDeVista, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta,
+  idsDocumentos, estadoDocumento,
 } from "./agente-logica.js";
+import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 /* GUIMAES CRM — Asistente (fase 1, solo lectura).
    Botón en la topbar + cajón lateral (420 px en escritorio, pantalla completa
    en móvil). Habla con la Edge Function "agente" por SSE (fetch + getReader).
    El texto del modelo se pinta con elementos de React a partir del árbol de
    agente-logica.js: nunca con innerHTML. */
-const { useState, useRef, useEffect, useCallback } = React;
+const { useState, useRef, useEffect, useCallback, useMemo, useContext } = React;
 
 const MAX_PREGUNTA = 4000;
 const MOVIL = 820; // = MOBILE_BREAKPOINT de app.jsx y @media(max-width:820px)
@@ -16,6 +18,77 @@ const MOVIL = 820; // = MOBILE_BREAKPOINT de app.jsx y @media(max-width:820px)
 async function sesion() {
   const { data } = await Auth.client.auth.getSession();
   return data?.session || null;
+}
+
+/* ---------------- Documentos enlazados ([nombre](doc:ID)) ---------------- */
+// El modelo solo ve id y metadatos (agente_listar_documentos); aquí, con la
+// sesión del usuario y la RLS de documentos, se piden sus datos para ofrecer
+// Ver / Descargar / Ir al documento con las mismas piezas que el módulo
+// Documentos (documentos-comun.jsx). La URL firmada nunca va al modelo.
+const DocsCtx = React.createContext(null);
+
+function useDocsAgente(burbujas, nav, onIr) {
+  const [docs, setDocs] = useState({}); // id → fila | null (no existe / sin acceso)
+  const pedidos = useRef(new Set());
+  const [mensaje, setMensaje] = useState(null);
+  const avisar = (m) => { setMensaje(m); setTimeout(() => setMensaje((x) => (x === m ? null : x)), 4000); };
+  const [descargar, bajando] = useDocDownload(avisar);
+  const [vista, setVista] = useState(null);
+  const ids = useMemo(() => {
+    const t = [];
+    for (const b of burbujas) if (b.rol === "assistant") for (const p of b.partes) if (p.tipo === "texto") t.push(p.texto);
+    return idsDocumentos(t.join("\n"));
+  }, [burbujas]);
+  const clave = ids.join(",");
+  useEffect(() => {
+    const faltan = ids.filter((id) => !pedidos.current.has(id));
+    if (!faltan.length) return;
+    faltan.forEach((id) => pedidos.current.add(id));
+    CRM.loadDocumentosPorIds(Auth.client, faltan)
+      .then((filas) => setDocs((d) => {
+        const n = { ...d };
+        faltan.forEach((id) => { n[id] = null; });
+        filas.forEach((f) => { n[String(f.id).toLowerCase()] = f; });
+        return n;
+      }))
+      .catch(() => {
+        faltan.forEach((id) => pedidos.current.delete(id)); // se reintentará
+        avisar("No se han podido comprobar los documentos enlazados.");
+      });
+  }, [clave]);
+  const ctx = {
+    docs, bajando,
+    // Ver: visor del módulo Documentos (PDF e imágenes); el resto, descarga.
+    ver: (doc) => (CRM.docPreviewKind(doc) ? setVista(doc) : descargar(doc)),
+    descargar,
+    ir: (doc) => { nav("empresa", doc.empresa_id, { doc: doc.id }); if (onIr) onIr(); },
+  };
+  const modal = vista
+    ? <DocPreviewModal doc={vista} onClose={() => setVista(null)} onDownload={descargar} downloading={bajando === vista.id} />
+    : null;
+  return { ctx, modal, mensaje, visorAbierto: !!vista };
+}
+
+function DocEnlace({ id, nombre }) {
+  const ctx = useContext(DocsCtx);
+  const doc = ctx ? ctx.docs[id] : null;
+  const st = estadoDocumento(doc);
+  return (
+    <span className={"ag-doc" + (st.acciones ? "" : " ag-doc--off")}>
+      <Icon name="documents" size={13} />
+      <span className="ag-doc__n">{nombre}</span>
+      {st.acciones && (
+        <span className="ag-doc__acc">
+          <button type="button" title="Ver" aria-label={"Ver " + nombre} onClick={() => ctx.ver(doc)}><Icon name="eye" size={13} /></button>
+          <button type="button" title="Descargar" aria-label={"Descargar " + nombre} disabled={ctx.bajando === doc.id}
+            onClick={() => ctx.descargar(doc)}><Icon name="download" size={13} /></button>
+          {doc.empresa_id && <button type="button" title="Ir al documento" aria-label={"Ir al documento " + nombre}
+            onClick={() => ctx.ir(doc)}><Icon name="arrowR" size={13} /></button>}
+        </span>
+      )}
+      {st.aviso && <span className="ag-doc__aviso">{st.aviso}</span>}
+    </span>
+  );
 }
 
 /* ---------------- Markdown → React ---------------- */
@@ -29,6 +102,7 @@ function Linea({ nodos, onNav }) {
       case "codigo": return <code key={i}>{n.v}</code>;
       case "crm": return <a key={i} className="ag-link" href="#" onClick={(e) => { e.preventDefault(); onNav(n.destino); }}>{n.v}</a>;
       case "url": return <a key={i} className="ag-link" href={n.href} target="_blank" rel="noopener noreferrer">{n.v}</a>;
+      case "doc": return <DocEnlace key={i} id={n.id} nombre={n.v} />;
       default: return null;
     }
   });
@@ -318,11 +392,16 @@ export function AsistenteBoton({ abierto, onClick, deshabilitado }) {
 export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
   const [lista, setLista] = useState(false); // vista de "mis conversaciones"
   const chat = useChatAgente({ view });
+  const cerrarSiMovil = () => { if (window.innerWidth <= MOVIL) onCerrar(); };
+  const docs = useDocsAgente(chat.burbujas, nav, cerrarSiMovil);
+  const visorRef = useRef(false);
+  visorRef.current = docs.visorAbierto;
 
   // Móvil: pantalla completa, sin scroll del body detrás. Escape cierra.
   useEffect(() => {
     if (!abierto) return;
-    const onKey = (e) => { if (e.key === "Escape") onCerrar(); };
+    // Con el visor de un documento abierto, Escape solo cierra el visor.
+    const onKey = (e) => { if (e.key === "Escape" && !visorRef.current) onCerrar(); };
     window.addEventListener("keydown", onKey);
     const movil = window.innerWidth <= MOVIL;
     if (movil) document.body.classList.add("no-scroll");
@@ -339,6 +418,7 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
   if (!abierto) return null;
   const ctx = contextoDeVista(view);
   return (
+    <DocsCtx.Provider value={docs.ctx}>
     <aside className="ag-panel" role="dialog" aria-label="Asistente">
       <header className="ag-head">
         <div className="ag-head__t"><Icon name="sparkles" size={16} /> Asistente</div>
@@ -355,8 +435,12 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
               <ListaConversaciones chat={chat} onAbrir={(id) => { setLista(false); chat.abrirConv(id); }} /></>
           : <Hilo chat={chat} onNav={irA} />}
       </div>
+      {docs.mensaje && <div className="ag-aviso ag-aviso--err ag-aviso--flota" role="alert">{docs.mensaje}</div>}
       <Entrada chat={chat} nota={ctx && titulo ? `Desde: ${titulo}` : null} />
+      {/* Dentro del cajón: así el visor queda por encima de él (z-index). */}
+      {docs.modal}
     </aside>
+    </DocsCtx.Provider>
   );
 }
 
@@ -374,6 +458,7 @@ function useMovil() {
 }
 export function AgenteVista({ nav }) {
   const chat = useChatAgente({}); // sin contexto de vista: aquí no hay ficha
+  const docs = useDocsAgente(chat.burbujas, nav);
   const movil = useMovil();
   const [verChat, setVerChat] = useState(false); // solo cuenta en móvil
   useEffect(() => { chat.cargarConvs(); }, []);
@@ -406,9 +491,14 @@ export function AgenteVista({ nav }) {
         {chat.convId && chat.convArchivada && <span className="ag-etiqueta">Archivada</span>}
       </header>
       <div className="ag-body"><Hilo chat={chat} onNav={(d) => nav(d.name, d.id)} /></div>
+      {docs.mensaje && <div className="ag-aviso ag-aviso--err ag-aviso--flota" role="alert">{docs.mensaje}</div>}
       <Entrada chat={chat} />
     </section>
   );
-  if (movil) return <div className="agv agv--movil">{verChat ? hilo : lista}</div>;
-  return <div className="agv">{lista}{hilo}</div>;
+  return (
+    <DocsCtx.Provider value={docs.ctx}>
+      {movil ? <div className="agv agv--movil">{verChat ? hilo : lista}</div> : <div className="agv">{lista}{hilo}</div>}
+      {docs.modal}
+    </DocsCtx.Provider>
+  );
 }

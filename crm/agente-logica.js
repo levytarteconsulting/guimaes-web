@@ -100,6 +100,33 @@ export function destinoCrm(href) {
   const name = VISTA_DE[m[1]];
   return name ? { name, id: m[2] } : null;
 }
+// "doc:ID" → id del documento; null si no es un enlace doc: con uuid válido.
+export function idDocumento(href) {
+  const m = /^doc:([^/?#\s]+)$/.exec(href || "");
+  return m && esUuid(m[1]) ? m[1].toLowerCase() : null;
+}
+// Ids de documento enlazados en un texto (para pedir sus datos de una vez).
+export function idsDocumentos(texto) {
+  const out = new Set();
+  const re = /\]\((doc:[^)\s]{1,100})\)/g;
+  let m;
+  while ((m = re.exec(texto || ""))) { const id = idDocumento(m[1]); if (id) out.add(id); }
+  return [...out];
+}
+// Qué se puede hacer con un documento enlazado. doc: fila de documentos
+// (CRM.loadDocumentosPorIds), null si no existe o no se puede leer,
+// undefined si aún se está cargando.
+export function estadoDocumento(doc) {
+  if (doc === undefined) return { acciones: false, aviso: null, cargando: true };
+  if (doc === null) return { acciones: false, aviso: "No encontrado" };
+  switch (doc.status) {
+    case "stored": return { acciones: true, aviso: null };
+    case "pending": return { acciones: false, aviso: "Aún descargándose" };
+    case "failed": return { acciones: false, aviso: "No se pudo descargar" };
+    case "too_large": return { acciones: false, aviso: "Demasiado grande" };
+    default: return { acciones: false, aviso: "No disponible" };
+  }
+}
 // Solo http(s): nada de javascript:, data:, etc.
 export function urlExterna(href) {
   try {
@@ -145,9 +172,11 @@ export function enLinea(texto) {
       const m = /^\[([^\]\n]{1,300})\]\(([^)\s]{1,500})\)/.exec(texto.slice(i));
       if (m) {
         const destino = destinoCrm(m[2]);
-        const href = destino ? null : urlExterna(m[2]);
+        const doc = destino ? null : idDocumento(m[2]);
+        const href = destino || doc ? null : urlExterna(m[2]);
         vaciar();
         if (destino) out.push({ t: "crm", v: m[1], destino });
+        else if (doc) out.push({ t: "doc", v: m[1], id: doc });
         else if (href) out.push({ t: "url", v: m[1], href });
         else out.push({ t: "texto", v: m[1] }); // enlace no válido: solo el texto
         i += m[0].length; continue;
@@ -222,11 +251,21 @@ export function markdown(texto) {
 /* ---------------- Historial guardado ---------------- */
 // Filas de agente_mensajes (orden, rol, tipo, texto, stop_reason) → burbujas
 // del panel: una por pregunta y una por respuesta (juntando las vueltas).
+// Una pregunta que se quedó sin respuesta (fallo, plazo o cancelación: las
+// respuestas a medias no se guardan) y se repitió igual justo después se
+// muestra una sola vez; si la siguiente es distinta, se marca sin respuesta.
+export const AVISO_SIN_RESPUESTA = "Esta pregunta se quedó sin respuesta.";
 export function burbujasDeHistorial(filas) {
   const out = [];
   for (const f of [...(filas || [])].sort((a, b) => a.orden - b.orden)) {
     if (f.rol === "user" && f.tipo === "pregunta") {
-      out.push({ rol: "user", texto: f.texto || "" });
+      const texto = f.texto || "";
+      const previa = out[out.length - 1];
+      if (previa && previa.rol === "user") {
+        if (previa.texto.trim() === texto.trim()) out.pop();
+        else out.push({ rol: "assistant", partes: [], aviso: AVISO_SIN_RESPUESTA });
+      }
+      out.push({ rol: "user", texto });
     } else if (f.rol === "assistant" && f.tipo === "modelo") {
       let ultima = out[out.length - 1];
       if (!ultima || ultima.rol !== "assistant") { ultima = { rol: "assistant", partes: [] }; out.push(ultima); }
@@ -234,6 +273,7 @@ export function burbujasDeHistorial(filas) {
       else if (f.texto) ultima.partes.push({ tipo: "texto", texto: f.texto });
     }
   }
+  if (out.length && out[out.length - 1].rol === "user") out.push({ rol: "assistant", partes: [], aviso: AVISO_SIN_RESPUESTA });
   return out;
 }
 
