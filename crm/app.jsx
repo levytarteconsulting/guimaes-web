@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { Instagram } from "./instagram.jsx";
 import { Asistente, AsistenteBoton, AgenteVista } from "./agente.jsx";
+import { MOBILE_BREAKPOINT, useIsMobile, useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
@@ -9,19 +10,6 @@ const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React
 /* ============ Helpers ============ */
 function Toast({msg}){ return msg ? <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#0B2238",color:"#fff",padding:"12px 20px",borderRadius:12,boxShadow:"var(--shadow-lg)",zIndex:200,fontWeight:600,fontFamily:"var(--display)"}}>{msg}</div> : null; }
 const useToast = () => { const [m,setM]=uState(null); const fire=(t)=>{setM(t);setTimeout(()=>setM(null),2200);}; return [m,fire]; };
-// Único punto de verdad para el breakpoint móvil — debe coincidir con
-// @media(max-width:820px) en styles.css (un valor CSS no se puede leer desde
-// aquí, así que si cambia uno hay que cambiar el otro a mano).
-const MOBILE_BREAKPOINT = 820;
-function useIsMobile(){
-  const [isMobile,setIsMobile]=uState(()=>window.innerWidth<=MOBILE_BREAKPOINT);
-  uEffect(()=>{
-    const onResize=()=>setIsMobile(window.innerWidth<=MOBILE_BREAKPOINT);
-    window.addEventListener("resize", onResize);
-    return ()=>window.removeEventListener("resize", onResize);
-  },[]);
-  return isMobile;
-}
 function ownerAvatar(id){ const u=CRM.userById(id); return u? <Avatar name={u.name} size="sm" color={u.color}/> : null; }
 // id real del servicio "Asesoría Laboral" en CRM.SERVICES — se busca por nombre en vez de
 // hardcodear el id, para no romper en silencio si el catálogo cambia.
@@ -510,24 +498,6 @@ function NewEmpresa({nav, onClose, onSave}){
 // crm/data.js); las reglas de carpetas viven en la BD
 // (crm/supabase-carpetas.sql) y aquí solo se reflejan.
 
-// Descarga con URL firmada. Mismo patrón que WaDocumentAttachment: la
-// pestaña se abre en blanco SÍNCRONO dentro del click, antes de cualquier
-// await — si se abriera después, Safari/iOS la bloquean por haber perdido
-// el gesto de usuario. Devuelve [download, idDescargando].
-function useDocDownload(toast){
-  const [busyId,setBusyId]=uState(null);
-  const download=async(doc)=>{
-    if(doc.status!=="stored") return;
-    const win = window.open("", "_blank");
-    setBusyId(doc.id);
-    try{
-      const url = await CRM.getAttachmentSignedUrl(Auth.client, doc.id, {download: CRM.docDownloadName(doc)});
-      if(!url){ toast("No se pudo generar el enlace de descarga."); if(win) win.close(); return; }
-      if(win) win.location.href = url; else window.open(url, "_blank");
-    }finally{ setBusyId(null); }
-  };
-  return [download, busyId];
-}
 // Nombre a mostrar: original_filename o, si no hay (adjuntos de WhatsApp
 // sin nombre), uno descriptivo compuesto al vuelo — ver CRM.docDisplayName.
 const docName = (doc)=>CRM.docDisplayName(doc);
@@ -602,43 +572,6 @@ function DocActions({doc, onDownload, downloading, onPreview, onRename, onMove, 
     {onMove && <button className="btn btn--sm btn--ghost" title="Mover a otra carpeta" onClick={()=>onMove(doc)}><Icon name="folder" size={14}/></button>}
     {onDelete && doc.status!=="pending" && <button className="btn btn--sm btn--ghost" title="Eliminar" onClick={()=>onDelete(doc)}><Icon name="trash" size={14}/></button>}
   </div>;
-}
-
-// Visor dentro del CRM con la URL firmada (sin "download", para que Storage
-// lo sirva inline). Imagen: <img>. PDF: <iframe> en escritorio; en móvil
-// no — Chrome de Android no pinta PDF dentro de un iframe y Safari de iOS
-// lo hace a medias, así que se ofrece abrirlo en el visor nativo del móvil
-// (enlace normal, sin bloqueo de ventanas emergentes). Solo se abre para
-// los tipos que devuelve CRM.docPreviewKind; el resto no llega aquí.
-function DocPreviewModal({doc, onClose, onDownload, downloading}){
-  const kind = CRM.docPreviewKind(doc);
-  const isMobile = useIsMobile();
-  const [url,setUrl]=uState(null); const [failed,setFailed]=uState(false);
-  uEffect(()=>{
-    let alive=true;
-    setUrl(null); setFailed(false);
-    CRM.getAttachmentSignedUrl(Auth.client, doc.id).then(u=>{ if(!alive) return; if(u) setUrl(u); else setFailed(true); });
-    return ()=>{alive=false;};
-  },[doc.id]);
-  const name = docName(doc);
-  const pdfInline = kind==="pdf" && !isMobile;
-  let body;
-  if(failed) body = <Empty icon="documents" title="No se pudo cargar la vista previa" sub="Prueba a descargarlo."/>;
-  else if(!url) body = <div className="doc-preview__loading muted"><Icon name="clock" size={16}/>Cargando vista previa…</div>;
-  else if(kind==="image") body = <div className="doc-preview__stage"><img className="doc-preview__img" src={url} alt={name} onError={()=>setFailed(true)}/></div>;
-  else if(pdfInline) body = <iframe className="doc-preview__pdf" src={url} title={name}></iframe>;
-  else body = <div className="doc-preview__mobile">
-    <div className="lrow__ico"><Icon name="documents" size={20}/></div>
-    <p className="muted">En el móvil, los PDF se abren con el visor del propio teléfono.</p>
-    <a className="btn btn--primary" href={url} target="_blank" rel="noopener noreferrer"><Icon name="external" size={15}/>Abrir PDF</a>
-  </div>;
-  return <Modal title={name} wide onClose={onClose} footer={<>
-    {pdfInline && url && !failed && <a className="btn btn--ghost" href={url} target="_blank" rel="noopener noreferrer" style={{marginRight:"auto"}}><Icon name="external" size={15}/>Abrir en pestaña nueva</a>}
-    <button className="btn btn--ghost" onClick={onClose}>Cerrar</button>
-    <button className="btn btn--primary" onClick={()=>onDownload(doc)} disabled={downloading}><Icon name="download" size={15}/>Descargar</button>
-  </>}>
-    <div className="doc-preview">{body}</div>
-  </Modal>;
 }
 
 // Renombrar un documento: solo cambia original_filename (CRM.renombrarDocumento).
@@ -895,7 +828,7 @@ function UploadDocModal({empresaId, carpetas, defaultFolderId, user, onClose, on
 // árbol. La usan la ficha de empresa y la pestaña de la ficha de contacto
 // (ContactDocsTab). onCount: total para el contador de la pestaña.
 // contextEmpresaIds: otras empresas a las que se puede mover un documento.
-function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
+function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds, foco}){
   const [data,setData]=uState(null); // {carpetas, docs}; null = cargando
   const [loadErr,setLoadErr]=uState(null);
   const [sel,setSel]=uState(null); // carpeta abierta: raíz o subcarpeta
@@ -915,6 +848,24 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
     }catch(e){ setLoadErr(CRM.docErrorMessage(e)); }
   };
   uEffect(()=>{ setData(null); setSel(null); reload(); },[empresaId]);
+  // foco = {doc}: abrir su carpeta y resaltarlo un momento (una vez por foco).
+  const [resaltado,setResaltado]=uState(null);
+  const focoAplicado=uRef(null);
+  uEffect(()=>{
+    if(!data || !foco || focoAplicado.current===foco) return;
+    focoAplicado.current=foco;
+    const d=data.docs.find(x=>x.id===foco.doc);
+    if(!d){ toast("Ese documento ya no está en esta empresa."); return; }
+    if(d.folder_id) setSel(d.folder_id);
+    setResaltado(d.id);
+  },[data, foco]);
+  uEffect(()=>{
+    if(!resaltado) return;
+    const el=document.getElementById("doc-"+resaltado);
+    if(el) el.scrollIntoView({block:"center", behavior:"smooth"});
+    const t=setTimeout(()=>setResaltado(null), 4000);
+    return ()=>clearTimeout(t);
+  },[resaltado, sel]);
 
   if(loadErr) return <div className="card"><div className="card__body"><Empty icon="documents" title="No se pudieron cargar los documentos" sub={loadErr} action={<button className="btn btn--sm btn--primary" onClick={reload}><Icon name="refresh" size={14}/>Reintentar</button>}/></div></div>;
   if(!data) return <div className="muted" style={{padding:16}}>Cargando documentos…</div>;
@@ -987,7 +938,7 @@ function EmpresaDocs({empresaId, user, toast, onCount, contextEmpresaIds}){
           </div>
           <Icon name="chevronR" size={16} style={{color:"var(--muted)",flex:"none"}}/>
         </button>; })}
-        {folderDocs.map(d=><div key={d.id} className="lrow doc-row">
+        {folderDocs.map(d=><div key={d.id} id={"doc-"+d.id} className={"lrow doc-row"+(resaltado===d.id?" doc-row--foco":"")}>
           <div className="lrow__ico"><Icon name="documents" size={17}/></div>
           <div className="lrow__main">
             <div className="lrow__title doc-row__name" title={docName(d)}>{docName(d)}</div>
@@ -1046,10 +997,14 @@ function ContactDocsTab({contact, user, toast, onCount, nav}){
     <EmpresaDocs key={actual.id} empresaId={actual.id} user={user} toast={toast} onCount={onCount} contextEmpresaIds={empresas.map(e=>e.id)}/>
   </div>;
 }
-function EmpresaDetail({id, nav, toast, user}){
+function EmpresaDetail({id, nav, toast, user, foco}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const e = CRM.empresaById[id];
-  const [tab,setTab]=uState("contactos");
+  const focoDoc = foco && foco.doc ? foco : null;
+  const [tab,setTab]=uState(focoDoc ? "docs" : "contactos");
+  // "Ir al documento" (asistente): abre la pestaña Documentos aunque la
+  // ficha ya estuviera abierta en otra pestaña.
+  uEffect(()=>{ if(focoDoc) setTab("docs"); },[focoDoc]);
   const [showEdit,setShowEdit]=uState(false);
   const [showBorrar,setShowBorrar]=uState(false);
   const [showArchivar,setShowArchivar]=uState(false);
@@ -1137,7 +1092,7 @@ function EmpresaDetail({id, nav, toast, user}){
             })}
           </tbody></table>{deals.length===0 && <Empty icon="briefcase" title="Sin deals"/>}</div>}
           {tab==="correos" && <CorreosFicha campo="empresa_id" id={id} nav={nav} toast={toast} NewContact={NewContact}/>}
-          {tab==="docs" && <EmpresaDocs empresaId={id} user={user} toast={toast} onCount={setDocCount}/>}
+          {tab==="docs" && <EmpresaDocs empresaId={id} user={user} toast={toast} onCount={setDocCount} foco={focoDoc}/>}
           {tab==="portal" && <EmpresaPortalTab empresa={e} portal={portal} toast={toast} onCambio={()=>{ cargarPortal(); bump(); }}/>}
         </div>
       </div>
@@ -3927,8 +3882,11 @@ function App(){
     const search = viewToSearch(name,id);
     if(window.location.search!==search) window.history.pushState({name,id}, "", search);
   };
-  const nav=(name,id=null)=>{
-    setView({name,id});
+  // extra (opcional, no va a la URL): indicaciones para la pantalla de
+  // destino, p. ej. {doc} para abrir la ficha de empresa en Documentos con
+  // ese documento a la vista (enlaces doc: del asistente).
+  const nav=(name,id=null,extra=null)=>{
+    setView({name,id,extra});
     pushUrl(name,id);
   };
   const logout=async()=>{ await Auth.signOut(); setUser(null); nav("home"); };
@@ -3967,7 +3925,7 @@ function App(){
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
   else if(view.name==="agente") screen=<AgenteVista nav={nav}/>;
   else if(view.name==="empresas") screen=<Empresas nav={nav} toast={fireToast}/>;
-  else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
+  else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast} user={user} foco={view.extra}/>;
   else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="cuentas") screen=<CuentasPortal nav={nav} toast={fireToast}/>;

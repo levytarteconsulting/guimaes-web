@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   crearLectorSSE, mensajeDeError, avisoDeFin, destinoCrm, urlExterna, contextoDeVista,
   enLinea, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta, etiquetaHerramienta,
+  idDocumento, idsDocumentos, estadoDocumento, AVISO_SIN_RESPUESTA,
 } from "../../agente-logica.js";
 
 const ID = "3f1c2b4a-1111-4a2b-8c3d-0123456789ab";
@@ -142,4 +143,84 @@ test("streaming: texto se concatena; herramientas por id, en orden", () => {
     { tipo: "herramienta", id: "t2", nombre: "ficha_empresa", estado: "fin", filas: undefined, error: true },
     { tipo: "texto", texto: "Listo" },
   ]);
+});
+
+/* ---------------- Documentos (doc:ID) ---------------- */
+const DOC = "9a8b7c6d-1234-4abc-9def-0123456789ab";
+test("doc: con uuid válido → nodo doc; en mayúsculas se normaliza", () => {
+  assert.equal(idDocumento(`doc:${DOC}`), DOC);
+  assert.equal(idDocumento(`doc:${DOC.toUpperCase()}`), DOC);
+  assert.deepEqual(enLinea(`Ver [contrato.pdf](doc:${DOC}) ya`), [
+    { t: "texto", v: "Ver " }, { t: "doc", v: "contrato.pdf", id: DOC }, { t: "texto", v: " ya" },
+  ]);
+});
+test("doc: con id no válido → texto plano (sin acciones)", () => {
+  for (const malo of ["doc:123", "doc:", `doc:${DOC}x`, `doc:${DOC}/otro`, "doc:../../etc", `docs:${DOC}`]) {
+    assert.equal(idDocumento(malo), null, malo);
+    const n = enLinea(`[f.pdf](${malo})`);
+    assert.ok(n.every((x) => x.t === "texto"), malo);
+    assert.equal(n[0].v, "f.pdf", malo);
+  }
+});
+test("doc: dentro de tablas y listas", () => {
+  const b = markdown(`| Documento | Carpeta |\n|---|---|\n| [a.pdf](doc:${DOC}) | Fiscal |\n\n- [b.png](doc:${DOC})`);
+  assert.deepEqual(b[0].filas[0][0], [{ t: "doc", v: "a.pdf", id: DOC }]);
+  assert.deepEqual(b[1].items[0], [{ t: "doc", v: "b.png", id: DOC }]);
+});
+test("idsDocumentos: únicos, solo válidos, ignora enlaces a medio llegar", () => {
+  const otro = "11111111-2222-4333-8444-555555555555";
+  assert.deepEqual(idsDocumentos(`[a](doc:${DOC}) [b](doc:${DOC.toUpperCase()}) [c](doc:${otro}) [d](doc:xx) [e](crm:empresa/${otro}) [f](doc:${DOC.slice(0, 10)}`),
+    [DOC, otro]);
+  assert.deepEqual(idsDocumentos(""), []);
+});
+test("estado del documento: solo 'stored' tiene acciones", () => {
+  assert.deepEqual(estadoDocumento({ status: "stored" }), { acciones: true, aviso: null });
+  for (const [st, aviso] of [["pending", /descarg/i], ["failed", /no se pudo/i], ["too_large", /grande/i], ["raro", /no disponible/i]]) {
+    const e = estadoDocumento({ status: st });
+    assert.equal(e.acciones, false, st);
+    assert.match(e.aviso, aviso, st);
+  }
+  assert.deepEqual(estadoDocumento(null), { acciones: false, aviso: "No encontrado" });
+  assert.equal(estadoDocumento(undefined).cargando, true);
+  assert.equal(estadoDocumento(undefined).acciones, false);
+});
+
+/* ---------------- Bug: pregunta duplicada en el historial ---------------- */
+test("historial: pregunta sin respuesta repetida igual → una sola burbuja", () => {
+  // Lo que había en producción: pregunta (falló), la misma 10 min después, respuesta.
+  const b = burbujasDeHistorial([
+    { orden: 0, rol: "user", tipo: "pregunta", texto: "¿Qué documentos tiene ACME?" },
+    { orden: 1, rol: "user", tipo: "pregunta", texto: "¿Qué documentos tiene ACME? " },
+    { orden: 2, rol: "assistant", tipo: "modelo", texto: "Busco.", stop_reason: "tool_use" },
+    { orden: 3, rol: "user", tipo: "herramientas", texto: null },
+    { orden: 4, rol: "assistant", tipo: "modelo", texto: "Tiene 3.", stop_reason: "end_turn" },
+  ]);
+  assert.deepEqual(b.map((x) => x.rol), ["user", "assistant"]);
+  assert.equal(b.filter((x) => x.rol === "user").length, 1);
+  assert.deepEqual(b[1].partes.map((p) => p.texto), ["Busco.", "Tiene 3."]);
+});
+test("historial: pregunta sin respuesta seguida de otra distinta → aviso, sin duplicar", () => {
+  const b = burbujasDeHistorial([
+    { orden: 0, rol: "user", tipo: "pregunta", texto: "Primera" },
+    { orden: 1, rol: "user", tipo: "pregunta", texto: "Segunda" },
+    { orden: 2, rol: "assistant", tipo: "modelo", texto: "Respuesta", stop_reason: "end_turn" },
+  ]);
+  assert.deepEqual(b.map((x) => x.rol), ["user", "assistant", "user", "assistant"]);
+  assert.equal(b[1].aviso, AVISO_SIN_RESPUESTA);
+  assert.deepEqual(b.filter((x) => x.rol === "user").map((x) => x.texto), ["Primera", "Segunda"]);
+});
+test("historial: la última pregunta sin respuesta queda marcada", () => {
+  const b = burbujasDeHistorial([{ orden: 0, rol: "user", tipo: "pregunta", texto: "Hola" }]);
+  assert.deepEqual(b.map((x) => x.rol), ["user", "assistant"]);
+  assert.equal(b[1].aviso, AVISO_SIN_RESPUESTA);
+});
+test("historial normal: nunca dos burbujas de usuario seguidas", () => {
+  const filas = [];
+  for (let i = 0; i < 5; i++) {
+    filas.push({ orden: i * 2, rol: "user", tipo: "pregunta", texto: "P" + i });
+    filas.push({ orden: i * 2 + 1, rol: "assistant", tipo: "modelo", texto: "R" + i, stop_reason: "end_turn" });
+  }
+  const b = burbujasDeHistorial(filas);
+  assert.equal(b.length, 10);
+  for (let i = 1; i < b.length; i++) assert.notEqual(b[i].rol, b[i - 1].rol);
 });

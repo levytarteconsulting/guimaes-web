@@ -1245,6 +1245,15 @@
       docs: aplicarRutas((results[1].data||[]).map(rowToDocumento), carpetas)
     };
   }
+  // Documentos concretos por id (enlaces doc:… en las respuestas del
+  // asistente). Misma consulta y RLS que el resto del módulo; los que no
+  // existan o no se puedan leer simplemente no vuelven.
+  async function loadDocumentosPorIds(client, ids){
+    if(!client || !ids || !ids.length) return [];
+    var res = await client.from("documentos").select(DOCUMENTO_SELECT).in("id", ids);
+    if(res.error) throw res.error;
+    return (res.data||[]).map(rowToDocumento);
+  }
   // Solo las carpetas de una empresa (destinos de "Mover a otra empresa").
   async function loadCarpetasEmpresa(client, empresaId){
     if(!client || !empresaId) return [];
@@ -2151,7 +2160,7 @@
     linkContactoEmpresa:linkContactoEmpresa, addContactoEmpresaLink:addContactoEmpresaLink,
     setPrincipalEmpresa:setPrincipalEmpresa, removeContactoEmpresaLink:removeContactoEmpresaLink,
     empresaPrincipalDe:empresaPrincipalDe, createEmpresaConContacto:createEmpresaConContacto,
-    MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosEmpresa:loadDocumentosEmpresa, loadCarpetasEmpresa:loadCarpetasEmpresa,
+    MAX_DOCUMENTO_BYTES:MAX_DOCUMENTO_BYTES, loadAllDocumentos:loadAllDocumentos, loadDocumentosEmpresa:loadDocumentosEmpresa, loadDocumentosPorIds:loadDocumentosPorIds, loadCarpetasEmpresa:loadCarpetasEmpresa,
     docErrorMessage:docErrorMessage, carpetaNombreIssue:carpetaNombreIssue,
     crearCarpeta:crearCarpeta, renombrarCarpeta:renombrarCarpeta, borrarCarpeta:borrarCarpeta, moverDocumentos:moverDocumentos,
     moverCarpeta:moverCarpeta, carpetaRaices:carpetaRaices, carpetaHijas:carpetaHijas, carpetaHermanas:carpetaHermanas,
