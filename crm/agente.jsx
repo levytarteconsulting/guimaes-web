@@ -85,6 +85,8 @@ function Burbuja({ b, onNav }) {
 // Lo usan el cajón (Asistente) y la vista "Agente IA" (AgenteVista).
 export function useChatAgente({ view } = {}) {
   const [convs, setConvs] = useState(null); // null = sin cargar
+  const [archivadas, setArchivadas] = useState(false); // la lista muestra las archivadas
+  const [convArchivada, setConvArchivada] = useState(false); // la conversación abierta lo está
   const [convId, setConvId] = useState(null);
   const [burbujas, setBurbujas] = useState([]);
   const [entrada, setEntrada] = useState("");
@@ -103,26 +105,38 @@ export function useChatAgente({ view } = {}) {
 
   const enfocar = () => setTimeout(() => textoRef.current && textoRef.current.focus(), 0);
 
-  const cargarConvs = useCallback(async () => {
+  const cargarConvs = useCallback(async (verArchivadas = archivadas) => {
     listaPedida.current = true;
     try {
       const s = await sesion();
       if (!s) return;
       // Filtro por el propio usuario: el rol admin puede leer las de todos (RLS).
       const { data, error } = await Auth.client.from("agente_conversaciones")
-        .select("id,titulo,updated_at").eq("auth_user_id", s.user.id).eq("archivada", false)
+        .select("id,titulo,updated_at").eq("auth_user_id", s.user.id).eq("archivada", verArchivadas)
         .order("updated_at", { ascending: false }).limit(50);
       if (error) throw error;
       setConvs(data || []);
     } catch (e) {
       setConvs((c) => c || []); setAviso("No se han podido cargar tus conversaciones.");
     }
-  }, []);
+  }, [archivadas]);
+  const verArchivadas = (v) => { setArchivadas(v); setConvs(null); cargarConvs(v); };
+
+  // Archivar solo la oculta de la lista: se sigue guardando y se borra a los
+  // 90 días de su último mensaje, como las demás (supabase-agente-archivar.sql).
+  const archivar = async (id, valor) => {
+    if (enCurso) return;
+    setAviso(null);
+    const { error } = await Auth.client.from("agente_conversaciones").update({ archivada: valor }).eq("id", id);
+    if (error) { setAviso(valor ? "No se ha podido archivar la conversación." : "No se ha podido desarchivar la conversación."); return; }
+    setConvs((cs) => (cs || []).filter((c) => c.id !== id));
+    if (id === convId) setConvArchivada(valor);
+  };
 
   const abrirConv = async (id) => {
     if (enCurso) return false;
     const n = ++cargaRef.current;
-    setConvId(id); setBurbujas([]); setAviso(null); setCargando(true);
+    setConvId(id); setConvArchivada(archivadas); setBurbujas([]); setAviso(null); setCargando(true);
     try {
       const { data, error } = await Auth.client.from("agente_mensajes")
         .select("orden,rol,tipo,texto,stop_reason").eq("conversacion_id", id)
@@ -139,7 +153,7 @@ export function useChatAgente({ view } = {}) {
   const nueva = () => {
     if (enCurso) return false;
     cargaRef.current++;
-    setConvId(null); setBurbujas([]); setAviso(null); setCargando(false); setEntrada("");
+    setConvId(null); setConvArchivada(false); setBurbujas([]); setAviso(null); setCargando(false); setEntrada("");
     enfocar();
     return true;
   };
@@ -163,6 +177,11 @@ export function useChatAgente({ view } = {}) {
       if (!s) { tocarUltima((b) => ({ ...b, error: mensajeDeError(401) })); return; }
       const cuerpo = { pregunta };
       if (convId) cuerpo.conversacion_id = convId;
+      // Seguir una conversación archivada la vuelve a sacar a la lista.
+      if (convId && convArchivada) {
+        const { error } = await Auth.client.from("agente_conversaciones").update({ archivada: false }).eq("id", convId);
+        if (!error) { setConvArchivada(false); if (archivadas) setConvs((cs) => (cs || []).filter((c) => c.id !== convId)); }
+      }
       const ctx = contextoDeVista(view);
       if (ctx) cuerpo.contexto = ctx;
       const res = await fetch(`${window.SUPABASE_CONFIG.url}/functions/v1/agente`, {
@@ -216,23 +235,40 @@ export function useChatAgente({ view } = {}) {
   };
   const cancelar = () => { if (abortRef.current) abortRef.current.abort(); };
 
-  return { convs, cargarConvs, convId, burbujas, entrada, setEntrada, enCurso, cargando, aviso,
+  return { convs, cargarConvs, archivadas, verArchivadas, archivar, convArchivada, convId, burbujas, entrada, setEntrada, enCurso, cargando, aviso,
            abrirConv, nueva, enviar, cancelar, finRef, textoRef, enfocar };
 }
 
 /* ---------------- Piezas comunes ---------------- */
+function SelectorArchivadas({ chat }) {
+  return (
+    <div className="ag-filtro" role="tablist" aria-label="Qué conversaciones ver">
+      <button role="tab" aria-selected={!chat.archivadas} className={!chat.archivadas ? "on" : ""}
+        onClick={() => chat.archivadas && chat.verArchivadas(false)}>Activas</button>
+      <button role="tab" aria-selected={chat.archivadas} className={chat.archivadas ? "on" : ""}
+        onClick={() => !chat.archivadas && chat.verArchivadas(true)}>Archivadas</button>
+    </div>
+  );
+}
 function ListaConversaciones({ chat, onAbrir }) {
-  const { convs, convId, aviso } = chat;
+  const { convs, convId, aviso, archivadas, enCurso } = chat;
+  const vacia = archivadas ? "No tienes conversaciones archivadas." : "Todavía no has hecho ninguna pregunta.";
   return <>
     {convs === null ? <div className="ag-vacio">Cargando…</div>
-      : convs.length === 0 ? <div className="ag-vacio">Todavía no has hecho ninguna pregunta.</div>
+      : convs.length === 0 ? <div className="ag-vacio">{vacia}</div>
       : convs.map((c) => (
-        <button key={c.id} className={"ag-conv" + (c.id === convId ? " active" : "")} disabled={chat.enCurso}
-          onClick={() => onAbrir(c.id)}>
-          <span className="ag-conv__t">{c.titulo || "Sin título"}</span>
-          <span className="ag-conv__f">{new Date(c.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}</span>
-        </button>
+        <div key={c.id} className={"ag-conv" + (c.id === convId ? " active" : "") + (enCurso ? " ag-conv--off" : "")}>
+          <button className="ag-conv__abrir" disabled={enCurso} onClick={() => onAbrir(c.id)}>
+            <span className="ag-conv__t">{c.titulo || "Sin título"}</span>
+            <span className="ag-conv__f">{new Date(c.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}</span>
+          </button>
+          <button className="ag-conv__arch" disabled={enCurso} onClick={() => chat.archivar(c.id, !archivadas)}
+            title={archivadas ? "Desarchivar" : "Archivar"} aria-label={(archivadas ? "Desarchivar: " : "Archivar: ") + (c.titulo || "Sin título")}>
+            <Icon name={archivadas ? "upload" : "archive"} size={15} />
+          </button>
+        </div>
       ))}
+    {archivadas && convs && convs.length > 0 && <div className="ag-nota">Las conversaciones se borran a los 90 días de su último mensaje, estén archivadas o no.</div>}
     {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
   </>;
 }
@@ -315,6 +351,7 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
       <div className="ag-body">
         {lista
           ? <><div className="ag-lista__t">Mis conversaciones</div>
+              <SelectorArchivadas chat={chat} />
               <ListaConversaciones chat={chat} onAbrir={(id) => { setLista(false); chat.abrirConv(id); }} /></>
           : <Hilo chat={chat} onNav={irA} />}
       </div>
@@ -355,6 +392,7 @@ export function AgenteVista({ nav }) {
         <button className="btn btn--primary agv__nueva" onClick={nueva} disabled={chat.enCurso}>
           <Icon name="plus" size={16} />Nueva conversación
         </button>
+        <SelectorArchivadas chat={chat} />
       </div>
       <div className="agv__lista-body"><ListaConversaciones chat={chat} onAbrir={abrir} /></div>
     </section>
@@ -365,6 +403,7 @@ export function AgenteVista({ nav }) {
         {movil && <button className="ag-hbtn" onClick={volver} disabled={chat.enCurso} title="Volver" aria-label="Volver a mis conversaciones">
           <Icon name="chevronR" size={18} style={{ transform: "rotate(180deg)" }} /></button>}
         <div className="agv__chat-t">{tituloChat}</div>
+        {chat.convId && chat.convArchivada && <span className="ag-etiqueta">Archivada</span>}
       </header>
       <div className="ag-body"><Hilo chat={chat} onNav={(d) => nav(d.name, d.id)} /></div>
       <Entrada chat={chat} />
