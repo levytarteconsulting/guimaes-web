@@ -345,7 +345,7 @@
   </url>
   <url>
     <loc>https://guimaes.es/blog/cuando-necesitas-cfo-externo</loc>
-    <lastmod>2026-10-19</lastmod>
+    <lastmod>2026-11-18</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/cuando-necesitas-cfo-externo"/>
@@ -354,7 +354,7 @@
   </url>
   <url>
     <loc>https://guimaes.es/en/blog/cuando-necesitas-cfo-externo</loc>
-    <lastmod>2026-10-19</lastmod>
+    <lastmod>2026-11-18</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/cuando-necesitas-cfo-externo"/>
@@ -750,5 +750,23 @@
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/impuesto-sucesiones-madrid"/>
     <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/impuesto-sucesiones-madrid"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/impuesto-sucesiones-madrid"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/blog/que-es-un-cfo-externo</loc>
+    <lastmod>2026-12-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/que-es-un-cfo-externo"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/que-es-un-cfo-externo"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/que-es-un-cfo-externo"/>
+  </url>
+  <url>
+    <loc>https://guimaes.es/en/blog/que-es-un-cfo-externo</loc>
+    <lastmod>2026-12-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/blog/que-es-un-cfo-externo"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/blog/que-es-un-cfo-externo"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/blog/que-es-un-cfo-externo"/>
   </url>
 </urlset>
