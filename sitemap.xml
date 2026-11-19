@@ -223,16 +223,6 @@
     <changefreq>yearly</changefreq>
     <priority>0.2</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/aviso-legal"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/aviso-legal"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/aviso-legal"/>
-  </url>
-  <url>
-    <loc>https://guimaes.es/en/aviso-legal</loc>
-    <lastmod>2026-07-02</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.2</priority>
-    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/aviso-legal"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/aviso-legal"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/aviso-legal"/>
   </url>
   <url>
@@ -241,16 +231,6 @@
     <changefreq>yearly</changefreq>
     <priority>0.2</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/politica-privacidad"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/politica-privacidad"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/politica-privacidad"/>
-  </url>
-  <url>
-    <loc>https://guimaes.es/en/politica-privacidad</loc>
-    <lastmod>2026-07-02</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.2</priority>
-    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/politica-privacidad"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/politica-privacidad"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/politica-privacidad"/>
   </url>
   <url>
@@ -259,16 +239,6 @@
     <changefreq>yearly</changefreq>
     <priority>0.2</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/politica-cookies"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/politica-cookies"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/politica-cookies"/>
-  </url>
-  <url>
-    <loc>https://guimaes.es/en/politica-cookies</loc>
-    <lastmod>2026-07-02</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.2</priority>
-    <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/politica-cookies"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://guimaes.es/en/politica-cookies"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://guimaes.es/politica-cookies"/>
   </url>
   <url>
