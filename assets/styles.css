@@ -490,12 +490,6 @@ body.menu-open .mobile-menu { transform: none; opacity: 1; pointer-events: auto;
   html.js-reveal [data-reveal][data-delay="3"].in{ transition-delay: .24s; }
 }
 
-/* ---------- i18n ----------
-   Ocultamos según el idioma del <html>; el elemento mostrado conserva
-   su display natural (block / inline), evitando conflictos de especificidad. */
-html[lang="es"] [data-lang-en]{ display: none !important; }
-html[lang="en"] [data-lang-es]{ display: none !important; }
-
 /* ============================================================
    HERO CON VÍDEO (estilo Talenom) — full-bleed, centrado
    ============================================================ */

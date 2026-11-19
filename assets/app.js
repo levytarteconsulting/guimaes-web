@@ -6,31 +6,20 @@
 
   /* ---------- Idioma ES / EN ----------
      El idioma lo fija la URL: las páginas /en/ declaran <html lang="en">.
-     El botón de idioma NO alterna en la misma página, sino que navega a la
-     versión equivalente (atributo data-lang-alt en cada botón). */
-  function applyLang(lang) {
-    document.documentElement.setAttribute("lang", lang);
-    // Placeholders traducibles
-    document.querySelectorAll("[data-ph-es]").forEach(function (el) {
-      el.setAttribute("placeholder", el.getAttribute(lang === "en" ? "data-ph-en" : "data-ph-es") || "");
-    });
-    // Opciones de <select>
-    document.querySelectorAll("[data-opt-es]").forEach(function (el) {
-      el.textContent = el.getAttribute(lang === "en" ? "data-opt-en" : "data-opt-es") || el.textContent;
-    });
-  }
+     Cada HTML lleva SOLO el texto de su idioma (no hay data-lang-es/en): al
+     editar un texto, cámbialo en x.html y en en/x.html. El botón de idioma
+     navega a la versión equivalente (atributo data-lang-alt en cada botón;
+     sin él, a la portada del otro idioma). Lo que genera este script elige
+     su texto con L(es, en). */
+  function isEN() { return document.documentElement.getAttribute("lang") === "en"; }
+  function L(es, en) { return isEN() ? en : es; }
   function initLang() {
-    var pageLang = document.documentElement.getAttribute("lang") || "es";
-    applyLang(pageLang);
     // El botón muestra el idioma AL QUE cambiarás
-    var target = pageLang === "es" ? "EN" : "ES";
+    var target = isEN() ? "ES" : "EN";
     document.querySelectorAll("[data-lang-toggle]").forEach(function (b) {
       b.querySelectorAll("[data-lang-current]").forEach(function (el) { el.textContent = target; });
-      var alt = b.getAttribute("data-lang-alt");
-      b.addEventListener("click", function () {
-        if (alt) { window.location.href = alt + window.location.hash; }
-        else { applyLang(document.documentElement.getAttribute("lang") === "es" ? "en" : "es"); }
-      });
+      var alt = b.getAttribute("data-lang-alt") || (isEN() ? "/" : "/en");
+      b.addEventListener("click", function () { window.location.href = alt + window.location.hash; });
     });
   }
 
@@ -261,12 +250,12 @@
   var TEL_NUMBER = "+34637420068";    // Teléfono clickable
   function initFloats() {
     if (document.querySelector(".floats")) return;
-    var waMsg = encodeURIComponent("Hola, me gustaría hablar con un experto de GUIMAES.");
+    var waMsg = encodeURIComponent(L("Hola, me gustaría hablar con un experto de GUIMAES.", "Hi, I would like to talk to a GUIMAES expert."));
     var wrap = document.createElement("div");
     wrap.className = "floats";
     wrap.innerHTML =
       '<a class="fab-wa" href="https://wa.me/' + WA_NUMBER + '?text=' + waMsg + '" target="_blank" rel="noopener" aria-label="WhatsApp">' +
-        '<span class="tip"><span data-lang-es>Escríbenos por WhatsApp</span><span data-lang-en>Message us on WhatsApp</span></span>' +
+        '<span class="tip">' + L("Escríbenos por WhatsApp", "Message us on WhatsApp") + '</span>' +
         '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.87 1.22 3.07.15.2 2.1 3.2 5.08 4.49.71.31 1.26.49 1.69.62.71.23 1.36.2 1.87.12.57-.09 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.07-.13-.27-.2-.57-.35Z"/><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.86 9.86 0 0 0 4.79 1.22h.01c5.46 0 9.9-4.45 9.9-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.18-1.14l-.3-.18-3.11.82.83-3.04-.2-.31a8.19 8.19 0 0 1-1.26-4.39c0-4.54 3.7-8.24 8.24-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.23 8.23Z"/></svg>' +
       '</a>';
     document.body.appendChild(wrap);
@@ -332,23 +321,22 @@
     wrap.innerHTML =
       '<div class="cookie-banner__inner">' +
         '<div class="cookie-banner__txt">' +
-          '<strong><span data-lang-es>Usamos cookies</span><span data-lang-en>We use cookies</span></strong>' +
-          '<span><span data-lang-es> — las técnicas son necesarias para que la web funcione; las analíticas solo se activan si las aceptas. Más información en nuestra </span><span data-lang-en> — technical cookies are required for the site to work; analytics cookies only activate if you accept them. More information in our </span><a href="' + (document.documentElement.lang === "en" ? "../politica-cookies.html" : "politica-cookies.html") + '"><span data-lang-es>Política de Cookies</span><span data-lang-en>Cookie Policy</span></a>.</span>' +
+          '<strong>' + L("Usamos cookies", "We use cookies") + '</strong>' +
+          '<span>' + L(" — las técnicas son necesarias para que la web funcione; las analíticas solo se activan si las aceptas. Más información en nuestra ", " — technical cookies are required for the site to work; analytics cookies only activate if you accept them. More information in our ") + '<a href="' + L("/politica-cookies", "/en/politica-cookies") + '">' + L("Política de Cookies", "Cookie Policy") + '</a>.</span>' +
         '</div>' +
         '<div class="cookie-banner__actions">' +
-          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-configure><span data-lang-es>Configurar</span><span data-lang-en>Configure</span></button>' +
-          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-reject><span data-lang-es>Rechazar</span><span data-lang-en>Reject</span></button>' +
-          '<button type="button" class="btn btn--primary btn--sm" data-cookie-accept><span data-lang-es>Aceptar todas</span><span data-lang-en>Accept all</span></button>' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-configure>' + L("Configurar", "Configure") + '</button>' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-reject>' + L("Rechazar", "Reject") + '</button>' +
+          '<button type="button" class="btn btn--primary btn--sm" data-cookie-accept>' + L("Aceptar todas", "Accept all") + '</button>' +
         '</div>' +
         '<div class="cookie-banner__prefs" hidden>' +
-          '<label class="cookie-toggle"><input type="checkbox" checked disabled /><span><b><span data-lang-es>Técnicas</span><span data-lang-en>Technical</span></b><span data-lang-es> — siempre activas, imprescindibles para el funcionamiento.</span><span data-lang-en> — always on, required for the site to work.</span></span></label>' +
-          '<label class="cookie-toggle"><input type="checkbox" data-cookie-analytics /><span><b><span data-lang-es>Analíticas</span><span data-lang-en>Analytics</span></b><span data-lang-es> — nos ayudan a entender el uso del sitio.</span><span data-lang-en> — help us understand site usage.</span></span></label>' +
-          '<label class="cookie-toggle"><input type="checkbox" data-cookie-ads /><span><b><span data-lang-es>Publicidad</span><span data-lang-en>Advertising</span></b><span data-lang-es> — nos permite medir la eficacia de nuestras campañas publicitarias.</span><span data-lang-en> — lets us measure the effectiveness of our ad campaigns.</span></span></label>' +
-          '<button type="button" class="btn btn--primary btn--sm" data-cookie-save><span data-lang-es>Guardar preferencias</span><span data-lang-en>Save preferences</span></button>' +
+          '<label class="cookie-toggle"><input type="checkbox" checked disabled /><span><b>' + L("Técnicas", "Technical") + '</b>' + L(" — siempre activas, imprescindibles para el funcionamiento.", " — always on, required for the site to work.") + '</span></label>' +
+          '<label class="cookie-toggle"><input type="checkbox" data-cookie-analytics /><span><b>' + L("Analíticas", "Analytics") + '</b>' + L(" — nos ayudan a entender el uso del sitio.", " — help us understand site usage.") + '</span></label>' +
+          '<label class="cookie-toggle"><input type="checkbox" data-cookie-ads /><span><b>' + L("Publicidad", "Advertising") + '</b>' + L(" — nos permite medir la eficacia de nuestras campañas publicitarias.", " — lets us measure the effectiveness of our ad campaigns.") + '</span></label>' +
+          '<button type="button" class="btn btn--primary btn--sm" data-cookie-save>' + L("Guardar preferencias", "Save preferences") + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(wrap);
-    applyLang(document.documentElement.getAttribute("lang") || "es");
 
     var prefs = wrap.querySelector(".cookie-banner__prefs");
     var actions = wrap.querySelector(".cookie-banner__actions");
