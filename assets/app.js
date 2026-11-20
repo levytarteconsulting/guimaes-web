@@ -253,6 +253,81 @@
     });
   }
 
+  /* ---------- Enlaces a un formulario de la misma página ----------
+     (#formulario, #cuentanos…). Si el formulario ya está a la vista, el
+     navegador no tiene adónde desplazarse y el clic parecía no hacer nada:
+     además de bajar hasta él, se pone el cursor en su primer campo. */
+  function initFormAnchors() {
+    document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+      var id = a.getAttribute("href").slice(1);
+      var target = id && document.getElementById(id);
+      if (!target || a.hasAttribute("data-lead-modal")) return;
+      var form = target.tagName === "FORM" ? target : target.querySelector("form");
+      if (!form) return;
+      a.addEventListener("click", function () {
+        var first = form.querySelector('input:not([type=hidden]):not([tabindex="-1"]), textarea');
+        if (!first) return;
+        setTimeout(function () { try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); } }, 450);
+      });
+    });
+  }
+
+  /* ---------- Ventana con el formulario corto (portada) ----------
+     Los enlaces con data-lead-modal (p. ej. «Habla con un experto» del hero)
+     abren #lead-modal en vez de navegar; sin JS, o en una página sin la
+     ventana, siguen su href (/contacto). El formulario de dentro es un
+     data-lead-form normal: lo envía bindLeadForm, igual que los demás.
+     Se cierra con la X, con Escape y pulsando fuera; el foco no sale de la
+     ventana y vuelve al botón al cerrar. No se abre con el aviso de cookies
+     pendiente de respuesta. */
+  function initLeadModal() {
+    var modal = document.getElementById("lead-modal");
+    if (!modal) return;
+    var box = modal.querySelector(".lead-modal__box");
+    var root = document.documentElement;
+    var opener = null;
+    var focusables = function () {
+      return Array.prototype.filter.call(
+        box.querySelectorAll("a[href], button, input:not([type=hidden]):not([tabindex=\"-1\"]), textarea, select"),
+        function (el) { return el.offsetParent !== null && !el.disabled; }
+      );
+    };
+    function onKey(e) {
+      if (e.key === "Escape" || e.key === "Esc") { e.preventDefault(); close(); return; }
+      if (e.key !== "Tab") return;
+      var f = focusables(); if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === box)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    function open(trigger) {
+      if (document.querySelector(".cookie-banner")) return false; // aviso de cookies pendiente
+      opener = trigger || document.activeElement;
+      modal.hidden = false;
+      root.classList.add("lead-open");
+      document.addEventListener("keydown", onKey);
+      var first = box.querySelector("input[name=nombre]");
+      try { (first || box).focus({ preventScroll: true }); } catch (e) { (first || box).focus(); }
+      return true;
+    }
+    function close() {
+      if (modal.hidden) return;
+      modal.hidden = true;
+      root.classList.remove("lead-open");
+      document.removeEventListener("keydown", onKey);
+      if (opener && opener.focus) { try { opener.focus({ preventScroll: true }); } catch (e) { opener.focus(); } }
+    }
+    document.querySelectorAll("[data-lead-modal]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        open(a);
+      });
+    });
+    modal.querySelectorAll("[data-lead-modal-close]").forEach(function (b) { b.addEventListener("click", close); });
+    // Pulsar fuera de la ventana (en el fondo oscurecido) la cierra
+    modal.addEventListener("click", function (e) { if (e.target === modal) close(); });
+  }
+
   /* ---------- Barra inferior de contacto (móvil, páginas de servicio) ----------
      Empieza oculta (clase is-hidden en el HTML) y se muestra cuando el
      formulario del hero (#cuentanos) no está en pantalla, para no duplicarlo.
@@ -422,5 +497,7 @@
     initYear();
     initFloats();
     initCookieBanner();
+    initLeadModal();
+    initFormAnchors();
   });
 })();
