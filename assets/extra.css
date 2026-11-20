@@ -247,8 +247,12 @@
    BOTONES FLOTANTES (WhatsApp + teléfono)
    ============================================================ */
 .floats {
-  position: fixed; right: clamp(16px,3vw,26px); bottom: clamp(16px,3vw,26px);
+  position: fixed; right: clamp(16px,3vw,26px);
+  /* --cookie-h: altura del banner de cookies mientras está abierto (app.js);
+     así WhatsApp queda visible justo encima en vez de quedar tapado. */
+  bottom: calc(clamp(16px,3vw,26px) + min(var(--cookie-h, 0px), 70vh));
   z-index: 70; display: flex; flex-direction: column; gap: 12px;
+  transition: bottom .2s ease;
 }
 .floats a {
   width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
@@ -487,5 +491,7 @@
   body.has-callbar { padding-bottom: 56px; }
   body.has-callbar .floats { display: none; }
   body:has(.cookie-banner) .callbar { display: none; }
+  /* ...y como la barra (que lleva WhatsApp) se oculta, vuelve el flotante. */
+  body.has-callbar:has(.cookie-banner) .floats { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) { .callbar, .callbar.is-hidden { transition: none; } }

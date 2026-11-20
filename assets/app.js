@@ -338,21 +338,34 @@
       '</div>';
     document.body.appendChild(wrap);
 
+    // Mientras el banner está abierto, los botones flotantes (WhatsApp) se
+    // colocan justo encima: su altura va en --cookie-h (ver .floats en extra.css).
+    var root = document.documentElement;
+    function syncHeight() { root.style.setProperty("--cookie-h", wrap.offsetHeight + "px"); }
+    syncHeight();
+    var ro = window.ResizeObserver ? new ResizeObserver(syncHeight) : null;
+    if (ro) ro.observe(wrap); else window.addEventListener("resize", syncHeight);
+    function close() {
+      if (ro) ro.disconnect(); else window.removeEventListener("resize", syncHeight);
+      wrap.remove();
+      root.style.removeProperty("--cookie-h");
+    }
+
     var prefs = wrap.querySelector(".cookie-banner__prefs");
     var actions = wrap.querySelector(".cookie-banner__actions");
     wrap.querySelector("[data-cookie-accept]").addEventListener("click", function () {
-      setConsent(true, true); wrap.remove();
+      setConsent(true, true); close();
     });
     wrap.querySelector("[data-cookie-reject]").addEventListener("click", function () {
-      setConsent(false, false); wrap.remove();
+      setConsent(false, false); close();
     });
     wrap.querySelector("[data-cookie-configure]").addEventListener("click", function () {
-      prefs.hidden = !prefs.hidden;
+      prefs.hidden = !prefs.hidden; syncHeight();
     });
     wrap.querySelector("[data-cookie-save]").addEventListener("click", function () {
       var analytics = wrap.querySelector("[data-cookie-analytics]").checked;
       var ads = wrap.querySelector("[data-cookie-ads]").checked;
-      setConsent(analytics, ads); wrap.remove();
+      setConsent(analytics, ads); close();
     });
   }
 
