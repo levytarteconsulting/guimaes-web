@@ -248,12 +248,11 @@
    ============================================================ */
 .floats {
   position: fixed; right: clamp(16px,3vw,26px);
-  /* --cookie-h: altura del banner de cookies mientras está abierto (app.js);
-     así WhatsApp queda visible justo encima en vez de quedar tapado. */
-  bottom: calc(clamp(16px,3vw,26px) + min(var(--cookie-h, 0px), 70vh));
+  bottom: clamp(16px,3vw,26px);
   z-index: 70; display: flex; flex-direction: column; gap: 12px;
-  transition: bottom .2s ease;
 }
+/* Con el aviso de cookies abierto, WhatsApp queda por encima del fondo oscurecido y se puede pulsar */
+body:has(.cookie-banner) .floats { z-index: 310; }
 .floats a {
   width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
   color: #fff; box-shadow: var(--shadow-lg); transition: transform .18s ease, filter .18s ease;
@@ -495,3 +494,29 @@
   body.has-callbar:has(.cookie-banner) .floats { display: flex; }
 }
 @media (prefers-reduced-motion: reduce) { .callbar, .callbar.is-hidden { transition: none; } }
+
+/* ============================================================
+   PORTADA: hero con formulario corto (vhero--lead)
+   En escritorio, texto a la izquierda y formulario a la derecha; en móvil,
+   titular, subtítulo y botón principal, y justo debajo el formulario.
+   ============================================================ */
+.vhero--lead { text-align: left; place-items: stretch; min-height: 0; }
+.vhero--lead .vhero__grid { position: relative; z-index: 1; display: grid; gap: 28px; align-items: center; padding-block: clamp(96px,11vw,130px) clamp(40px,6vw,80px); }
+.vhero--lead .vhero__inner { padding: 0; max-width: none; }
+.vhero--lead h1 { font-size: clamp(2rem,4vw,3.3rem); margin-top: 0; }
+.vhero--lead .vhero__sub { margin: 20px 0 0; }
+.vhero--lead .vhero__cta { justify-content: flex-start; margin-top: 28px; }
+.vhero--lead .vhero__tagline { margin: 22px 0 0; font-size: .98rem; }
+.vhero--lead .vhero__tagline a { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+@media (min-width: 960px) {
+  .vhero--lead .vhero__grid { grid-template-columns: minmax(0,1.1fr) minmax(0,.9fr); gap: clamp(40px,5vw,72px); }
+}
+@media (max-width: 959px) {
+  /* En móvil el formulario ya está debajo: el segundo botón sobra */
+  .vhero--lead .vhero__cta .btn--light { display: none; }
+}
+:is(.vhero, .lp-hero) .hero-form { text-align: left; }
+:is(.vhero, .lp-hero) .hero-form p { color: inherit; margin-top: 0; max-width: none; font-size: inherit; }
+:is(.vhero, .lp-hero) .hero-form .hero-form__title { font-family: var(--display); font-weight: 700; font-size: 1.4rem; letter-spacing: -.01em; color: var(--ink); line-height: 1.2; }
+:is(.vhero, .lp-hero) .hero-form .hero-form__sub { color: var(--slate); font-size: .95rem; margin: 6px 0 18px; }
+:is(.vhero, .lp-hero) .hero-form .form-ok .lead { color: var(--slate); margin-top: 10px; font-size: 1.02rem; }

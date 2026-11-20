@@ -111,7 +111,30 @@
     forms.forEach(bindLeadForm);
   }
 
+  // Formularios con data-campaign (páginas locales /gestoria-*, por si van en
+  // Google Ads): guardan los UTM y el gclid de la URL de llegada igual que
+  // assets/landing-pozuelo.js (misma clave de sessionStorage, mismo tope de
+  // 500 caracteres de las columnas de crm/supabase-leads-utm.sql).
+  var CAMPAIGN_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid"];
+  var CAMPAIGN_KEY = "guimaes_landing_campaign";
+  function readCampaign() {
+    var fromUrl = {}, any = false;
+    try {
+      var q = new URLSearchParams(window.location.search);
+      CAMPAIGN_PARAMS.forEach(function (k) {
+        var v = (q.get(k) || "").trim();
+        if (v) { fromUrl[k] = v.slice(0, 500); any = true; }
+      });
+    } catch (e) {}
+    if (any) {
+      try { sessionStorage.setItem(CAMPAIGN_KEY, JSON.stringify(fromUrl)); } catch (e) {}
+      return fromUrl;
+    }
+    try { return JSON.parse(sessionStorage.getItem(CAMPAIGN_KEY)) || {}; } catch (e) { return {}; }
+  }
+
   function bindLeadForm(form) {
+    var campaign = form.hasAttribute("data-campaign") ? readCampaign() : {};
     var isEN = function () { return document.documentElement.lang === "en"; };
 
     form.addEventListener("submit", function (e) {
@@ -147,6 +170,7 @@
         source: "Formulario web",
         page: location.pathname
       };
+      CAMPAIGN_PARAMS.forEach(function (k) { if (campaign[k]) payload[k] = campaign[k]; });
 
       var showSuccess = function () {
         if (fields) fields.style.display = "none";
@@ -316,51 +340,70 @@
     window.guimaesConsent = existing || null;
     if (existing) return; // ya ha decidido
 
+    // Ventana centrada con fondo oscurecido. GTM depende de los atributos
+    // data-cookie-accept / -reject / -configure / -save, de la clave
+    // guimaes_cookie_consent_v2 y del gtag('consent', 'update') de arriba:
+    // no cambiarlos. «Aceptar todas» y «Rechazar» llevan el mismo estilo.
     var wrap = document.createElement("div");
     wrap.className = "cookie-banner";
     wrap.innerHTML =
-      '<div class="cookie-banner__inner">' +
-        '<div class="cookie-banner__txt">' +
-          '<strong>' + L("Usamos cookies", "We use cookies") + '</strong>' +
-          '<span>' + L(" — las técnicas son necesarias para que la web funcione; las analíticas solo se activan si las aceptas. Más información en nuestra ", " — technical cookies are required for the site to work; analytics cookies only activate if you accept them. More information in our ") + '<a href="' + L("/politica-cookies", "/en/politica-cookies") + '">' + L("Política de Cookies", "Cookie Policy") + '</a>.</span>' +
+      '<div class="cookie-banner__inner" role="dialog" aria-modal="true" aria-labelledby="cookie-title" aria-describedby="cookie-desc" tabindex="-1">' +
+        '<p class="cookie-banner__title" id="cookie-title">' + L("Usamos cookies", "We use cookies") + '</p>' +
+        '<p class="cookie-banner__txt" id="cookie-desc">' + L("Las técnicas son necesarias para que la web funcione; las analíticas y las de publicidad solo se activan si las aceptas. Más información en nuestra ", "Technical cookies are required for the site to work; analytics and advertising cookies only activate if you accept them. More information in our ") + '<a href="' + L("/politica-cookies", "/en/politica-cookies") + '">' + L("Política de Cookies", "Cookie Policy") + '</a>.</p>' +
+        '<div class="cookie-banner__prefs" id="cookie-prefs" hidden>' +
+          '<label class="cookie-toggle"><input type="checkbox" checked disabled /><span><b>' + L("Técnicas", "Technical") + '</b>' + L("Siempre activas, imprescindibles para el funcionamiento.", "Always on, required for the site to work.") + '</span></label>' +
+          '<label class="cookie-toggle"><input type="checkbox" data-cookie-analytics /><span><b>' + L("Analíticas", "Analytics") + '</b>' + L("Nos ayudan a entender el uso del sitio.", "Help us understand site usage.") + '</span></label>' +
+          '<label class="cookie-toggle"><input type="checkbox" data-cookie-ads /><span><b>' + L("Publicidad", "Advertising") + '</b>' + L("Nos permiten medir la eficacia de nuestras campañas publicitarias.", "Let us measure the effectiveness of our ad campaigns.") + '</span></label>' +
+          '<button type="button" class="btn btn--primary btn--sm cookie-banner__save" data-cookie-save>' + L("Guardar preferencias", "Save preferences") + '</button>' +
         '</div>' +
         '<div class="cookie-banner__actions">' +
-          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-configure>' + L("Configurar", "Configure") + '</button>' +
-          '<button type="button" class="btn btn--ghost btn--sm" data-cookie-reject>' + L("Rechazar", "Reject") + '</button>' +
-          '<button type="button" class="btn btn--primary btn--sm" data-cookie-accept>' + L("Aceptar todas", "Accept all") + '</button>' +
+          '<button type="button" class="btn btn--sm cookie-banner__choice" data-cookie-reject>' + L("Rechazar", "Reject") + '</button>' +
+          '<button type="button" class="btn btn--sm cookie-banner__choice" data-cookie-accept>' + L("Aceptar todas", "Accept all") + '</button>' +
         '</div>' +
-        '<div class="cookie-banner__prefs" hidden>' +
-          '<label class="cookie-toggle"><input type="checkbox" checked disabled /><span><b>' + L("Técnicas", "Technical") + '</b>' + L(" — siempre activas, imprescindibles para el funcionamiento.", " — always on, required for the site to work.") + '</span></label>' +
-          '<label class="cookie-toggle"><input type="checkbox" data-cookie-analytics /><span><b>' + L("Analíticas", "Analytics") + '</b>' + L(" — nos ayudan a entender el uso del sitio.", " — help us understand site usage.") + '</span></label>' +
-          '<label class="cookie-toggle"><input type="checkbox" data-cookie-ads /><span><b>' + L("Publicidad", "Advertising") + '</b>' + L(" — nos permite medir la eficacia de nuestras campañas publicitarias.", " — lets us measure the effectiveness of our ad campaigns.") + '</span></label>' +
-          '<button type="button" class="btn btn--primary btn--sm" data-cookie-save>' + L("Guardar preferencias", "Save preferences") + '</button>' +
-        '</div>' +
+        '<button type="button" class="cookie-banner__link" data-cookie-configure aria-expanded="false" aria-controls="cookie-prefs">' + L("Configurar", "Configure") + '</button>' +
       '</div>';
-    document.body.appendChild(wrap);
-
-    // Mientras el banner está abierto, los botones flotantes (WhatsApp) se
-    // colocan justo encima: su altura va en --cookie-h (ver .floats en extra.css).
     var root = document.documentElement;
-    function syncHeight() { root.style.setProperty("--cookie-h", wrap.offsetHeight + "px"); }
-    syncHeight();
-    var ro = window.ResizeObserver ? new ResizeObserver(syncHeight) : null;
-    if (ro) ro.observe(wrap); else window.addEventListener("resize", syncHeight);
+    var lastFocus = document.activeElement;
+    document.body.appendChild(wrap);
+    root.classList.add("cookie-open"); // bloquea el scroll de fondo (extra.css)
+
+    var dialog = wrap.querySelector(".cookie-banner__inner");
+    var prefs = wrap.querySelector(".cookie-banner__prefs");
+    var configure = wrap.querySelector("[data-cookie-configure]");
+    var focusables = function () {
+      return Array.prototype.filter.call(
+        dialog.querySelectorAll("a[href], button, input:not([disabled])"),
+        function (el) { return el.offsetParent !== null; }
+      );
+    };
+    // Teclado: el foco empieza en la ventana y Tab no sale de ella.
+    function onKey(e) {
+      if (e.key !== "Tab") return;
+      var f = focusables(); if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    wrap.addEventListener("keydown", onKey);
+    try { dialog.focus({ preventScroll: true }); } catch (e) { dialog.focus(); }
+
     function close() {
-      if (ro) ro.disconnect(); else window.removeEventListener("resize", syncHeight);
+      wrap.removeEventListener("keydown", onKey);
       wrap.remove();
-      root.style.removeProperty("--cookie-h");
+      root.classList.remove("cookie-open");
+      if (lastFocus && lastFocus.focus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
     }
 
-    var prefs = wrap.querySelector(".cookie-banner__prefs");
-    var actions = wrap.querySelector(".cookie-banner__actions");
     wrap.querySelector("[data-cookie-accept]").addEventListener("click", function () {
       setConsent(true, true); close();
     });
     wrap.querySelector("[data-cookie-reject]").addEventListener("click", function () {
       setConsent(false, false); close();
     });
-    wrap.querySelector("[data-cookie-configure]").addEventListener("click", function () {
-      prefs.hidden = !prefs.hidden; syncHeight();
+    configure.addEventListener("click", function () {
+      prefs.hidden = !prefs.hidden;
+      configure.setAttribute("aria-expanded", String(!prefs.hidden));
+      if (!prefs.hidden) { var a = prefs.querySelector("[data-cookie-analytics]"); if (a) a.focus(); }
     });
     wrap.querySelector("[data-cookie-save]").addEventListener("click", function () {
       var analytics = wrap.querySelector("[data-cookie-analytics]").checked;

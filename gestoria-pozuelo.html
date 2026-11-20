@@ -42,7 +42,15 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
   "url": "https://guimaes.es/gestoria-pozuelo",
   "telephone": "+34637420068",
   "email": "info@guimaes.es",
-  "areaServed": "Madrid",
+  "priceRange": "€€€",
+  "areaServed": [
+    { "@type": "City", "name": "Pozuelo de Alarcón" },
+    { "@type": "City", "name": "Majadahonda" },
+    { "@type": "City", "name": "Boadilla del Monte" },
+    { "@type": "City", "name": "Las Rozas de Madrid" },
+    { "@type": "Place", "name": "Aravaca" },
+    { "@type": "AdministrativeArea", "name": "Madrid" }
+  ],
   "address": {
     "@type": "PostalAddress",
     "streetAddress": "Paseo Club Deportivo 1, Edificio 4, Pl. 1, Parque Empresarial La Finca",
@@ -51,14 +59,24 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     "postalCode": "28223",
     "addressCountry": "ES"
   },
+  "geo": {
+    "@type": "GeoCoordinates",
+    "latitude": 40.4548,
+    "longitude": -3.8348
+  },
   "openingHoursSpecification": [{
     "@type": "OpeningHoursSpecification",
     "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday"],
     "opens": "09:00",
     "closes": "18:00"
-  }]
+  }],
+  "sameAs": [
+    "https://g.page/r/CX3ZGc6Eb4j0EBM",
+    "https://www.linkedin.com/company/guimaes/"
+  ]
 }
 </script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Ya tengo gestoría, ¿es complicado cambiar?","acceptedAnswer":{"@type":"Answer","text":"No. Pedimos la documentación a tu asesor actual, revisamos lo más reciente y hacemos el traspaso de forma ordenada, sin que pierdas continuidad ni información."}},{"@type":"Question","name":"¿Hay permanencia en el contrato?","acceptedAnswer":{"@type":"Answer","text":"No. Trabajamos sin permanencia y con honorarios claros. Si en algún momento decides no continuar, basta con un simple aviso."}},{"@type":"Question","name":"¿Incluye la presentación de impuestos?","acceptedAnswer":{"@type":"Answer","text":"La contabilidad y la fiscalidad van de la mano. Podemos integrar ambos servicios para que todo esté coordinado bajo un único interlocutor."}},{"@type":"Question","name":"¿Os encargáis de todas las nóminas cada mes?","acceptedAnswer":{"@type":"Answer","text":"Sí. Calculamos y emitimos las nóminas, los seguros sociales y las comunicaciones oficiales dentro de plazo cada mes. Tú solo nos comunicas las incidencias."}},{"@type":"Question","name":"¿Cómo es la primera reunión?","acceptedAnswer":{"@type":"Answer","text":"Es una consulta inicial sin compromiso en la que entendemos tu negocio y tus objetivos. A partir de ahí preparamos una propuesta personalizada con servicios y honorarios."}},{"@type":"Question","name":"¿Dónde está vuestra oficina en Pozuelo de Alarcón?","acceptedAnswer":{"@type":"Answer","text":"En el Parque Empresarial La Finca: Paseo Club Deportivo 1, Edificio 4, Planta 1, 28223 Pozuelo de Alarcón. Atendemos con cita previa, así que antes de venir te damos una hora para que nadie te haga esperar."}},{"@type":"Question","name":"¿Tengo que ir a la oficina para trabajar con vosotros?","acceptedAnswer":{"@type":"Answer","text":"No hace falta. La primera reunión suele ser en La Finca porque así conocemos bien tu negocio, pero después puedes enviarnos y consultar toda la documentación (escrituras, contratos, nóminas, impuestos) desde el área de cliente, con tu cuenta de Google."}},{"@type":"Question","name":"Mi empresa está en Pozuelo pero facturo en toda España, ¿podéis llevarla?","acceptedAnswer":{"@type":"Answer","text":"Sí. Que la oficina esté en Pozuelo no limita dónde trabaja tu empresa: llevamos la fiscalidad, la contabilidad y lo laboral igual si vendes en Pozuelo, en el resto de Madrid o fuera de la comunidad."}},{"@type":"Question","name":"¿Qué tipo de empresas de Pozuelo asesoráis?","acceptedAnswer":{"@type":"Answer","text":"Startups, pymes, grupos de sociedades, holdings y family offices. Adaptamos el alcance a cada estructura: no necesita lo mismo una sociedad que empieza que un grupo con varias filiales."}},{"@type":"Question","name":"¿Podéis llevar a la vez lo fiscal, lo contable y lo laboral?","acceptedAnswer":{"@type":"Answer","text":"Sí, y es lo que más recomendamos. Un mismo equipo lleva las tres áreas, más lo legal, coordinado por un asesor de referencia que conoce tu empresa. Así no tienes que repetir tu situación a cada departamento."}},{"@type":"Question","name":"¿En cuánto tiempo me respondéis?","acceptedAnswer":{"@type":"Answer","text":"Contestamos a las consultas que nos llegan por el formulario, por WhatsApp o por teléfono en menos de 24 horas laborables. Si tu caso es urgente, dínoslo al escribirnos y lo priorizamos."}}]}</script>
 <style>
   /* Solo esta landing: cabecera sin menú, CTAs del hero y barra móvil */
   .lp-header .nav__right { gap: 10px; }
@@ -85,9 +103,26 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     .lp-callbar .lp-callbar__wa { background: #25D366; }
     body { padding-bottom: 54px; }
     .floats { display: none; }
-    .cookie-banner { bottom: 54px; }
   }
   @media (min-width: 720px){ .lp-callbar { display: none; } }
+  /* Bloques locales: dirección, zona y enlaces del pie */
+  .lp-address { margin-top: 14px; color: var(--slate); font-size: .95rem; }
+  .lp-address a { color: var(--accent); }
+  .lp-zone { display: grid; gap: 16px; margin-top: 36px; }
+  @media (min-width: 760px){ .lp-zone { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+  .lp-zone__card { display: flex; flex-direction: column; gap: 6px; padding: 22px 24px; background: #fff; border: 1px solid var(--line); border-radius: var(--r-lg); color: var(--ink); transition: border-color .18s, transform .18s; }
+  .lp-zone__card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .lp-zone__card b { font-family: var(--display); font-size: 1.05rem; }
+  .lp-zone__card span { color: var(--slate); font-size: .92rem; }
+  .lp-footer__zones { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 18px; font-size: .9rem; }
+  .lp-footer__zones a { color: #A7BCD3; }
+  .lp-footer__zones a:hover { color: #fff; }
+  .lp-footer__zones span { color: #fff; }
+  .lp-prose { max-width: 760px; margin: 0 auto; }
+  .lp-prose p { margin-top: 16px; color: var(--ink-2); font-size: 1.04rem; line-height: 1.7; }
+  .lp-prose p a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  /* Con el aviso de cookies abierto, la barra móvil (con WhatsApp) queda por encima del fondo */
+  body:has(.cookie-banner) .lp-callbar { z-index: 310; }
 </style>
 </head>
 <body>
@@ -350,6 +385,126 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   </div>
 </section>
 
+<!-- ============ PREGUNTAS FRECUENTES LOCALES ============ -->
+<section class="section">
+  <div class="wrap">
+    <div class="section-head center">
+      <span class="eyebrow">Gestoría en Pozuelo</span>
+      <h2>Preguntas sobre trabajar con nosotros en Pozuelo de Alarcón</h2>
+    </div>
+    <div class="faq" style="margin-top:42px">
+      <details>
+        <summary><span>¿Dónde está vuestra oficina en Pozuelo de Alarcón?</span><span class="plus">+</span></summary>
+        <p>En el Parque Empresarial La Finca: Paseo Club Deportivo 1, Edificio 4, Planta 1, 28223 Pozuelo de Alarcón. Atendemos con cita previa, así que antes de venir te damos una hora para que nadie te haga esperar.</p>
+      </details>
+      <details>
+        <summary><span>¿Tengo que ir a la oficina para trabajar con vosotros?</span><span class="plus">+</span></summary>
+        <p>No hace falta. La primera reunión suele ser en La Finca porque así conocemos bien tu negocio, pero después puedes enviarnos y consultar toda la documentación (escrituras, contratos, nóminas, impuestos) desde el <a href="/area-cliente">área de cliente</a>, con tu cuenta de Google.</p>
+      </details>
+      <details>
+        <summary><span>Mi empresa está en Pozuelo pero facturo en toda España, ¿podéis llevarla?</span><span class="plus">+</span></summary>
+        <p>Sí. Que la oficina esté en Pozuelo no limita dónde trabaja tu empresa: llevamos la fiscalidad, la contabilidad y lo laboral igual si vendes en Pozuelo, en el resto de Madrid o fuera de la comunidad.</p>
+      </details>
+      <details>
+        <summary><span>¿Qué tipo de empresas de Pozuelo asesoráis?</span><span class="plus">+</span></summary>
+        <p>Startups, pymes, grupos de sociedades, holdings y family offices. Adaptamos el alcance a cada estructura: no necesita lo mismo una sociedad que empieza que un grupo con varias filiales.</p>
+      </details>
+      <details>
+        <summary><span>¿Podéis llevar a la vez lo fiscal, lo contable y lo laboral?</span><span class="plus">+</span></summary>
+        <p>Sí, y es lo que más recomendamos. Un mismo equipo lleva las tres áreas, más lo legal, coordinado por un asesor de referencia que conoce tu empresa. Así no tienes que repetir tu situación a cada departamento.</p>
+      </details>
+      <details>
+        <summary><span>¿En cuánto tiempo me respondéis?</span><span class="plus">+</span></summary>
+        <p>Contestamos a las consultas que nos llegan por el formulario, por WhatsApp o por teléfono en menos de 24 horas laborables. Si tu caso es urgente, dínoslo al escribirnos y lo priorizamos.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="section section--mist" id="testimonios">
+  <div class="wrap">
+    <div class="section-head center" data-reveal>
+      <span class="eyebrow">Lo que dicen nuestros clientes</span>
+      <h2><span>Reseñas reales de empresas que asesoramos</span></h2>
+      <div class="reviews-head">
+        <span class="g-badge">
+          <svg class="review__g" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.7-.06-1.4-.18-2H12v3.8h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-2 3.2-4.8 3.2-7.8Z"/><path fill="#34A853" d="M12 23c2.9 0 5.4-1 7.2-2.6l-3.6-2.7c-1 .7-2.3 1.1-3.6 1.1-2.8 0-5.1-1.9-6-4.4H2.3v2.8A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M6 14.4a6.6 6.6 0 0 1 0-4.2V7.4H2.3a11 11 0 0 0 0 9.8L6 14.4Z"/><path fill="#EA4335" d="M12 5.6c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 12 1 11 11 0 0 0 2.3 7.4L6 10.2c.9-2.5 3.2-4.6 6-4.6Z"/></svg>
+          <b>4,7</b> <span class="stars">★★★★★</span>
+        </span>
+        <span>Valoración media en Google · reseñas verificadas</span>
+      </div>
+    </div>
+
+    <div class="reviews">
+      <article class="review" data-reveal>
+        <div class="review__top"><span class="review__stars">★★★★★</span><svg class="review__g" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.7-.06-1.4-.18-2H12v3.8h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-2 3.2-4.8 3.2-7.8Z"/><path fill="#34A853" d="M12 23c2.9 0 5.4-1 7.2-2.6l-3.6-2.7c-1 .7-2.3 1.1-3.6 1.1-2.8 0-5.1-1.9-6-4.4H2.3v2.8A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M6 14.4a6.6 6.6 0 0 1 0-4.2V7.4H2.3a11 11 0 0 0 0 9.8L6 14.4Z"/><path fill="#EA4335" d="M12 5.6c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 12 1 11 11 0 0 0 2.3 7.4L6 10.2c.9-2.5 3.2-4.6 6-4.6Z"/></svg></div>
+        <p>«Atención, conocimiento y profesionalidad inmejorables. Trato humano sobresaliente. Me siento muy afortunado por haber encontrado una asesoría con estas cualidades. Mejor imposible.»</p>
+        <div class="review__who"><span class="review__av">AC</span><span><b>Antonio Cano Picó</b><span>Hace 3 meses · Google</span></span></div>
+      </article>
+      <article class="review" data-reveal data-delay="1">
+        <div class="review__top"><span class="review__stars">★★★★★</span><svg class="review__g" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.7-.06-1.4-.18-2H12v3.8h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-2 3.2-4.8 3.2-7.8Z"/><path fill="#34A853" d="M12 23c2.9 0 5.4-1 7.2-2.6l-3.6-2.7c-1 .7-2.3 1.1-3.6 1.1-2.8 0-5.1-1.9-6-4.4H2.3v2.8A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M6 14.4a6.6 6.6 0 0 1 0-4.2V7.4H2.3a11 11 0 0 0 0 9.8L6 14.4Z"/><path fill="#EA4335" d="M12 5.6c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 12 1 11 11 0 0 0 2.3 7.4L6 10.2c.9-2.5 3.2-4.6 6-4.6Z"/></svg></div>
+        <p>«Quiero agradecer a Guillermo y Raquel por el gran trato y la ayuda que siempre me brindan. Da gusto encontrar a personas tan profesionales, cercanas y amables. Siempre que necesito asesoramiento acudo a ellos, porque sé que me van a atender.»</p>
+        <div class="review__who"><span class="review__av">LC</span><span><b>Laura Chavarría Maldonado</b><span>Hace un mes · Google</span></span></div>
+      </article>
+      <article class="review" data-reveal data-delay="2">
+        <div class="review__top"><span class="review__stars">★★★★★</span><svg class="review__g" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.7-.06-1.4-.18-2H12v3.8h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2.1-2 3.2-4.8 3.2-7.8Z"/><path fill="#34A853" d="M12 23c2.9 0 5.4-1 7.2-2.6l-3.6-2.7c-1 .7-2.3 1.1-3.6 1.1-2.8 0-5.1-1.9-6-4.4H2.3v2.8A11 11 0 0 0 12 23Z"/><path fill="#FBBC05" d="M6 14.4a6.6 6.6 0 0 1 0-4.2V7.4H2.3a11 11 0 0 0 0 9.8L6 14.4Z"/><path fill="#EA4335" d="M12 5.6c1.6 0 3 .5 4.1 1.6l3.1-3.1A11 11 0 0 0 12 1 11 11 0 0 0 2.3 7.4L6 10.2c.9-2.5 3.2-4.6 6-4.6Z"/></svg></div>
+        <p>«Constituí con ellos mi S.L. y la verdad que no puedo poner ni una queja. Todo rapidísimo y un trato genial. Recomendable 100%.»</p>
+        <div class="review__who"><span class="review__av">WM</span><span><b>Wild Motors Garage</b><span>Hace 3 meses · Google</span></span></div>
+      </article>
+    </div>
+
+    <div class="center" style="margin-top:40px" data-reveal>
+      <a class="link-arrow" href="https://www.google.com/maps/search/GUIMAES+Pozuelo+de+Alarc%C3%B3n" target="_blank" rel="noopener"><span>Ver todas las reseñas en Google</span><svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DÓNDE ESTAMOS (mismo mapa que /contacto) ============ -->
+<section class="section" aria-labelledby="mapa-title">
+  <div class="wrap">
+    <div class="section-head" style="margin-bottom:26px">
+      <span class="eyebrow">Dónde estamos</span>
+      <h2 id="mapa-title">Nuestra oficina en el Parque Empresarial La Finca</h2>
+      <p class="lead" style="margin-top:12px">Estamos en Pozuelo de Alarcón, en el Parque Empresarial La Finca. Te atendemos con cita previa para dedicarte toda la atención.</p>
+      <p class="lp-address"><b>GUIMAES</b> · Paseo Club Deportivo 1, Edificio 4, Planta 1 · Parque Empresarial La Finca · 28223 Pozuelo de Alarcón, Madrid · <a href="tel:+34637420068">+34 637 420 068</a> · <a href="mailto:info@guimaes.es">info@guimaes.es</a></p>
+    </div>
+    <div class="map-embed" data-reveal data-delay="1">
+      <iframe
+        title="Mapa de la ubicación de GUIMAES en Parque Empresarial La Finca, Pozuelo de Alarcón, Madrid"
+        src="https://www.google.com/maps?q=Parque+Empresarial+La+Finca,+Paseo+Club+Deportivo+1,+28223+Pozuelo+de+Alarc%C3%B3n,+Madrid&output=embed"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+        allowfullscreen></iframe>
+    </div>
+    <div class="map-actions" data-reveal>
+      <a class="btn btn--ghost" href="https://www.google.com/maps/search/Paseo+Club+Deportivo+1,+Edificio+4,+Pl.+1+Parque+Empresarial+La+Finca+Pozuelo+de+Alarc%C3%B3n" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2"/></svg>
+        <span>Cómo llegar</span>
+      </a>
+      <a class="btn btn--ghost" href="https://g.page/r/CX3ZGc6Eb4j0EBM/review" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.58 1.11 6.47L12 17.9l-5.81 3.05 1.11-6.47-4.7-4.58 6.5-.95L12 2.5Z"/></svg>
+        <span>Déjanos tu reseña en Google</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ZONA ============ -->
+<section class="section section--mist">
+  <div class="wrap">
+    <div class="section-head center">
+      <span class="eyebrow">Zona oeste de Madrid</span>
+      <h2>Empresas de Aravaca, Majadahonda, Boadilla y Las Rozas</h2>
+      <p>Desde nuestra oficina de La Finca también llevamos empresas de los municipios cercanos. No tenemos oficina en ellos: las reuniones son en Pozuelo y el resto del trabajo, a través del área de cliente. Las Rozas también está en nuestra zona habitual, aunque todavía no tiene página propia.</p>
+    </div>
+    <div class="lp-zone">
+      <a class="lp-zone__card" href="/gestoria-majadahonda"><b>Gestoría para empresas en Majadahonda</b><span>Desde nuestra oficina de La Finca, en Pozuelo</span></a>
+      <a class="lp-zone__card" href="/gestoria-boadilla"><b>Gestoría para empresas en Boadilla del Monte</b><span>Desde nuestra oficina de La Finca, en Pozuelo</span></a>
+      <a class="lp-zone__card" href="/gestoria-aravaca"><b>Gestoría para empresas en Aravaca</b><span>Desde nuestra oficina de La Finca, en Pozuelo</span></a>
+    </div>
+  </div>
+</section>
+
 <!-- ============ CTA FINAL ============ -->
 <section class="section section--ink lp-final">
   <div class="wrap">
@@ -367,6 +522,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <footer class="site-footer lp-footer">
   <div class="wrap">
     <p class="lp-footer__addr">GUIMAES · Paseo Club Deportivo 1, Edificio 4, Pl. 1, Parque Empresarial La Finca, 28223 Pozuelo de Alarcón, Madrid · <a href="mailto:info@guimaes.es">info@guimaes.es</a> · <a href="tel:+34637420068">+34 637 420 068</a></p>
+    <nav class="lp-footer__zones" aria-label="Gestoría por zona"><span>Gestoría en Pozuelo de Alarcón</span><a href="/gestoria-majadahonda">Gestoría en Majadahonda</a><a href="/gestoria-boadilla">Gestoría en Boadilla del Monte</a><a href="/gestoria-aravaca">Gestoría en Aravaca</a></nav>
     <div class="footer__bottom">
       <span>© <span data-year></span> GUIMAES. Todos los derechos reservados.</span>
       <nav class="footer__legal">
