@@ -3,7 +3,7 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://guimaes.es/</loc>
-    <lastmod>2026-07-02</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/"/>
@@ -12,7 +12,7 @@
   </url>
   <url>
     <loc>https://guimaes.es/en</loc>
-    <lastmod>2026-07-02</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/"/>
@@ -75,7 +75,7 @@
   </url>
   <url>
     <loc>https://guimaes.es/contacto</loc>
-    <lastmod>2026-07-02</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/contacto"/>
@@ -84,7 +84,7 @@
   </url>
   <url>
     <loc>https://guimaes.es/en/contacto</loc>
-    <lastmod>2026-07-02</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="es" href="https://guimaes.es/contacto"/>
@@ -681,9 +681,27 @@
   </url>
   <url>
     <loc>https://guimaes.es/gestoria-pozuelo</loc>
-    <lastmod>2026-10-23</lastmod>
+    <lastmod>2026-11-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://guimaes.es/gestoria-majadahonda</loc>
+    <lastmod>2026-11-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://guimaes.es/gestoria-boadilla</loc>
+    <lastmod>2026-11-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://guimaes.es/gestoria-aravaca</loc>
+    <lastmod>2026-11-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://guimaes.es/blog/modelo-232-operaciones-vinculadas</loc>
