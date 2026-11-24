@@ -168,8 +168,8 @@ function PasswordRecovery({onDone}){
 const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
   {id:"agente", label:"Agente IA", icon:"sparkles"},
-  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.EMPRESAS.filter(e=>!e.archived_at).length},
-  {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.CONTACTS.length},
+  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.contarEmpresasNuevas(), badgeTitle:"Empresas nuevas (nadie ha abierto su ficha)"},
+  {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.contarContactosNuevos(), badgeTitle:"Contactos nuevos (nadie ha abierto su ficha)"},
   {id:"cuentas", label:"Área cliente", icon:"users", badge:()=>CRM.CUENTAS_PENDIENTES.length + CRM.ALTAS_PROVISIONALES.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
   {id:"tareas", label:"Tareas", icon:"task"},
@@ -222,7 +222,7 @@ function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
           {NAV.map(n=>{
             const b = n.badge && n.badge();
             return <a key={n.id} className={"sb-item"+(view===n.id?" active":"")} onClick={()=>goTo(n.id)}>
-              <Icon name={n.icon} size={18}/>{n.label}{b?<span className="sb-item__badge">{b}</span>:null}
+              <Icon name={n.icon} size={18}/>{n.label}{b?<span className="sb-item__badge" title={n.badgeTitle}>{b}</span>:null}
             </a>;
           })}
         </nav>
@@ -349,7 +349,7 @@ function Empresas({nav, toast}){
               <div className="card__body" style={{display:"flex",gap:12,alignItems:"flex-start"}}>
                 <Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontWeight:600,fontSize:14}}>{e.razon_social}</div>
+                  <div className="row" style={{gap:6,fontWeight:600,fontSize:14}}>{e.razon_social}{CRM.esNuevo(e) && <NuevoBadge/>}</div>
                   <div className="muted" style={{fontSize:12.5,marginTop:2}}>{e.cif || "Sin CIF"}</div>
                   {e.provisional_at && <div style={{marginTop:4}}><PendienteBadge/></div>}
                   {e.archived_at && <div style={{marginTop:4}}><ArchivadaBadge/></div>}
@@ -368,7 +368,7 @@ function Empresas({nav, toast}){
             <tbody>
               {list.map(e=>(
                 <tr key={e.id} onClick={()=>nav("empresa",e.id)}>
-                  <td><div className="row"><Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/><div className="tbl__name">{e.razon_social}</div>{e.provisional_at && <PendienteBadge/>}{e.archived_at && <ArchivadaBadge/>}</div></td>
+                  <td><div className="row"><Avatar name={e.razon_social} size="md" color={CRM.colorFor(e.razon_social)}/><div className="tbl__name">{e.razon_social}</div>{CRM.esNuevo(e) && <NuevoBadge/>}{e.provisional_at && <PendienteBadge/>}{e.archived_at && <ArchivadaBadge/>}</div></td>
                   <td className="tbl__sub">{e.cif || "—"}</td>
                   <td>{CRM.contactsForEmpresa(e.id).length}</td>
                   <td style={{textAlign:"right"}}><button className="btn btn--sm btn--ghost" title="Eliminar empresa" aria-label={"Eliminar "+e.razon_social} onClick={ev=>pedirBorrar(ev,e)}><Icon name="trash" size={14}/></button></td>
@@ -997,9 +997,23 @@ function ContactDocsTab({contact, user, toast, onCount, nav}){
     <EmpresaDocs key={actual.id} empresaId={actual.id} user={user} toast={toast} onCount={onCount} contextEmpresaIds={empresas.map(e=>e.id)}/>
   </div>;
 }
+// Al abrir una ficha "Nueva" la marca como vista (para todo el equipo).
+// Devuelve si lo era al entrar, para seguir enseñando la etiqueta en esta
+// visita; la próxima vez ya no sale.
+function useMarcarVisto(tabla, id, x){
+  const [eraNuevo,setEraNuevo]=uState(()=>CRM.esNuevo(x));
+  uEffect(()=>{
+    const nuevo = CRM.esNuevo(x);
+    setEraNuevo(nuevo);
+    if(nuevo) CRM.marcarVisto(Auth.client, tabla, id);
+  },[tabla, id, !!x]);
+  return eraNuevo;
+}
 function EmpresaDetail({id, nav, toast, user, foco}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const e = CRM.empresaById[id];
+  // "Nuevo": se ve en esta visita y se quita para todos al abrir la ficha.
+  const eraNueva = useMarcarVisto("empresas", id, e);
   const focoDoc = foco && foco.doc ? foco : null;
   const [tab,setTab]=uState(focoDoc ? "docs" : "contactos");
   // "Ir al documento" (asistente): abre la pestaña Documentos aunque la
@@ -1049,7 +1063,7 @@ function EmpresaDetail({id, nav, toast, user, foco}){
           <div className="profile">
             <div className="profile__top">
               <Avatar name={e.razon_social} size="lg" color={CRM.colorFor(e.razon_social)}/>
-              <div><div className="profile__name">{e.razon_social}</div><div className="profile__sub">{e.cif || "Sin CIF"}</div>{e.provisional_at && <div style={{marginTop:6}}><PendienteBadge/></div>}{e.provisional_at && <button className="btn btn--sm btn--ghost" style={{marginTop:6}} onClick={()=>nav("cuentas")}>Revisar en Área cliente</button>}</div>
+              <div><div className="profile__name">{e.razon_social}</div><div className="profile__sub">{e.cif || "Sin CIF"}</div>{eraNueva && <div style={{marginTop:6}}><NuevoBadge/></div>}{e.provisional_at && <div style={{marginTop:6}}><PendienteBadge/></div>}{e.provisional_at && <button className="btn btn--sm btn--ghost" style={{marginTop:6}} onClick={()=>nav("cuentas")}>Revisar en Área cliente</button>}</div>
             </div>
             <div style={{marginTop:16}}>
               <KV k="CIF/NIF">{e.cif || "—"}</KV>
@@ -1414,7 +1428,7 @@ function Contacts({nav, toast, user}){
                   <Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div className="row" style={{justifyContent:"space-between",gap:8}}>
-                      <span style={{fontWeight:600,fontSize:14}}>{c.full_name||c.company||"—"}</span>
+                      <span className="row" style={{gap:6,fontWeight:600,fontSize:14}}>{c.full_name||c.company||"—"}{CRM.esNuevo(c) && <NuevoBadge/>}</span>
                       <PriorityDot id={c.priority}/>
                     </div>
                     <div className="muted" style={{fontSize:12.5,marginTop:2}}>{c.company}</div>
@@ -1439,7 +1453,7 @@ function Contacts({nav, toast, user}){
               {list.map(c=>(
                 <tr key={c.id} className={sel.includes(c.id)?"sel":""} onClick={()=>nav("contact",c.id)}>
                   <td onClick={e=>{e.stopPropagation();toggle(c.id);}}><div className={"tbl-check"+(sel.includes(c.id)?" on":"")}>{sel.includes(c.id)&&<Icon name="check" size={12}/>}</div></td>
-                  <td><div className="row"><Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/><div><div className="tbl__name">{c.full_name||c.company||"—"}</div><div className="tbl__sub">{[c.company,c.email].filter(Boolean).join(" · ")}</div></div></div></td>
+                  <td><div className="row"><Avatar name={c.full_name||c.company} size="md" color={CRM.colorFor(c.full_name||c.company)}/><div><div className="tbl__name">{c.full_name||c.company||"—"}{CRM.esNuevo(c) && <> <NuevoBadge/></>}</div><div className="tbl__sub">{[c.company,c.email].filter(Boolean).join(" · ")}</div></div></div></td>
                   <td><div className="row" style={{gap:6,flexWrap:"wrap"}}><LifecycleBadge id={c.lifecycle}/>{c.provisional_at && <PendienteBadge/>}</div></td>
                   <td><div className="row">{ownerAvatar(c.owner)}<span style={{fontSize:13}}>{CRM.userById(c.owner)?.name.split(" ")[0]}</span></div></td>
                   <td>{c.city}</td>
@@ -1464,7 +1478,7 @@ function Contacts({nav, toast, user}){
               <div className="kcol__body">
                 {items.map(c=>(
                   <div key={c.id} className={"kcard"+(drag===c.id?" dragging":"")} draggable onDragStart={()=>setDrag(c.id)} onDragEnd={()=>{setDrag(null);setOver(null);}} onClick={()=>nav("contact",c.id)}>
-                    <div className="kcard__top"><Avatar name={c.company} size="sm" color={CRM.colorFor(c.company)}/><span className="right">{ownerAvatar(c.owner)}</span></div>
+                    <div className="kcard__top"><Avatar name={c.company} size="sm" color={CRM.colorFor(c.company)}/>{CRM.esNuevo(c) && <NuevoBadge/>}<span className="right">{ownerAvatar(c.owner)}</span></div>
                     <div className="kcard__title">{c.company}</div>
                     <div className="kcard__co">{c.full_name} · {c.city}</div>
                     <div className="kcard__foot"><span className="muted" style={{fontSize:11.5}}>{c.source}</span><span className="right"><PriorityDot id={c.priority}/></span></div>
@@ -1634,6 +1648,9 @@ function EliminarCuentaModal({cuenta, onClose, onDone, toast}){
 // coincidencias por CIF y email, y Confirmar, Fusionar con existente o
 // Rechazar. Todo pasa por portal-cuentas.
 const PendienteBadge = ()=> <Badge label="Pendiente de validar" color="#D9822B"/>;
+// Marca "Nuevo" (crm/supabase-visto.sql): relleno sólido para no confundirla
+// con la etapa "Nuevo" del ciclo de vida (gris, con fondo suave).
+const NuevoBadge = ()=> <Badge label="Nuevo" color="#16B8A6" solid dot={false}/>;
 const altaFila = (t, v)=> <div className="alta-kv__f"><span className="muted">{t}</span><span>{v||"—"}</span></div>;
 function AltaCoincidencias({co, nav}){
   if(!co.empresas.length && !co.contactos.length) return <p className="muted" style={{fontSize:13}}>No hay ninguna empresa validada con ese CIF ni ningún contacto con ese email.</p>;
@@ -1907,6 +1924,8 @@ function LeadFormsCard({contactId}){
 function ContactDetail({id, nav, toast, user}){
   const [,setTick]=uState(0); const bump=()=>setTick(t=>t+1);
   const c = CRM.contactById[id];
+  // "Nuevo": se ve en esta visita y se quita para todos al abrir la ficha.
+  const eraNuevo = useMarcarVisto("contactos", id, c);
   const [tab,setTab]=uState("resumen");
   const [showEdit,setShowEdit]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false);
@@ -1993,7 +2012,7 @@ function ContactDetail({id, nav, toast, user}){
           <div className="profile">
             <div className="profile__top">
               <Avatar name={c.company} size="lg" color={CRM.colorFor(c.company)}/>
-              <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div>{c.provisional_at && <div style={{marginTop:6}}><PendienteBadge/></div>}</div>
+              <div><div className="profile__name">{c.company}</div><div className="profile__sub">{c.full_name}</div>{eraNuevo && <div style={{marginTop:6}}><NuevoBadge/></div>}{c.provisional_at && <div style={{marginTop:6}}><PendienteBadge/></div>}</div>
               <div className="row" style={{gap:6,flexWrap:"wrap",justifyContent:"center"}}><LifecycleBadge id={c.lifecycle}/><PriorityDot id={c.priority} showLabel/>{isLead && <Badge label={(c.source && c.source!=="Formulario web" ? "Lead de "+c.source : "Lead del formulario web")+" — sin convertir"} color="#D9822B"/>}</div>
             </div>
             {empresas.length>0 && <div style={{marginTop:14}}>
