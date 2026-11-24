@@ -356,6 +356,9 @@
       }
       return;
     }
+    // El webhook desarchiva la conversación al entrar un mensaje del
+    // cliente; archived no llega por Realtime, así que se refleja aquí.
+    if(msg.dir==="in") w.archived = false;
     waAgregarMensaje(w.id, msg);
   }
   // Carga las conversaciones + mensajes reales de Supabase y los inyecta en WHATSAPP (una sola vez, al arrancar)
