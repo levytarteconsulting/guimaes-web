@@ -460,5 +460,59 @@ ok(r && JSON.stringify(r).includes("Alta nueva"), "agente_ficha_contacto lee un 
 r = (await rpc("admin", `public.agente_buscar('Empresa Nueva')`)).v;
 ok(r.resultados.some(x => x.id === EN), "agente_buscar encuentra la empresa nueva");
 
+// ---------------------------------------------------------------- whatsapp_lecturas (crm/supabase-whatsapp-lecturas.sql)
+console.log("WhatsApp no leídas (supabase-whatsapp-lecturas.sql):");
+const migLect = fs.readFileSync(new URL("../../supabase-whatsapp-lecturas.sql", import.meta.url), "utf8");
+const parteLect = (id) => {
+  const m = migLect.match(new RegExp(`-- ${id} [\\s\\S]*?(?=\\n-- =+\\n-- 4[A-Z] |$)`));
+  if (!m) throw new Error("sin parte " + id);
+  return m[0];
+};
+await db.exec(`create publication supabase_realtime; alter publication supabase_realtime add table public.whatsapp_messages;`);
+const A4 = await filas(parteLect("4A"));
+console.log("   ", JSON.stringify(A4));
+ok(A4["tabla whatsapp_lecturas"] === "no" && A4["publicación supabase_realtime"] === "sí" && A4["función is_admin"] === "sí"
+   && A4["migración 20261124120000"] === "no", "4A: estado previo esperado");
+await db.exec(parteLect("4B"));
+ok(true, "4B aplicado");
+try { await db.exec(parteLect("4B")); ok(false, "4B dos veces debería fallar"); }
+catch (e) { ok(/ya está aplicada/.test(e.message), "4B se niega a repetirse"); }
+const C4 = await filas(parteLect("4C"));
+console.log("   ", JSON.stringify(C4));
+ok(C4["tabla whatsapp_lecturas"] === "sí" && C4["RLS activada"] === "sí" && C4["políticas"] === "3"
+   && C4["en supabase_realtime"] === "sí" && C4["anon select"] === "false"
+   && C4["authenticated s/i/u/d"] === "true/true/true/false"
+   && C4["lecturas"] === A4["conversaciones"] && C4["conversaciones"] === A4["conversaciones"]
+   && /^20261124120000 /.test(C4["migración registrada"] || ""), "4C: verificación");
+
+r = await como("miembro", `insert into public.whatsapp_conversations (phone, wa_id) values ('34600999888', '34600999888') returning id`);
+ok(!r.error, "conversación nueva " + (r.error || ""));
+const WN = r.rows[0].id;
+ok((await q(`select count(*)::int n from public.whatsapp_lecturas where conversation_id = '${WN}'`))[0].n === 0,
+   "una conversación nueva no tiene lectura (todo lo entrante sin leer)");
+const upsert = (quien, conv, hasta) => como(quien, `insert into public.whatsapp_lecturas (conversation_id, leido_hasta) values ('${conv}', ${hasta})
+  on conflict (conversation_id) do update set leido_hasta = excluded.leido_hasta returning leido_hasta`);
+r = await upsert("miembro", WN, "now()");
+ok(!r.error && r.rows.length === 1, "un miembro la marca como leída (upsert, alta) " + (r.error || ""));
+r = await upsert("admin", WN, "now() - interval '1 hour'");
+ok(!r.error && r.rows.length === 1, "otro usuario la marca como no leída (upsert, cambio): estado compartido " + (r.error || ""));
+r = await como("miembro", `select round(extract(epoch from now() - leido_hasta) / 60)::int m from public.whatsapp_lecturas where conversation_id = '${WN}'`);
+ok(!r.error && r.rows[0].m === 60, "el miembro ve el cambio del otro usuario");
+r = await upsert("portal", WN, "now()");
+ok(!!r.error, "un cliente del portal no puede escribir lecturas");
+r = await como("portal", `select count(*)::int n from public.whatsapp_lecturas`);
+ok(!r.error && r.rows[0].n === 0, "un cliente del portal no ve lecturas");
+r = await como("anon", `select 1 from public.whatsapp_lecturas`);
+ok(!!r.error, "anon sin acceso");
+r = await como("miembro", `delete from public.whatsapp_lecturas where conversation_id = '${WN}'`);
+ok(!!r.error, "nadie borra lecturas a mano (sin DELETE)");
+await db.exec(`delete from public.whatsapp_conversations where id = '${WN}'`);
+ok((await q(`select count(*)::int n from public.whatsapp_lecturas where conversation_id = '${WN}'`))[0].n === 0,
+   "al borrar la conversación se va su lectura (cascade)");
+for (const l of [`public.agente_listar_conversaciones_whatsapp()`, `public.agente_leer_whatsapp('${W1}')`]) {
+  const a = await rpc("admin", l), m = await rpc("miembro", l);
+  ok(!a.error && !m.error, `con whatsapp_lecturas, ${l.match(/agente_[a-z_]+/)[0]} sigue funcionando ${a.error || m.error || ""}`);
+}
+
 console.log(`\n${total - fallos}/${total} ok${fallos ? `, ${fallos} FALLOS` : ""}`);
 process.exit(fallos ? 1 : 0);

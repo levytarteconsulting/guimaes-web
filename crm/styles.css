@@ -309,7 +309,10 @@ textarea.inp{resize:vertical;min-height:80px;}
 .wa__conv:hover{background:var(--mist);}
 .wa__conv.active{background:var(--accent-soft);}
 .wa__conv__main{flex:1;min-width:0;}
-.wa__conv__name{font-weight:600;font-size:14px;display:flex;justify-content:space-between;gap:8px;}
+.wa__conv__name{font-weight:500;font-size:14px;display:flex;justify-content:space-between;gap:8px;}
+/* Con mensajes sin leer (CRM.waUnread): nombre y último mensaje en negrita. */
+.wa__conv--unread .wa__conv__name{font-weight:700;}
+.wa__conv--unread .wa__conv__last{color:var(--ink);font-weight:600;}
 .wa__conv__time{font-size:11px;color:var(--muted);font-weight:400;flex:none;white-space:nowrap;}
 /* Último mensaje del cliente sin contestar: fecha en negrita, en verde y con
    un punto delante. */
@@ -360,6 +363,7 @@ button.wa-attach[disabled]{opacity:.6;cursor:not-allowed;}
 .wa__tabs button{padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;color:var(--muted);}
 .wa__tabs button:hover{color:var(--ink);background:var(--mist);}
 .wa__tabs button.active{background:var(--accent-soft);color:var(--accent-ink);}
+.wa__tab-count{margin-left:6px;background:var(--accent-2);color:#fff;font-size:10.5px;font-weight:700;min-width:16px;height:16px;border-radius:20px;padding:0 5px;display:inline-grid;place-items:center;vertical-align:1px;}
 .wa__tpl-btn{margin-left:auto!important;display:flex;align-items:center;gap:6px;color:var(--accent)!important;}
 .wa__archive{margin-left:2px;color:var(--muted);padding:6px;border-radius:8px;flex:none;}
 .wa__archive:hover{background:var(--mist-2);color:var(--ink);}
