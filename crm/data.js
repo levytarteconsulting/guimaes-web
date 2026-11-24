@@ -237,17 +237,132 @@
       wa_id: row.wa_id || "",
       owner: row.owner || "",
       archived: !!row.archived,
-      unread: 0, // no persistido en el esquema; solo sube en sesión vía Realtime (ver subscribeWhatsapp)
       last_customer_message_at: row.last_customer_message_at || null, // crudo, para calcular la ventana de 24h en la UI
       updated_at: row.updated_at || null,
       created_at: row.created_at || null,
       messages: []
     };
   }
+  // ---- WhatsApp: no leídas (crm/supabase-whatsapp-lecturas.sql) ----
+  // WA_LECTURAS[conversation_id] = leido_hasta: lo entrante posterior está
+  // sin leer; sin entrada, todo lo entrante. Estado compartido por el
+  // equipo, sincronizado por Realtime (iniciarWhatsappRealtime).
+  // waLecturasOk = false si la tabla no se pudo leer: entonces no se marca
+  // nada como no leído (mejor que todo).
+  var WA_LECTURAS = {};
+  var waLecturasOk = false;
+  // Avisos de cambios en WHATSAPP / WA_LECTURAS para que la UI se repinte
+  // (lista, hilo, ficha de contacto y contador del menú).
+  var waListeners = [];
+  function onWhatsappChange(fn){
+    waListeners.push(fn);
+    return function(){ waListeners = waListeners.filter(function(f){ return f!==fn; }); };
+  }
+  function emitWhatsapp(){ waListeners.slice().forEach(function(fn){ try{ fn(); }catch(e){ if(window.console) console.error(e); } }); }
+  // Milisegundos de un timestamptz de Postgres (recorta los microsegundos,
+  // que no todos los navegadores entienden).
+  function waMs(iso){
+    if(!iso) return 0;
+    var t = Date.parse(String(iso).replace(" ", "T").replace(/(\.\d{3})\d+/, "$1").replace(/([+-]\d{2})$/, "$1:00"));
+    return isNaN(t) ? 0 : t;
+  }
+  function waUnread(conv){
+    if(!waLecturasOk || !conv) return 0;
+    var hasta = waMs(WA_LECTURAS[conv.id]);
+    var n = 0;
+    (conv.messages||[]).forEach(function(m){ if(m.dir==="in" && waMs(m.at) > hasta) n++; });
+    return n;
+  }
+  function waTotalNoLeidos(){
+    return WHATSAPP.reduce(function(a,w){ return a + waUnread(w); }, 0);
+  }
+  async function guardarLectura(client, id, hasta){
+    var prev = WA_LECTURAS[id];
+    WA_LECTURAS[id] = hasta; emitWhatsapp();
+    var res = await client.from("whatsapp_lecturas").upsert({conversation_id: id, leido_hasta: hasta}, {onConflict: "conversation_id"});
+    if(res.error){
+      if(WA_LECTURAS[id]===hasta){ if(prev===undefined) delete WA_LECTURAS[id]; else WA_LECTURAS[id] = prev; emitWhatsapp(); }
+      throw res.error;
+    }
+  }
+  // Leída hasta su último mensaje (hora del servidor, no la del navegador).
+  // No hace nada si no tiene nada sin leer.
+  async function marcarWaLeida(client, id){
+    var w = WHATSAPP.find(function(x){ return x.id===id; });
+    if(!client || !w || waUnread(w)===0) return;
+    var last = w.messages[w.messages.length-1];
+    try{ await guardarLectura(client, id, (last && last.at) || new Date().toISOString()); }
+    catch(e){ if(window.console) console.error("marcarWaLeida:", e); }
+  }
+  // Justo antes del último mensaje entrante: vuelve a contar como no leído.
+  async function marcarWaNoLeida(client, id){
+    var w = WHATSAPP.find(function(x){ return x.id===id; });
+    if(!client || !w || !waLecturasOk) return;
+    var ins = w.messages.filter(function(m){ return m.dir==="in" && m.at; });
+    if(!ins.length) return;
+    await guardarLectura(client, id, new Date(waMs(ins[ins.length-1].at) - 1).toISOString());
+  }
+  async function loadWaLecturas(client){
+    var res = await client.from("whatsapp_lecturas").select("conversation_id, leido_hasta");
+    if(res.error){ waLecturasOk = false; if(window.console) console.error("whatsapp_lecturas:", res.error); return; }
+    (res.data||[]).forEach(function(r){ WA_LECTURAS[r.conversation_id] = r.leido_hasta; });
+    waLecturasOk = true;
+  }
+  // Añade (o sustituye, si ya estaba por id o wa_message_id) un mensaje en
+  // su conversación. Lo usan el envío y Realtime: el mensaje propio puede
+  // llegar por los dos caminos, en cualquier orden.
+  function waAgregarMensaje(convId, msg){
+    var w = WHATSAPP.find(function(x){ return x.id===convId; });
+    if(!w) return false;
+    var i = w.messages.findIndex(function(m){ return (msg.id && m.id===msg.id) || (msg.wa_message_id && m.wa_message_id===msg.wa_message_id); });
+    if(i>=0) w.messages = w.messages.map(function(m,j){ return j===i ? msg : m; });
+    else {
+      w.messages = w.messages.concat([msg]);
+      if(msg.dir==="in" && msg.at) w.last_customer_message_at = msg.at;
+    }
+    emitWhatsapp();
+    return true;
+  }
+  // Una sola suscripción para toda la app (no solo con la pantalla de
+  // WhatsApp abierta): mensajes nuevos y actualizados, y lecturas de otros
+  // usuarios o dispositivos. Un mensaje de una conversación aún no cargada
+  // (nueva) trae la conversación entera.
+  var waCanal = null;
+  function iniciarWhatsappRealtime(client){
+    if(!client || waCanal) return;
+    waCanal = client
+      .channel("crm_whatsapp")
+      .on("postgres_changes", {event:"INSERT", schema:"public", table:"whatsapp_messages"}, function(p){ waAplicarFila(client, p.new, "INSERT"); })
+      .on("postgres_changes", {event:"UPDATE", schema:"public", table:"whatsapp_messages"}, function(p){ waAplicarFila(client, p.new, "UPDATE"); })
+      .on("postgres_changes", {event:"*", schema:"public", table:"whatsapp_lecturas"}, function(p){
+        var r = p.new;
+        if(r && r.conversation_id && r.leido_hasta){ WA_LECTURAS[r.conversation_id] = r.leido_hasta; emitWhatsapp(); }
+      })
+      .subscribe();
+  }
+  function waAplicarFila(client, row, eventType){
+    if(!row || !row.conversation_id) return;
+    var w = WHATSAPP.find(function(x){ return x.id===row.conversation_id; });
+    if(!w){
+      if(eventType==="INSERT") loadWhatsappConversationById(client, row.conversation_id).then(function(c){ if(c) emitWhatsapp(); });
+      return;
+    }
+    var msg = rowToWhatsappMessage(row);
+    if(eventType==="UPDATE"){
+      // Un UPDATE (adjunto pending→stored, delivery_status) nunca añade ni cuenta como nuevo.
+      if(w.messages.some(function(m){ return m.id===msg.id; })){
+        w.messages = w.messages.map(function(m){ return m.id===msg.id ? msg : m; });
+        emitWhatsapp();
+      }
+      return;
+    }
+    waAgregarMensaje(w.id, msg);
+  }
   // Carga las conversaciones + mensajes reales de Supabase y los inyecta en WHATSAPP (una sola vez, al arrancar)
   async function loadWhatsapp(client){
     if(!client) return 0;
     try{
+      await loadWaLecturas(client);
       var convRes = await client.from("whatsapp_conversations").select("*").order("last_customer_message_at",{ascending:false, nullsFirst:false});
       if(convRes.error || !convRes.data || convRes.data.length===0) return 0;
       var convRows = convRes.data;
@@ -287,27 +402,6 @@
       if(!WHATSAPP.some(function(x){return x.id===conv.id;})) WHATSAPP.unshift(conv);
       return conv;
     }catch(e){ if(window.console) console.error("loadWhatsappConversationById:", e); return null; }
-  }
-  // Suscripción Realtime a whatsapp_messages (requiere que la tabla esté
-  // añadida a la publicación "supabase_realtime" en Supabase — Database →
-  // Replication — si no, el canal se conecta pero no llegan eventos).
-  // Escucha INSERT (mensaje nuevo) y UPDATE (p. ej. un adjunto que pasa de
-  // pending a stored, o un delivery_status) — onChange(row, eventType) para
-  // que cada caller decida qué hacer con cada uno; un UPDATE nunca debe
-  // tratarse como si fuera un mensaje nuevo (no hay que añadirlo al final
-  // de la lista ni sumar al contador de no leídos, solo refrescar el que
-  // ya estaba).
-  function subscribeWhatsapp(client, onChange){
-    if(!client) return null;
-    return client
-      .channel("whatsapp_messages_changes")
-      .on("postgres_changes", {event:"INSERT", schema:"public", table:"whatsapp_messages"}, function(payload){
-        onChange(payload.new, "INSERT");
-      })
-      .on("postgres_changes", {event:"UPDATE", schema:"public", table:"whatsapp_messages"}, function(payload){
-        onChange(payload.new, "UPDATE");
-      })
-      .subscribe();
   }
 
   // ---- Documents ----
@@ -2216,8 +2310,10 @@
     cuentaDeContacto:cuentaDeContacto, desvincularCuentaPortal:desvincularCuentaPortal,
     loadSolicitudesEmpresa:loadSolicitudesEmpresa, loadCambiosEmpresa:loadCambiosEmpresa,
     resolverSolicitud:resolverSolicitud, refrescarEmpresa:refrescarEmpresa,
-    loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
+    loadWhatsapp:loadWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
+    onWhatsappChange:onWhatsappChange, emitWhatsapp:emitWhatsapp, waUnread:waUnread, waTotalNoLeidos:waTotalNoLeidos,
+    marcarWaLeida:marcarWaLeida, marcarWaNoLeida:marcarWaNoLeida, waAgregarMensaje:waAgregarMensaje, iniciarWhatsappRealtime:iniciarWhatsappRealtime,
     esNuevo:esNuevo, contarContactosNuevos:contarContactosNuevos, contarEmpresasNuevas:contarEmpresasNuevas, marcarVisto:marcarVisto,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
     savePushSubscription:savePushSubscription, removePushSubscription:removePushSubscription,

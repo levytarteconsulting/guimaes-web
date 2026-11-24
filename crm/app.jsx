@@ -173,13 +173,20 @@ const NAV = [
   {id:"cuentas", label:"Área cliente", icon:"users", badge:()=>CRM.CUENTAS_PENDIENTES.length + CRM.ALTAS_PROVISIONALES.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
   {id:"tareas", label:"Tareas", icon:"task"},
-  {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.WHATSAPP.reduce((a,w)=>a+w.unread,0)},
+  {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.waTotalNoLeidos(), badgeTitle:"Mensajes de WhatsApp sin leer"},
   {id:"inbox", label:"Bandeja de entrada", icon:"mail", badge:()=>noLeidosCache()},
   {id:"instagram", label:"Instagram", icon:"instagram"},
   {id:"config", label:"Configuración", icon:"settings"}
 ];
+// Repinta el componente cuando cambian las conversaciones de WhatsApp o
+// sus lecturas (CRM.onWhatsappChange: Realtime, envíos, marcar leída).
+function useWhatsappVersion(){
+  const [,setV]=uState(0);
+  uEffect(()=>CRM.onWhatsappChange(()=>setV(v=>v+1)),[]);
+}
 function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
   const [drawerOpen,setDrawerOpen]=uState(false);
+  useWhatsappVersion(); // contador de no leídos del menú
   // Asistente (crm/agente.jsx): cajón a la derecha; se mantiene montado al
   // cambiar de vista para no perder la conversación.
   const [asistente,setAsistente]=uState(false);
@@ -1926,6 +1933,7 @@ function ContactDetail({id, nav, toast, user}){
   const c = CRM.contactById[id];
   // "Nuevo": se ve en esta visita y se quita para todos al abrir la ficha.
   const eraNuevo = useMarcarVisto("contactos", id, c);
+  useWhatsappVersion(); // pestaña WhatsApp: mensajes nuevos por Realtime
   const [tab,setTab]=uState("resumen");
   const [showEdit,setShowEdit]=uState(false);
   const [confirmDel,setConfirmDel]=uState(false);
@@ -2074,7 +2082,7 @@ function ContactDetail({id, nav, toast, user}){
           {tab==="tareas" && <div className="card"><div className="card__head"><h3>Tareas</h3><button className="right btn btn--sm btn--subtle" onClick={()=>setShowNewTask(true)}><Icon name="plus" size={14}/>Nueva tarea</button></div><div className="card__body" style={{paddingTop:6}}>{tasks.length? tasks.map(t=><TaskRow key={t.id} t={t} toast={toast} onToggle={()=>toggleTask(t)} onEdit={()=>setEditingTask(t)} onDelete={()=>deleteTask(t)}/>) : <Empty icon="task" title="Sin tareas"/>}</div></div>}
           {tab==="whatsapp" && (
             !c.phone ? <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Hace falta un teléfono" sub="Añade un número de teléfono a la ficha de este contacto para poder usar WhatsApp."/></div></div>
-            : wa.length ? <div className="card wa-thread-panel"><WaThread conv={wa[0]} toast={toast} onConvChange={updated=>{ Object.assign(wa[0], updated); bump(); }}/></div>
+            : wa.length ? <div className="card wa-thread-panel"><WaThread conv={wa[0]} toast={toast} onConvChange={updated=>{ Object.assign(wa[0], updated); CRM.emitWhatsapp(); }}/></div>
             : <div className="card"><div className="card__body"><Empty icon="whatsapp" title="Sin conversación de WhatsApp" sub="Todavía no le has escrito a este contacto por WhatsApp." action={<button className="btn btn--sm btn--primary" onClick={()=>setShowStartWa(true)}><Icon name="whatsapp" size={15}/>Iniciar conversación</button>}/></div></div>
           )}
           {tab==="correos" && (isLead
@@ -2973,16 +2981,14 @@ function WaMessageContent({m, toast}){
 // Hilo de WhatsApp reutilizable (mensajes + composer + ventana de 24h +
 // plantillas). Lo usan tanto la vista general de WhatsApp, con la conversación
 // activa de la lista, como la pestaña "WhatsApp" de la ficha de contacto, de
-// forma standalone. La lista de conversaciones (filtro, selección, no
-// leídos) es responsabilidad de cada caller — este componente solo conoce la
-// conversación concreta que le pasan (nunca null).
-// `live`: si es true (por defecto), se suscribe él mismo a los mensajes
-// entrantes por Realtime. Pásalo a false cuando el caller ya tiene su propia
-// suscripción para toda la lista (la vista general de WhatsApp), para no
-// procesar el mismo mensaje dos veces.
+// forma standalone. La lista de conversaciones (filtro, selección) es
+// responsabilidad de cada caller — este componente solo conoce la
+// conversación concreta que le pasan (nunca null), que vive en CRM.WHATSAPP
+// y se actualiza por la suscripción común (CRM.iniciarWhatsappRealtime);
+// el caller se repinta con useWhatsappVersion. Abrirlo la marca como leída.
 // `onBack`: opcional — si se pasa, muestra un botón de volver en la cabecera
 // (solo lo usa la vista general en móvil, para volver a la lista).
-function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true}){
+function WaThread({conv, toast, onConvChange, onViewContact, onBack}){
   const ident = waIdentity(conv);
   const windowOpen = isWaWindowOpen(conv);
   const [txt,setTxt]=uState(""); const [showTpl,setShowTpl]=uState(false); const [sending,setSending]=uState(false);
@@ -3016,7 +3022,8 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
       const saved = res.data && res.data.message;
       const nowIso = new Date().toISOString();
       const msg = saved ? CRM.rowToWhatsappMessage(saved) : {dir:"out", at:nowIso, t:CRM.fmtWaTime(nowIso), body};
-      onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,msg]});
+      // Por el almacén común: Realtime puede traer el mismo mensaje antes o después.
+      if(!CRM.waAgregarMensaje(conv.id, msg)) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,msg]});
       setTxt("");
     }catch(e){
       toast("No se pudo enviar el mensaje: "+(e && e.message ? e.message : String(e)));
@@ -3025,27 +3032,18 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
     }
   };
 
-  // Realtime: mensajes entrantes nuevos de ESTA conversación se añaden al hilo
-  // en caliente y reabren la ventana de 24h (last_customer_message_at).
-  // UPDATE (p. ej. un adjunto que pasa de pending a stored) refresca el
-  // mensaje que ya estaba en el hilo en vez de añadirlo de nuevo — sin
-  // esto, ver un PDF pasar a disponible exigía recargar la página entera.
+  // Los mensajes nuevos llegan por la suscripción común de toda la app
+  // (CRM.iniciarWhatsappRealtime), que actualiza esta misma conversación.
+  // Abrir el hilo la marca como leída para todo el equipo, y también cada
+  // vez que llega o se envía un mensaje con ella abierta — solo si la
+  // pestaña está a la vista (si no, al volver a ella).
+  const lastAt = conv.messages.length ? conv.messages[conv.messages.length-1].at : null;
   uEffect(()=>{
-    if(!live || !Auth.client || !CRM.subscribeWhatsapp) return;
-    const channel = CRM.subscribeWhatsapp(Auth.client, (row, eventType)=>{
-      if(row.conversation_id!==convRef.current.id) return;
-      const prev = convRef.current;
-      if(eventType==="UPDATE"){
-        const msg = CRM.rowToWhatsappMessage(row);
-        onConvChangeRef.current({...prev, messages: prev.messages.map(m=>m.id===msg.id?msg:m)});
-        return;
-      }
-      if(row.direction!=="in") return;
-      const msg = CRM.rowToWhatsappMessage(row);
-      onConvChangeRef.current({...prev, messages:[...prev.messages,msg], last_customer_message_at: row.created_at});
-    });
-    return ()=>{ if(channel) Auth.client.removeChannel(channel); };
-  },[live, conv.id]);
+    const marcar=()=>{ if(document.visibilityState==="visible") CRM.marcarWaLeida(Auth.client, conv.id); };
+    marcar();
+    document.addEventListener("visibilitychange", marcar);
+    return ()=>document.removeEventListener("visibilitychange", marcar);
+  },[conv.id, lastAt]);
 
   return (
     <div className="wa__thread">
@@ -3072,7 +3070,7 @@ function WaThread({conv, toast, onConvChange, onViewContact, onBack, live=true})
           <button className="btn btn--sm btn--primary" style={{flex:"none"}} onClick={()=>setShowTpl(true)}>Enviar plantilla</button>
         </div>
       )}
-      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message]}); }} toast={toast}/>}
+      {showTpl && <TemplatesModal onClose={()=>setShowTpl(false)} conversationId={conv.id} onSent={({message})=>{ if(message && !CRM.waAgregarMensaje(conv.id, message)) onConvChangeRef.current({...convRef.current, messages:[...convRef.current.messages,message]}); }} toast={toast}/>}
       {showLink && <LinkWhatsapp conv={conv} onClose={()=>setShowLink(false)} onSave={linkTo}/>}
     </div>
   );
@@ -3108,7 +3106,10 @@ function LinkWhatsapp({conv, onClose, onSave}){
   </Modal>;
 }
 function WhatsApp({nav, toast, focusId}){
-  const [convs,setConvs]=uState(()=>CRM.WHATSAPP.map(w=>({...w,messages:[...w.messages]})));
+  // Fuente única: CRM.WHATSAPP (+ lecturas), al día por Realtime aunque esta
+  // pantalla no esté abierta; aquí solo se repinta al cambiar.
+  useWhatsappVersion();
+  const convs = CRM.WHATSAPP;
   const [filter,setFilter]=uState("active");
   // Se entra con la lista y ninguna abierta; solo se abre una al pincharla o
   // si llega su id (botón WhatsApp de la ficha de un contacto, "Nueva conversación").
@@ -3117,10 +3118,12 @@ function WhatsApp({nav, toast, focusId}){
   const isMobile = useIsMobile();
   useWaToday(); // vuelve a pintar las fechas del listado al cambiar el día
   const now = new Date();
-  // Más reciente arriba, por el último mensaje de cualquiera de los dos lados
-  // (la consulta ordena por last_customer_message_at, que no ve los nuestros).
+  // Primero las que tienen mensajes sin leer; dentro de cada grupo, la más
+  // reciente arriba, por el último mensaje de cualquiera de los dos lados.
   const lastMs = w=>{ const t=Date.parse(CRM.waLastAt(w)); return isNaN(t) ? 0 : t; };
-  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived).sort((a,b)=>lastMs(b)-lastMs(a));
+  const visible = convs.filter(w=>filter==="active" ? !w.archived : w.archived)
+    .sort((a,b)=>((CRM.waUnread(b)>0)-(CRM.waUnread(a)>0)) || (lastMs(b)-lastMs(a)));
+  const noLeidasEn = archivadas => convs.filter(w=>!!w.archived===archivadas && CRM.waUnread(w)>0).length;
   const conv = convs.find(w=>w.id===active);
   // Maestro-detalle en móvil: en desktop se pintan siempre los dos paneles
   // (como hoy); en móvil solo uno, según haya o no conversación activa. No es
@@ -3129,20 +3132,26 @@ function WhatsApp({nav, toast, focusId}){
   // sigue siendo válido, desktop simplemente vuelve a mostrar los dos paneles.
   const showList = !isMobile || !conv;
   const showThread = !isMobile || !!conv;
-  const activeRef = uRef(active);
-  uEffect(()=>{ activeRef.current = active; },[active]);
   const toggleArchive=async(id,e)=>{
     e.stopPropagation();
     const w=convs.find(x=>x.id===id); if(!w) return;
     const newVal=!w.archived;
     try{
       await CRM.setArchived(Auth.client, id, newVal);
-      setConvs(cs=>cs.map(x=>x.id===id?{...x,archived:newVal}:x));
+      CRM.emitWhatsapp();
       toast(newVal?"Conversación archivada":"Conversación restaurada");
       if(active===id) setActive(null);
     }catch(e){
       toast("No se pudo "+(newVal?"archivar":"restaurar")+" la conversación: "+(e && e.message ? e.message : String(e)));
     }
+  };
+  // Vuelve a contar el último mensaje entrante como no leído, para todo el
+  // equipo. Si estaba abierta se cierra: abierta se marcaría leída otra vez.
+  const marcarNoLeida=async(id,e)=>{
+    e.stopPropagation();
+    if(active===id){ setActive(null); nav("whatsapp",null); }
+    try{ await CRM.marcarWaNoLeida(Auth.client, id); }
+    catch(err){ toast("No se pudo marcar como no leída: "+(err && err.message ? err.message : String(err))); }
   };
   uEffect(()=>{
     if(!visible.find(w=>w.id===active)) setActive(null);
@@ -3159,35 +3168,12 @@ function WhatsApp({nav, toast, focusId}){
     (async ()=>{
       const conv = await CRM.loadWhatsappConversationById(Auth.client, focusId);
       if(!conv) return;
-      setConvs(cs=>[{...conv, messages:[...conv.messages]}, ...cs]);
+      CRM.emitWhatsapp();
       setFilter(conv.archived?"archived":"active");
       setActive(conv.id);
     })();
   },[focusId]);
-  // Realtime: mensajes entrantes nuevos se añaden a la conversación que les
-  // corresponde (para la vista previa en la lista). Si es la conversación
-  // abierta, <WaThread> ya se encarga de sí mismo (ver prop live=false más
-  // abajo), pero igualmente actualizamos aquí su vista previa/hora en la
-  // lista; solo el contador de no leídos distingue abierta vs. no abierta.
-  // UPDATE (adjunto pending→stored, delivery_status...) solo refresca el
-  // mensaje ya presente — nunca cuenta como no leído ni mueve la fecha.
-  uEffect(()=>{
-    if(!Auth.client || !CRM.subscribeWhatsapp) return;
-    const channel = CRM.subscribeWhatsapp(Auth.client, (row, eventType)=>{
-      const msg = CRM.rowToWhatsappMessage(row);
-      setConvs(cs=>{
-        const idx = cs.findIndex(w=>w.id===row.conversation_id);
-        if(idx===-1) return cs; // conversación nueva no cargada aún: aparecerá al recargar
-        if(eventType==="UPDATE"){
-          return cs.map((w,i)=> i!==idx ? w : {...w, messages: w.messages.map(m=>m.id===msg.id?msg:m)});
-        }
-        if(row.direction!=="in") return cs; // los salientes ya se añaden al enviar
-        const isOpen = activeRef.current===row.conversation_id;
-        return cs.map((w,i)=> i!==idx ? w : {...w, messages:[...w.messages,msg], last_customer_message_at: row.created_at, unread: isOpen ? w.unread : w.unread+1});
-      });
-    });
-    return ()=>{ if(channel) Auth.client.removeChannel(channel); };
-  },[]);
+  const nActivas = noLeidasEn(false), nArchivadas = noLeidasEn(true);
   return (
     <div className="wa">
       {showList && <div className="wa__list">
@@ -3195,25 +3181,28 @@ function WhatsApp({nav, toast, focusId}){
           <button className="btn btn--sm btn--primary" onClick={()=>setShowStart(true)}><Icon name="plus" size={15}/>Nueva conversación</button>
         </div>
         <div className="wa__tabs">
-          <button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>Activas</button>
-          <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas</button>
+          <button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>Activas{nActivas>0 && <span className="wa__tab-count" title="Conversaciones con mensajes sin leer">{nActivas}</span>}</button>
+          <button className={filter==="archived"?"active":""} onClick={()=>setFilter("archived")}>Archivadas{nArchivadas>0 && <span className="wa__tab-count" title="Conversaciones con mensajes sin leer">{nArchivadas}</span>}</button>
         </div>
         {visible.map(w=>{ const ident=waIdentity(w); const last=w.messages[w.messages.length-1];
+          const unread = CRM.waUnread(w);
+          const tieneEntrantes = w.messages.some(m=>m.dir==="in");
           // Último mensaje del cliente sin contestar: fecha destacada con un
           // punto. Si el último es nuestro, la fecha normal.
           const pending = !!last && last.dir==="in";
           const time = <span className={"wa__conv__time"+(pending?" wa__conv__time--pending":"")} title={pending?"Último mensaje del cliente, sin contestar":undefined}>{CRM.fmtWaListDate(CRM.waLastAt(w), now)}</span>;
-          return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")} onClick={()=>{setActive(w.id);nav("whatsapp",w.id);setConvs(cs=>cs.map(x=>x.id===w.id?{...x,unread:0}:x));}}>
+          return <div key={w.id} className={"wa__conv"+(active===w.id?" active":"")+(unread>0?" wa__conv--unread":"")} onClick={()=>{setActive(w.id);nav("whatsapp",w.id);}}>
             <WaAvatar ident={ident}/>
             <div className="wa__conv__main"><div className="wa__conv__name"><span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ident.name}{ident.company && <span className="muted" style={{fontWeight:400,fontSize:12}}> · {ident.company}</span>}</span>{time}</div><div className="wa__conv__last">{last?(last.dir==="out"?"Tú: ":"")+last.body:"—"}</div></div>
-            {w.unread>0 && <span className="wa__unread">{w.unread}</span>}
+            {unread>0 && <span className="wa__unread" title={unread===1?"1 mensaje sin leer":unread+" mensajes sin leer"}>{unread}</span>}
+            {unread===0 && tieneEntrantes && <button className="wa__archive" title="Marcar como no leída" aria-label="Marcar como no leída" onClick={e=>marcarNoLeida(w.id,e)}><Icon name="mail" size={15}/></button>}
             <button className="wa__archive" title={w.archived?"Restaurar":"Archivar"} onClick={e=>toggleArchive(w.id,e)}><Icon name={w.archived?"refresh":"archive"} size={15}/></button>
           </div>;
         })}
         {visible.length===0 && <div className="muted" style={{padding:"24px 16px",fontSize:13,textAlign:"center"}}>{filter==="active"?"Sin conversaciones activas.":"No hay conversaciones archivadas."}</div>}
       </div>}
-      {showThread && (conv ? <WaThread conv={conv} toast={toast} live={false}
-        onConvChange={updated=>setConvs(cs=>cs.map(w=>w.id===updated.id?updated:w))}
+      {showThread && (conv ? <WaThread conv={conv} toast={toast}
+        onConvChange={updated=>{ Object.assign(conv, updated); CRM.emitWhatsapp(); }}
         onViewContact={conv.contact?()=>nav("contact",conv.contact):undefined}
         onBack={isMobile?()=>{setActive(null);nav("whatsapp",null);}:undefined}/>
       : <div className="wa__thread"><div style={{margin:"auto"}}>{visible.length
@@ -3889,6 +3878,7 @@ function App(){
           if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
           if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
           if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client);
+          CRM.iniciarWhatsappRealtime(Auth.client);
           if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client);
           if(mounted) setUser(userFromSession(session));
         }
@@ -3901,7 +3891,7 @@ function App(){
               if(CRM.loadEmpresas) await CRM.loadEmpresas(Auth.client);
               if(CRM.loadContactos) await CRM.loadContactos(Auth.client); if(CRM.loadContactoEmpresa) await CRM.loadContactoEmpresa(Auth.client); if(CRM.loadCuentasPendientes) await CRM.loadCuentasPendientes(Auth.client); if(CRM.loadAltasProvisionales) await CRM.loadAltasProvisionales(Auth.client); if(CRM.loadDeals) await CRM.loadDeals(Auth.client); if(CRM.loadTasks) await CRM.loadTasks(Auth.client); if(CRM.loadNotes) await CRM.loadNotes(Auth.client);
               if(CRM.loadWebLeads){ const r = await CRM.loadWebLeads(Auth.client); reportLeadIssues(fireToast, r); }
-              if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
+              if(CRM.loadWhatsapp) await CRM.loadWhatsapp(Auth.client); CRM.iniciarWhatsappRealtime(Auth.client); if(CRM.loadWaTemplates) await CRM.loadWaTemplates(Auth.client); setUser(userFromSession(session));
             })();
           }
           if(event==="SIGNED_OUT"){ setUser(null); }
