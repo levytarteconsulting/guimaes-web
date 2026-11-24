@@ -357,9 +357,12 @@ async function handleIncomingMessage(supabase: any, message: any, senderProfile:
   const conversationId = conversation.id;
 
   const timestampMs = message.timestamp ? Number(message.timestamp) * 1000 : Date.now();
+  // Un mensaje del cliente desarchiva la conversación para que vuelva a
+  // "Activas" en el CRM. Solo aquí (entrantes): los salientes
+  // (whatsapp-send) y los estados de entrega no tocan archived.
   const { error: updErr } = await supabase
     .from("whatsapp_conversations")
-    .update({ last_customer_message_at: new Date(timestampMs).toISOString() })
+    .update({ last_customer_message_at: new Date(timestampMs).toISOString(), archived: false })
     .eq("id", conversationId);
   if (updErr) throw updErr;
 
