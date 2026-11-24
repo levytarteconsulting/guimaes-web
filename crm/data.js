@@ -655,6 +655,9 @@
       auth_user_id: row.auth_user_id || null,
       // Alta del área cliente pendiente de validar (crm/supabase-portal-fase33.sql).
       provisional_at: row.provisional_at || null,
+      // null = "Nuevo": nadie ha abierto aún la ficha (crm/supabase-visto.sql).
+      // Los leads sin convertir ("lead-<uuid>") no tienen fila: undefined.
+      visto_at: row.visto_at===undefined ? undefined : (row.visto_at || null),
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -734,6 +737,7 @@
       province: row.province || "",
       provisional_at: row.provisional_at || null,
       archived_at: row.archived_at || null,
+      visto_at: row.visto_at===undefined ? undefined : (row.visto_at || null), // null = "Nuevo" (crm/supabase-visto.sql)
       created: (row.created_at||"").toString().slice(0,10)
     };
   }
@@ -812,6 +816,23 @@
     var linkedIds = contactsForEmpresa(id).map(function(c){return c.id;});
     await refreshContactsCompany(client, linkedIds);
     return e;
+  }
+  // Marca "Nuevo" (crm/supabase-visto.sql): estado compartido, se quita la
+  // primera vez que alguien abre la ficha.
+  function esNuevo(x){ return !!x && x.visto_at===null; }
+  function contarContactosNuevos(){ return CONTACTS.filter(esNuevo).length; }
+  function contarEmpresasNuevas(){ return EMPRESAS.filter(function(e){ return !e.archived_at && esNuevo(e); }).length; }
+  // tabla: "contactos" | "empresas". Solo si sigue sin ver; un fallo no
+  // bloquea la ficha (se reintentará la próxima vez que se abra).
+  async function marcarVisto(client, tabla, id){
+    var x = tabla==="contactos" ? contactById[id] : empresaById[id];
+    if(!client || !esNuevo(x)) return;
+    var ahora = new Date().toISOString();
+    try{
+      var res = await client.from(tabla).update({visto_at: ahora}).eq("id", id).is("visto_at", null).select("visto_at");
+      if(res.error) throw res.error;
+      x.visto_at = (res.data && res.data[0] && res.data[0].visto_at) || ahora; // si otro ya la abrió, 0 filas: también vista
+    }catch(e){ if(window.console) console.error("marcarVisto:", e); }
   }
   function rowToContactoEmpresa(row){
     return { id: row.id, contact_id: row.contact_id, empresa_id: row.empresa_id, principal: !!row.principal, created_at: row.created_at || "" };
@@ -2197,6 +2218,7 @@
     resolverSolicitud:resolverSolicitud, refrescarEmpresa:refrescarEmpresa,
     loadWhatsapp:loadWhatsapp, subscribeWhatsapp:subscribeWhatsapp, rowToWhatsappMessage:rowToWhatsappMessage, loadWaTemplates:loadWaTemplates,
     loadWhatsappConversationById:loadWhatsappConversationById,
+    esNuevo:esNuevo, contarContactosNuevos:contarContactosNuevos, contarEmpresasNuevas:contarEmpresasNuevas, marcarVisto:marcarVisto,
     waExtractBodyText:waExtractBodyText, waAnalyzeBodyVariables:waAnalyzeBodyVariables, waTemplateSendIssue:waTemplateSendIssue,
     savePushSubscription:savePushSubscription, removePushSubscription:removePushSubscription,
     MAILBOX:MAILBOX

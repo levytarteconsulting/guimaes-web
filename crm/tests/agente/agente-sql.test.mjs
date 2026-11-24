@@ -405,5 +405,60 @@ ok((await q(`select public.agente_retencion(90) n`))[0].n === 0, "retención: ar
 await envejecer2(convArch, 91);
 ok((await q(`select public.agente_retencion(90) n`))[0].n === 1, "retención: archivada de 91 días se borra");
 
+// ---------------------------------------------------------------- visto_at (crm/supabase-visto.sql)
+console.log("Visto (supabase-visto.sql):");
+const migVisto = fs.readFileSync(new URL("../../supabase-visto.sql", import.meta.url), "utf8");
+const parteVisto = (id) => {
+  const m = migVisto.match(new RegExp(`-- ${id} [\\s\\S]*?(?=\\n-- =+\\n-- 3[A-Z] |$)`));
+  if (!m) throw new Error("sin parte " + id);
+  return m[0];
+};
+// Los triggers de updated_at existen en producción (esquema-base.sql no los trae).
+await db.exec(`
+  update public.contactos set updated_at = now() - interval '10 days';
+  update public.empresas set updated_at = now() - interval '10 days';
+  create trigger contactos_set_updated_at before update on public.contactos for each row execute function public.set_updated_at();
+  create trigger empresas_set_updated_at before update on public.empresas for each row execute function public.set_updated_at();
+`);
+const edadUpd = async (t, id) => (await q(`select extract(day from now() - updated_at)::int d from public.${t} where id = '${id}'`))[0]?.d;
+const A3 = await filas(parteVisto("3A"));
+console.log("   ", JSON.stringify(A3));
+ok(A3["columna contactos.visto_at"] === "no" && A3["columna empresas.visto_at"] === "no"
+   && A3["migración 20261124100000"] === "no", "3A: estado previo esperado");
+await db.exec(parteVisto("3B"));
+ok(true, "3B aplicado");
+try { await db.exec(parteVisto("3B")); ok(false, "3B dos veces debería fallar"); }
+catch (e) { ok(/ya está aplicada/.test(e.message), "3B se niega a repetirse"); }
+const C3 = await filas(parteVisto("3C"));
+console.log("   ", JSON.stringify(C3));
+ok(C3["columnas visto_at (contactos/empresas)"] === "sí/sí" && C3["contactos sin ver"] === "0" && C3["empresas sin ver"] === "0"
+   && C3["filas contactos"] === A3["filas contactos"] && C3["filas empresas"] === A3["filas empresas"]
+   && C3["triggers de updated_at activos"] === "2" && /^20261124100000 /.test(C3["migración registrada"] || ""), "3C: verificación");
+ok(await edadUpd("contactos", C1) === 10 && await edadUpd("empresas", E1) === 10, "3B no cambia updated_at de lo que ya existía");
+
+r = await como("miembro", `insert into public.contactos (full_name, lifecycle, source) values ('Alta nueva', 'new', 'Web') returning id, visto_at`);
+ok(!r.error && r.rows[0].visto_at === null, "un contacto nuevo entra sin ver (Nuevo)");
+const CN = r.rows[0].id;
+r = await como("miembro", `insert into public.empresas (razon_social) values ('Empresa Nueva SL') returning id, visto_at`);
+ok(!r.error && r.rows[0].visto_at === null, "una empresa nueva entra sin ver (Nuevo)");
+const EN = r.rows[0].id;
+r = await como("portal", `update public.contactos set visto_at = now() where id = '${CN}' and visto_at is null returning id`);
+ok(!r.error && r.rows.length === 0, "un cliente del portal no puede marcarlo como visto (RLS)");
+r = await como("miembro", `update public.contactos set visto_at = now() where id = '${CN}' and visto_at is null returning visto_at`);
+ok(!r.error && r.rows.length === 1 && r.rows[0].visto_at !== null, "un miembro lo marca como visto al abrir la ficha");
+r = await como("admin", `update public.contactos set visto_at = now() where id = '${CN}' and visto_at is null returning id`);
+ok(!r.error && r.rows.length === 0, "abrirla otra vez (otro usuario) no cambia nada: estado compartido");
+r = await como("admin", `update public.empresas set visto_at = now() where id = '${EN}' and visto_at is null returning visto_at`);
+ok(!r.error && r.rows.length === 1, "la empresa también se marca como vista");
+for (const l of llamadas) {
+  const nombre = l.match(/agente_[a-z_]+/)[0];
+  const a = await rpc("admin", l), m = await rpc("miembro", l);
+  ok(!a.error && !m.error, `con visto_at, ${nombre} sigue funcionando ${a.error || m.error || ""}`);
+}
+r = (await rpc("admin", `public.agente_ficha_contacto('${CN}')`)).v;
+ok(r && JSON.stringify(r).includes("Alta nueva"), "agente_ficha_contacto lee un contacto creado después de la migración");
+r = (await rpc("admin", `public.agente_buscar('Empresa Nueva')`)).v;
+ok(r.resultados.some(x => x.id === EN), "agente_buscar encuentra la empresa nueva");
+
 console.log(`\n${total - fallos}/${total} ok${fallos ? `, ${fallos} FALLOS` : ""}`);
 process.exit(fallos ? 1 : 0);
