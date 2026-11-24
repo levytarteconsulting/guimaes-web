@@ -1325,19 +1325,37 @@ function EditEmpresa({empresa, onClose, onSave}){
 }
 
 /* ============ CONTACTS ============ */
-function Contacts({nav, toast}){
+// Vista de Contactos (lista / pipeline) recordada por usuario en este
+// navegador: no hay tabla de preferencias en la BD. Sin nada guardado (o si
+// localStorage no está disponible), pipeline.
+const contactosVistaKey = user => "crm.contactos.vista."+String(user && user.email || "").toLowerCase();
+function leerVistaContactos(user){
+  try{ const v = localStorage.getItem(contactosVistaKey(user)); return v==="list"||v==="pipeline" ? v : "pipeline"; }catch(e){ return "pipeline"; }
+}
+function Contacts({nav, toast, user}){
   const [contacts,setContacts]=uState(()=>CRM.CONTACTS.map(c=>({...c})));
   const [q,setQ]=uState(""); const [lc,setLc]=uState("all"); const [sel,setSel]=uState([]); const [showNew,setNew]=uState(false);
-  const [mode,setMode]=uState("list");
+  const [mode,setModeState]=uState(()=>leerVistaContactos(user));
+  const setMode=(m)=>{ setModeState(m); try{ localStorage.setItem(contactosVistaKey(user), m); }catch(e){} };
   const isMobile = useIsMobile();
   const [drag,setDrag]=uState(null); const [over,setOver]=uState(null);
   const list = contacts.filter(c=>(lc==="all"||c.lifecycle===lc) && (q==="" || (c.company+c.full_name+c.email).toLowerCase().includes(q.toLowerCase())));
   const toggle=(id)=>setSel(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const allSel = list.length && list.every(c=>sel.includes(c.id));
-  const moveLifecycle=(id,lifecycle)=>{
+  // Arrastrar en el pipeline: se mueve al momento y se guarda en la BD; si
+  // falla, la tarjeta vuelve a su columna y se avisa.
+  const moveLifecycle=async(id,lifecycle)=>{
     const c=contacts.find(x=>x.id===id); if(!c||c.lifecycle===lifecycle) return;
+    const prev=c.lifecycle;
+    const nombre=c.full_name||c.company||"Contacto";
     setContacts(cs=>cs.map(x=>x.id===id?{...x,lifecycle}:x));
-    toast(c.company+" → "+CRM.lifecycleById[lifecycle].label);
+    try{
+      if(!(await CRM.updateContact(Auth.client, id, {lifecycle}))) throw new Error("el contacto ya no está cargado; recarga la página");
+      toast(nombre+" → "+CRM.lifecycleById[lifecycle].label);
+    }catch(e){
+      setContacts(cs=>cs.map(x=>x.id===id?{...x,lifecycle:prev}:x));
+      toast("No se pudo cambiar la etapa de "+nombre+": "+(e && e.message ? e.message : String(e)));
+    }
   };
   const doDeleteSelected=async()=>{
     if(!window.confirm("¿Eliminar "+sel.length+" contacto(s)? Esta acción no se puede deshacer.")) return;
@@ -3926,7 +3944,7 @@ function App(){
   else if(view.name==="agente") screen=<AgenteVista nav={nav}/>;
   else if(view.name==="empresas") screen=<Empresas nav={nav} toast={fireToast}/>;
   else if(view.name==="empresa") screen=<EmpresaDetail id={view.id} nav={nav} toast={fireToast} user={user} foco={view.extra}/>;
-  else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast}/>;
+  else if(view.name==="contacts") screen=<Contacts nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="contact") screen=<ContactDetail id={view.id} nav={nav} toast={fireToast} user={user}/>;
   else if(view.name==="cuentas") screen=<CuentasPortal nav={nav} toast={fireToast}/>;
   else if(view.name==="pipeline") screen=<Pipeline nav={nav} toast={fireToast}/>;
