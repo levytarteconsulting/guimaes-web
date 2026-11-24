@@ -168,8 +168,8 @@ function PasswordRecovery({onDone}){
 const NAV = [
   {id:"home", label:"Inicio", icon:"home"},
   {id:"agente", label:"Agente IA", icon:"sparkles"},
-  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.contarEmpresasNuevas(), badgeTitle:"Empresas nuevas (nadie ha abierto su ficha)"},
-  {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.contarContactosNuevos(), badgeTitle:"Contactos nuevos (nadie ha abierto su ficha)"},
+  {id:"empresas", label:"Empresas", icon:"building", badge:()=>CRM.contarEmpresasNuevas(), badgeTitle:"Empresas sin abrir (nadie ha abierto su ficha)"},
+  {id:"contacts", label:"Contactos", icon:"contacts", badge:()=>CRM.contarContactosNuevos(), badgeTitle:"Contactos sin abrir (nadie ha abierto su ficha)"},
   {id:"cuentas", label:"Área cliente", icon:"users", badge:()=>CRM.CUENTAS_PENDIENTES.length + CRM.ALTAS_PROVISIONALES.length},
   {id:"pipeline", label:"Pipeline", icon:"pipeline"},
   {id:"tareas", label:"Tareas", icon:"task"},
@@ -1655,9 +1655,9 @@ function EliminarCuentaModal({cuenta, onClose, onDone, toast}){
 // coincidencias por CIF y email, y Confirmar, Fusionar con existente o
 // Rechazar. Todo pasa por portal-cuentas.
 const PendienteBadge = ()=> <Badge label="Pendiente de validar" color="#D9822B"/>;
-// Marca "Nuevo" (crm/supabase-visto.sql): relleno sólido para no confundirla
+// Marca "Sin abrir" (crm/supabase-visto.sql): relleno sólido para no confundirla
 // con la etapa "Nuevo" del ciclo de vida (gris, con fondo suave).
-const NuevoBadge = ()=> <Badge label="Nuevo" color="#16B8A6" solid dot={false}/>;
+const NuevoBadge = ()=> <Badge label="Sin abrir" color="#16B8A6" solid dot={false}/>;
 const altaFila = (t, v)=> <div className="alta-kv__f"><span className="muted">{t}</span><span>{v||"—"}</span></div>;
 function AltaCoincidencias({co, nav}){
   if(!co.empresas.length && !co.contactos.length) return <p className="muted" style={{fontSize:13}}>No hay ninguna empresa validada con ese CIF ni ningún contacto con ese email.</p>;
