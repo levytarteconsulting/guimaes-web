@@ -1,7 +1,10 @@
-// Herramientas del agente (fase 1: solo lectura). Cada una es una RPC de
+// Herramientas del agente (solo lectura). Las del CRM son RPC de
 // crm/supabase-agente.sql: herramienta "x" → public.agente_x, parámetro "y" →
 // argumento "p_y". agente_test.ts comprueba que nombres y parámetros
 // coinciden con las firmas del SQL.
+// Las holded_* van a la Edge Function holded-proxy (consulta "x" de
+// holded_x, con empresa_id y el resto como params); holded-proxy vuelve a
+// validar todo y solo hace GET a una lista cerrada de rutas de Holded.
 //
 // La base de datos ya valida y recorta (límites de filas, textos); aquí se
 // valida otra vez la entrada del modelo contra el esquema antes de llamar a
@@ -11,7 +14,7 @@ import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { ETAPAS, SERVICIOS } from "../_shared/catalogos.ts";
 
 type Propiedad =
-  | { type: "string"; description: string; format?: "uuid" | "fecha"; enum?: string[]; maxLength?: number }
+  | { type: "string"; description: string; format?: "uuid" | "fecha" | "dia"; enum?: string[]; maxLength?: number; minLength?: number }
   | { type: "integer"; description: string; minimum: number; maximum: number }
   | { type: "boolean"; description: string }
   | { type: "array"; description: string; items: { type: "string"; enum: string[] }; maxItems: number };
@@ -27,6 +30,10 @@ const fecha = (description: string): Propiedad => ({
   type: "string", format: "fecha",
   description: `${description} Formato AAAA-MM-DD, o AAAA-MM-DDTHH:MM con zona (+01:00) si importa la hora.`,
 });
+const dia = (description: string): Propiedad => ({
+  type: "string", format: "dia", description: `${description} Formato AAAA-MM-DD.`,
+});
+const empresaHolded = uuid("Id de la empresa en el CRM (de buscar). Tiene que tener Holded conectado.");
 const limite = (porDefecto: number, max: number): Propiedad => ({
   type: "integer", minimum: 1, maximum: max, description: `Máximo de filas (por defecto ${porDefecto}, como mucho ${max}).`,
 });
@@ -134,7 +141,43 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
       desde: fecha("Inicio del periodo."),
       hasta: fecha("Fin del periodo (por defecto, ahora)."),
     }, ["desde"]),
+  // ---------------------------------------------------------------- Holded (holded-proxy)
+  herramienta("holded_facturas",
+    "Holded de una empresa cliente: facturas emitidas (ventas) o recibidas (compras y gastos) de un periodo, con totales " +
+    "(base, impuestos, total y pendiente de cobro o pago) y la lista de documentos. Borradores y anuladas no cuentan en los totales.",
+    {
+      empresa_id: empresaHolded,
+      tipo: { type: "string", enum: ["emitidas", "recibidas"], description: "emitidas = ventas del cliente; recibidas = sus compras y gastos." },
+      desde: dia("Fecha de factura desde (incluida)."),
+      hasta: dia("Fecha de factura hasta (incluida). Como mucho 400 días después de desde."),
+      estado: { type: "string", enum: ["pending", "completed", "partial", "cancelled", "failed", "overdue", "outstanding"],
+                description: "pending = pendiente; completed = cobrada/pagada; partial = cobro parcial; overdue = vencida; outstanding = sin cobrar (pendientes y vencidas); cancelled = anulada." },
+      contacto_id: { type: "string", maxLength: 64, description: "Solo las de este contacto de Holded (id de holded_contactos, no del CRM)." },
+      rectificativas: { type: "boolean", description: "Incluir también las facturas rectificativas, con sus totales aparte." },
+      limite: limite(50, 100),
+    }, ["empresa_id", "tipo", "desde", "hasta"]),
+  herramienta("holded_resumen",
+    "Holded de una empresa cliente: resumen de un periodo calculado con sus facturas: ingresos y gastos (base imponible, netos de " +
+    "rectificativas), resultado e impuestos repercutidos y soportados (aproximación al IVA, no la liquidación).",
+    { empresa_id: empresaHolded, desde: dia("Inicio del periodo."), hasta: dia("Fin del periodo (incluido). Como mucho 400 días.") },
+    ["empresa_id", "desde", "hasta"]),
+  herramienta("holded_contactos",
+    "Holded de una empresa cliente: sus contactos (clientes, proveedores…), buscando por nombre o listando por tipo. " +
+    "Devuelve el id de Holded que usa holded_facturas en contacto_id.",
+    {
+      empresa_id: empresaHolded,
+      nombre: { type: "string", minLength: 2, maxLength: 100, description: "Texto a buscar en el nombre." },
+      tipo: { type: "string", enum: ["client", "supplier", "lead", "debtor", "creditor"],
+              description: "client = cliente; supplier = proveedor; lead = potencial; debtor = deudor; creditor = acreedor." },
+      limite: limite(25, 100),
+    }, ["empresa_id"]),
+  herramienta("holded_tesoreria",
+    "Holded de una empresa cliente: cuentas de tesorería (bancos, caja) con su saldo según Holded.",
+    { empresa_id: empresaHolded }, ["empresa_id"]),
 ];
+
+/** Herramientas que van a holded-proxy (sus resultados no se guardan). */
+export const esHolded = (nombre: string) => nombre.startsWith("holded_");
 
 /** Definiciones para la API de Claude (orden estable: no romper la caché).
  *  "fecha" es un formato propio (lo valida validarEntrada): a la API solo
@@ -145,7 +188,7 @@ export const HERRAMIENTAS_API: Anthropic.Beta.BetaTool[] = HERRAMIENTAS.map((h) 
   input_schema: {
     ...h.input_schema,
     properties: Object.fromEntries(Object.entries(h.input_schema.properties).map(([k, p]) => {
-      if ("format" in p && p.format === "fecha") {
+      if ("format" in p && (p.format === "fecha" || p.format === "dia")) {
         const { format: _f, ...resto } = p;
         return [k, resto];
       }
@@ -155,11 +198,16 @@ export const HERRAMIENTAS_API: Anthropic.Beta.BetaTool[] = HERRAMIENTAS.map((h) 
 }));
 
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RE_DIA = /^\d{4}-\d{2}-\d{2}$/;
 const RE_FECHA = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
-export type Validacion = { ok: true; rpc: string; args: Record<string, unknown> } | { ok: false; error: string };
+export type LlamadaHolded = { consulta: string; empresa_id: string; params: Record<string, unknown> };
+export type Validacion =
+  | { ok: true; rpc: string; args: Record<string, unknown> }
+  | { ok: true; holded: LlamadaHolded }
+  | { ok: false; error: string };
 
-/** Valida la entrada del modelo y la traduce a la llamada RPC. */
+/** Valida la entrada del modelo y la traduce a la llamada RPC (o a holded-proxy). */
 export function validarEntrada(nombre: string, entrada: unknown): Validacion {
   const h = HERRAMIENTAS.find((x) => x.name === nombre);
   if (!h) return { ok: false, error: `No existe la herramienta "${nombre}".` };
@@ -182,9 +230,13 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
       case "string":
         if (typeof v !== "string") return mal("tiene que ser texto");
         if (p.maxLength && v.length > p.maxLength) return mal(`como mucho ${p.maxLength} caracteres`);
+        if (p.minLength && v.trim().length < p.minLength) return mal(`al menos ${p.minLength} caracteres`);
         if (p.format === "uuid" && !RE_UUID.test(v)) return mal("tiene que ser un id (uuid)");
         if (p.format === "fecha" && (!RE_FECHA.test(v) || Number.isNaN(Date.parse(v.replace(" ", "T"))))) {
           return mal("fecha no válida (AAAA-MM-DD)");
+        }
+        if (p.format === "dia" && (!RE_DIA.test(v) || Number.isNaN(Date.parse(v)) || new Date(Date.parse(v)).toISOString().slice(0, 10) !== v)) {
+          return mal("fecha no válida (AAAA-MM-DD, sin hora)");
         }
         if (p.enum && !p.enum.includes(v)) return mal(`valores válidos: ${p.enum.join(", ")}`);
         break;
@@ -200,7 +252,11 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
         if (v.some((x) => typeof x !== "string" || !p.items.enum.includes(x))) return mal(`valores válidos: ${p.items.enum.join(", ")}`);
         break;
     }
-    args[`p_${k}`] = v;
+    args[k] = v;
   }
-  return { ok: true, rpc: `agente_${h.name}`, args };
+  if (esHolded(h.name)) {
+    const { empresa_id, ...params } = args;
+    return { ok: true, holded: { consulta: h.name.slice("holded_".length), empresa_id: String(empresa_id).toLowerCase(), params } };
+  }
+  return { ok: true, rpc: `agente_${h.name}`, args: Object.fromEntries(Object.entries(args).map(([k, v]) => [`p_${k}`, v])) };
 }

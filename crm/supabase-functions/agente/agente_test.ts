@@ -6,11 +6,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import fs from "node:fs";
 import {
-  createHandler, historialDe, inicioDiaMadrid, MAX_PREGUNTAS_CONVERSACION, MAX_RESULTADO, MAX_VUELTAS,
+  createHandler, historialDe, SIN_GUARDAR_HOLDED, inicioDiaMadrid, MAX_PREGUNTAS_CONVERSACION, MAX_RESULTADO, MAX_VUELTAS,
   MODELO_POR_DEFECTO, serializarResultado, TOPE_DIARIO_POR_DEFECTO,
 } from "./agente.ts";
-import type { Db, MensajeGuardado, Modelo, NuevaLlamada, NuevoMensaje, ParamsModelo, StreamModelo } from "./agente.ts";
-import { HERRAMIENTAS, HERRAMIENTAS_API, validarEntrada } from "./herramientas.ts";
+import type { Db, RespuestaHolded, MensajeGuardado, Modelo, NuevaLlamada, NuevoMensaje, ParamsModelo, StreamModelo } from "./agente.ts";
+import { esHolded, HERRAMIENTAS, HERRAMIENTAS_API, type LlamadaHolded, validarEntrada } from "./herramientas.ts";
+import { ESTADOS, TIPOS, TIPOS_CONTACTO, validar as validarProxy } from "../holded-proxy/consultas.ts";
 import { ETAPAS, SERVICIOS } from "../_shared/catalogos.ts";
 
 const UID = "11111111-1111-1111-1111-111111111111";
@@ -54,6 +55,9 @@ class FakeDb implements Db {
   async guardarLlamadas(l: NuevaLlamada[]) { this.llamadas.push(...l); }
   async rpc(nombre: string, args: Record<string, unknown>) { this.rpcs.push({ nombre, args }); return this.rpcResponde(nombre, args); }
   rpcResponde(nombre: string, args: Record<string, unknown>) { return this.rpcRespuesta(nombre, args); }
+  holdeds: LlamadaHolded[] = [];
+  holdedRespuesta: (l: LlamadaHolded) => Promise<RespuestaHolded> = async () => ({ ok: true, datos: { totales: { EUR: 1 } } });
+  async holded(l: LlamadaHolded) { this.holdeds.push(structuredClone(l)); return this.holdedRespuesta(l); }
 }
 
 // ---------------------------------------------------------------- Claude simulado
@@ -292,7 +296,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 12);
+  assert.equal(params.tools!.length, 16);   // 12 del CRM + 4 de Holded
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -549,8 +553,9 @@ test("las herramientas coinciden con las firmas de las RPC de crm/supabase-agent
     firmas.set(m[1], m[2].split(",").map((a) => a.trim().split(/\s+/)[0]).filter(Boolean));
   }
   assert.equal(firmas.size, 12);
-  assert.deepEqual([...firmas.keys()].sort(), HERRAMIENTAS.map((h) => `agente_${h.name}`).sort());
-  for (const h of HERRAMIENTAS) {
+  const delCrm = HERRAMIENTAS.filter((h) => !esHolded(h.name));
+  assert.deepEqual([...firmas.keys()].sort(), delCrm.map((h) => `agente_${h.name}`).sort());
+  for (const h of delCrm) {
     assert.deepEqual(Object.keys(h.input_schema.properties).map((k) => `p_${k}`).sort(), [...firmas.get(`agente_${h.name}`)!].sort(), h.name);
   }
 });
@@ -573,4 +578,119 @@ test("index.ts no usa la service role", () => {
     .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
   assert.doesNotMatch(index, /SERVICE_ROLE|service_role|serviceKey/i);
   assert.match(index, /SUPABASE_ANON_KEY/);
+});
+
+// ================================================================= Holded
+const E2 = "e2000000-0000-0000-0000-000000000002";
+const DATOS_HOLDED = { totales_por_moneda: { EUR: { documentos: 3, base: 1234.56 } }, documentos: [{ contacto: "Cliente Inventado" }] };
+
+test("Holded: las herramientas holded_* coinciden con lo que acepta holded-proxy", () => {
+  const hs = HERRAMIENTAS.filter((h) => esHolded(h.name));
+  assert.deepEqual(hs.map((h) => h.name.slice(7)).sort(), [...TIPOS].sort());
+  const ejemplo: Record<string, unknown> = { tipo: "emitidas", desde: "2026-01-01", hasta: "2026-03-31", estado: "overdue",
+    contacto_id: "abc123", rectificativas: true, limite: 10, nombre: "Proveedor" };
+  for (const h of hs) {
+    assert.ok(h.input_schema.required.includes("empresa_id"), h.name);
+    const props = Object.keys(h.input_schema.properties).filter((k) => k !== "empresa_id");
+    const params = Object.fromEntries(props.map((k) => [k, h.name === "holded_contactos" && k === "tipo" ? "supplier" : ejemplo[k]]));
+    assert.deepEqual(validarProxy(h.name.slice(7), params), { ok: true, params }, h.name);
+    const v = validarEntrada(h.name, { empresa_id: E1, ...params });
+    assert.deepEqual(v, { ok: true, holded: { consulta: h.name.slice(7), empresa_id: E1, params } });
+  }
+  const f = hs.find((h) => h.name === "holded_facturas")!.input_schema.properties;
+  assert.deepEqual((f.estado as Msg).enum, [...ESTADOS]);
+  assert.deepEqual((hs.find((h) => h.name === "holded_contactos")!.input_schema.properties.tipo as Msg).enum, [...TIPOS_CONTACTO]);
+  assert.equal(JSON.stringify(HERRAMIENTAS_API).includes('"dia"'), false);
+  assert.equal(validarEntrada("holded_resumen", { empresa_id: E1, desde: "2026-01-01T10:00", hasta: "2026-02-01" }).ok, false);
+  assert.equal(validarEntrada("holded_resumen", { empresa_id: E1, desde: "2026-02-30", hasta: "2026-03-01" }).ok, false);
+  assert.equal(validarEntrada("holded_tesoreria", {}).ok, false);
+});
+
+test("Holded: el modelo recibe los datos, pero en el historial guardado queda el marcador", async () => {
+  const u1 = usar("holded_resumen", { empresa_id: E1, desde: "2026-01-01", hasta: "2026-03-31" });
+  const u2 = usar("buscar", { q: "Muñoz" });
+  const modelo = new FakeModelo([respuesta([u1, u2], "tool_use"), fin("Ingresos: 1.234,56 €.")]);
+  const db = new FakeDb();
+  db.holdedRespuesta = async () => ({ ok: true, datos: DATOS_HOLDED, desde_cache: false, truncado: false });
+  const { h } = montar({ db, modelo });
+  const ev = await eventos(await h(peticion({ pregunta: "¿cómo va el trimestre?" })));
+  assert.equal(finDe(ev).motivo, "fin");
+  assert.deepEqual(db.holdeds, [{ consulta: "resumen", empresa_id: E1, params: { desde: "2026-01-01", hasta: "2026-03-31" } }]);
+  assert.equal(db.rpcs.length, 1);
+
+  // En la respuesta en curso, el modelo ve los datos reales.
+  const enviados = modelo.llamadas[1].messages.at(-1)!.content as Msg[];
+  assert.deepEqual(JSON.parse(enviados[0].content), { ...DATOS_HOLDED, truncado: false, fuente: "Holded" });
+  // Guardado: marcador para Holded; el resultado del CRM, tal cual.
+  const guardado = db.msgs.find((m) => m.tipo === "herramientas")!.contenido as Msg[];
+  assert.equal(guardado[0].tool_use_id, u1.id);
+  assert.equal(guardado[0].content, SIN_GUARDAR_HOLDED);
+  assert.notEqual(guardado[1].content, SIN_GUARDAR_HOLDED);
+  assert.ok(!JSON.stringify(db.msgs).includes("1234.56") && !JSON.stringify(db.msgs).includes("Cliente Inventado"));
+  // Auditoría de la llamada: sí (herramienta, parámetros, filas, bytes).
+  const l = db.llamadas.find((x) => x.herramienta === "holded_resumen")!;
+  assert.deepEqual([l.es_error, l.parametros], [false, { empresa_id: E1, desde: "2026-01-01", hasta: "2026-03-31" }]);
+  historialValido(db, db.convs[0].id);
+
+  // Pregunta siguiente: el historial que llega al modelo trae el marcador, no los datos.
+  const modelo2 = new FakeModelo([fin("Vuelvo a consultar si hace falta.")]);
+  const { h: h2 } = montar({ db, modelo: modelo2 });
+  await eventos(await h2(peticion({ pregunta: "¿y los gastos?", conversacion_id: db.convs[0].id })));
+  const hist = JSON.stringify(modelo2.llamadas[0].messages);
+  assert.ok(hist.includes(SIN_GUARDAR_HOLDED));
+  assert.ok(!hist.includes("1234.56"));
+});
+
+test("Holded: sin conexión, cupo o error → tool_result de error que prohíbe suponer datos", async () => {
+  for (const r of [
+    { ok: false as const, codigo: "sin_conexion", mensaje: "Esta empresa no tiene Holded conectado en el CRM." },
+    { ok: false as const, codigo: "cupo", mensaje: "Se ha llegado al tope de llamadas a Holded de este mes para esta empresa (150 de 150)." },
+  ]) {
+    const u = usar("holded_tesoreria", { empresa_id: E2 });
+    const modelo = new FakeModelo([respuesta([u], "tool_use"), fin("No tiene Holded.")]);
+    const db = new FakeDb();
+    db.holdedRespuesta = async () => r;
+    const { h } = montar({ db, modelo });
+    await eventos(await h(peticion({ pregunta: "saldo del banco" })));
+    const res = (modelo.llamadas[1].messages.at(-1)!.content as Msg[])[0];
+    assert.equal(res.is_error, true);
+    assert.ok(res.content.startsWith(r.mensaje));
+    assert.match(res.content, /no los supongas/);
+    assert.equal(db.llamadas[0].es_error, true);
+    // Los errores no traen datos de Holded: se guardan tal cual.
+    assert.equal((db.msgs.find((m) => m.tipo === "herramientas")!.contenido as Msg[])[0].content, res.content);
+  }
+});
+
+test("Holded: entrada no válida no llega a holded-proxy; 400 de holded-proxy se le pasa al modelo", async () => {
+  const u1 = usar("holded_facturas", { empresa_id: E1, tipo: "todas", desde: "2026-01-01", hasta: "2026-01-31" });
+  const u2 = usar("holded_facturas", { empresa_id: E1, tipo: "emitidas", desde: "2026-01-01", hasta: "2026-01-31" });
+  const modelo = new FakeModelo([respuesta([u1, u2], "tool_use"), fin()]);
+  const db = new FakeDb();
+  db.holdedRespuesta = async () => { throw { code: "22023", message: "El periodo no puede pasar de 400 días." }; };
+  const { h } = montar({ db, modelo });
+  await eventos(await h(peticion({ pregunta: "facturas" })));
+  assert.equal(db.holdeds.length, 1);
+  const res = modelo.llamadas[1].messages.at(-1)!.content as Msg[];
+  assert.match(res[0].content, /valores válidos: emitidas, recibidas/);
+  assert.equal(res[1].content, "El periodo no puede pasar de 400 días.");
+});
+
+test("Holded: holded-proxy tiene más plazo que las RPC (45 s), y se corta si no responde", async () => {
+  const u = usar("holded_resumen", { empresa_id: E1, desde: "2026-01-01", hasta: "2026-01-31" });
+  const modelo = new FakeModelo([respuesta([u], "tool_use"), fin()]);
+  const db = new FakeDb();
+  db.holdedRespuesta = () => new Promise(() => {});
+  const { h } = montar({ db, modelo, opciones: { holdedMs: 20, herramientaMs: 5 } });
+  const t0 = Date.now();
+  await eventos(await h(peticion({ pregunta: "resumen" })));
+  assert.ok(Date.now() - t0 >= 15);
+  const res = (modelo.llamadas[1].messages.at(-1)!.content as Msg[])[0];
+  assert.match(res.content, /tardado demasiado/);
+});
+
+test("index.ts llama a holded-proxy con el JWT del usuario, nunca con la service role", () => {
+  const index = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(index, /functions\/v1\/holded-proxy/);
+  assert.match(index, /Authorization: `Bearer \$\{jwt\}`/);
 });
