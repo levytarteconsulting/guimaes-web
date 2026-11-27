@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node holded-sql.test.mjs && node holded-consultas.test.mjs"
+    "test": "node holded-sql.test.mjs && node holded-consultas.test.mjs && node holded-acciones.test.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17"

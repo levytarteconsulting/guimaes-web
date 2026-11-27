@@ -78,14 +78,25 @@ function db(jwt: string): Db {
       ok(await c.from("agente_tool_calls").insert(l));
     },
     async holded(llamada) {
-      const res = await fetch(`${url}/functions/v1/holded-proxy`, {
+      // proponer_accion va a holded-acciones (solo crea la propuesta; aprobar
+      // y ejecutar no se pueden pedir desde aquí); el resto, a holded-proxy.
+      const accion = llamada.consulta === "proponer_accion";
+      const { tipo, ...parametros } = llamada.params;
+      const res = await fetch(`${url}/functions/v1/${accion ? "holded-acciones" : "holded-proxy"}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${jwt}`, apikey: anonKey, "Content-Type": "application/json" },
-        body: JSON.stringify(llamada),
+        body: JSON.stringify(accion
+          ? { accion: "proponer", origen: "agente", empresa_id: llamada.empresa_id, tipo, parametros }
+          : llamada),
         signal: AbortSignal.timeout(44_000),
       });
       let cuerpo: Record<string, unknown> = {};
       try { cuerpo = await res.json(); } catch { /* sin JSON */ }
+      if (res.status === 200 && accion) {
+        return cuerpo.ok === true
+          ? { ok: true, datos: { propuesta: cuerpo.propuesta, nota: "Propuesta creada, NO ejecutada: la aprueba o rechaza un administrador en Acciones." } }
+          : { ok: false, codigo: String(cuerpo.codigo ?? ""), mensaje: String(cuerpo.mensaje ?? "No se ha podido preparar la propuesta.") };
+      }
       if (res.status === 200) return cuerpo as RespuestaHolded;
       if (res.status === 400 && typeof cuerpo.error === "string") throw { code: "22023", message: cuerpo.error } satisfies ErrorDb;
       if (res.status === 401 || res.status === 403) throw { code: "42501", message: "holded-proxy" } satisfies ErrorDb;

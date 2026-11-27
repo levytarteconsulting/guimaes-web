@@ -6,6 +6,7 @@ import { MOBILE_BREAKPOINT, useIsMobile, useDocDownload, DocPreviewModal } from 
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
 import { Importador } from "./importador.jsx";
 import { HoldedIntegracion, HoldedFicha } from "./holded.jsx";
+import { Acciones } from "./acciones.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
 
@@ -178,6 +179,7 @@ const NAV = [
   {id:"whatsapp", label:"WhatsApp", icon:"whatsapp", badge:()=>CRM.waTotalNoLeidos(), badgeTitle:"Mensajes de WhatsApp sin leer"},
   {id:"inbox", label:"Bandeja de entrada", icon:"mail", badge:()=>noLeidosCache()},
   {id:"instagram", label:"Instagram", icon:"instagram"},
+  {id:"acciones", label:"Acciones", icon:"list", soloRolAdmin:true},
   {id:"config", label:"Configuración", icon:"settings"}
 ];
 // Repinta el componente cuando cambian las conversaciones de WhatsApp o
@@ -228,7 +230,7 @@ function Shell({user, view, vista, nav, onLogout, children, title, crumb}){
         <div className="sb-brand"><span className="sb-brand__logo">GUIMAES</span><span className="sb-brand__dot"></span></div>
         <div className="sb-tag">CRM interno</div>
         <nav className="sb-nav">
-          {NAV.map(n=>{
+          {NAV.filter(n=>!n.soloRolAdmin || user.role==="admin").map(n=>{
             const b = n.badge && n.badge();
             return <a key={n.id} className={"sb-item"+(view===n.id?" active":"")} onClick={()=>goTo(n.id)}>
               <Icon name={n.icon} size={18}/>{n.label}{b?<span className="sb-item__badge" title={n.badgeTitle}>{b}</span>:null}
@@ -3856,7 +3858,7 @@ function InstallPrompt(){
 //   la URL para el login con Google y para los enlaces de recuperación de
 //   contraseña (#access_token=...). Dos usos del hash a la vez es fuente
 //   garantizada de bugs.
-const ROUTABLE_VIEWS = ["home","agente","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","instagram","config"];
+const ROUTABLE_VIEWS = ["home","agente","contacts","contact","cuentas","pipeline","deal","tareas","whatsapp","inbox","instagram","acciones","config"];
 // Antiguas secciones del menú que ahora son pestañas de Configuración. Se
 // siguen aceptando en la URL (marcadores y el aviso push de portal-subir,
 // que abre /crm?view=documents).
@@ -3977,7 +3979,7 @@ function App(){
   if(booting) return <div className="login" style={{minHeight:"100vh"}}></div>;
   if(recovery) return <><PasswordRecovery onDone={()=>{setRecovery(false); fireToast("Contraseña actualizada");}}/><Toast msg={toast}/></>;
   if(!user) return <><Login onLogin={u=>setUser(u)}/><Toast msg={toast}/></>;
-  const titles={home:["Inicio","Resumen del despacho"],agente:["Agente IA","Consultas sobre el CRM"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],config:["Configuración",""]};
+  const titles={home:["Inicio","Resumen del despacho"],agente:["Agente IA","Consultas sobre el CRM"],empresas:["Empresas","Sociedades de tus contactos"],empresa:["Ficha de empresa",""],contacts:["Contactos","Base de datos de clientes y leads"],contact:["Ficha de contacto",""],cuentas:["Área cliente","Solicitudes de acceso"],pipeline:["Pipeline","Oportunidades por etapa"],deal:["Ficha de oportunidad",""],tareas:["Tareas","Seguimiento del equipo"],whatsapp:["WhatsApp","Conversaciones"],inbox:["Bandeja de entrada",CRM.MAILBOX],instagram:["Instagram","Publicaciones del feed de @guimaes_asesoria"],acciones:["Acciones","Cambios en Holded pendientes de aprobar y en curso"],config:["Configuración",""]};
   const [title,crumb]=titles[view.name]||["",""];
   let screen;
   if(view.name==="home") screen=<Home user={user} nav={nav}/>;
@@ -3993,6 +3995,7 @@ function App(){
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast} NewContact={NewContact}/>;
   else if(view.name==="instagram") screen=<Instagram user={user} toast={fireToast}/>;
+  else if(view.name==="acciones") screen=user.role==="admin" ? <Acciones key={view.id||"acciones"} toast={fireToast} nav={nav} focusId={view.id}/> : <Empty icon="shield" title="Solo para el rol admin"/>;
   else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id} nav={nav} user={user}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp"||view.name==="agente";
   const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
