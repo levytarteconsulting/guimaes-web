@@ -1,4 +1,4 @@
-# Pruebas de Holded (bloque 1: conexiones; bloque 2: consultas del asistente)
+# Pruebas de Holded (conexiones, consultas del asistente y acciones)
 
 Sin tocar producción ni Holded:
 
@@ -26,8 +26,23 @@ Sin tocar producción ni Holded:
   holded-proxy; el modelo recibe los datos pero el historial guarda `[datos de Holded no guardados]`;
   sin conexión o sin cupo → error que prohíbe suponer cifras.
 
+- `holded-acciones.test.mjs` (PGlite): `crm/supabase-holded-acciones.sql` encima de los bloques 1 y 2,
+  con pg_net simulado.
+  - 8A/8B/8C, que 8B se niega sin el secreto en Vault y no se repite.
+  - Propuestas solo por service_role; un documento no puede estar en dos propuestas vivas; política
+    automática con topes; aprobar solo rol admin, con el número si son más de 100; caducidad a las 72 h.
+  - Cupo de acciones (0 por defecto: no se ejecuta nada), reintentos sin gastar cupo, 3 intentos,
+    atascados más de 5 min, pausar, reanudar, cancelar, completar, pg_cron.
+- `../../supabase-functions/holded-acciones/holded-acciones_test.ts` (Deno): lista cerrada (solo GET
+  `/sales-receipts`, GET `/usage` y POST `/sales-receipts/{id}/approve`), un usuario no puede
+  ejecutar, propuesta en días completos con exclusiones y avisos, ritmo de 40/min, Retry-After,
+  pausa por 429 mensual/401/403/402.
+- `crear-tickets-demo.ts`: crea 3 tickets de prueba pendientes en DEMO CLAUDE (lo lanzas tú con
+  `read -s`; ver la cabecera del fichero).
+
 ```sh
 cd crm/tests/holded && npm install && npm test
+cd ../../supabase-functions && deno test --allow-read --no-lock holded-acciones/ holded-proxy/
 cd crm/supabase-functions && deno test --allow-read holded-conexiones/ holded-proxy/ _shared/
 cd crm && node --experimental-strip-types --test supabase-functions/agente/
 ```

@@ -92,7 +92,7 @@ const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const esUuid = (s) => typeof s === "string" && RE_UUID.test(s);
 
 // "crm:empresa/ID" → destino de nav(); null si no es un enlace del CRM válido.
-const VISTA_DE = { empresa: "empresa", contacto: "contact", deal: "deal", whatsapp: "whatsapp" };
+const VISTA_DE = { empresa: "empresa", contacto: "contact", deal: "deal", whatsapp: "whatsapp", accion: "acciones" };
 export function destinoCrm(href) {
   const m = /^crm:([a-z]+)\/([^/?#\s]+)$/.exec(href || "");
   if (!m || !esUuid(m[2])) return null;

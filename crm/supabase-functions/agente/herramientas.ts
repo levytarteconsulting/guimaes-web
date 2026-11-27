@@ -173,10 +173,23 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
     }, ["empresa_id"]),
   herramienta("holded_tesoreria",
     "Holded de una empresa cliente: cuentas de tesorería (bancos, caja) con su saldo según Holded.",
-    { empresa_id: empresaHolded }, ["empresa_id"]),
+    { empresa_id: empresaHolded }, ["empresa_id"]),  // ---------------------------------------------------------------- Holded: acciones (holded-acciones)
+  herramienta("holded_proponer_accion",
+    "PROPONE una acción de escritura en Holded de una empresa cliente para que un administrador la revise y la apruebe en la " +
+    "pantalla Acciones del CRM. NO ejecuta nada: solo prepara la propuesta (resumen, muestra, excluidos y avisos). " +
+    "Por ahora solo aprobar_tickets_venta: aprobar los tickets de venta pendientes, del más antiguo al más reciente, en un " +
+    "rango de fechas cerrado (días completos).",
+    {
+      empresa_id: empresaHolded,
+      tipo: { type: "string", enum: ["aprobar_tickets_venta"], description: "aprobar_tickets_venta = aprobar tickets de venta pendientes (borradores)." },
+      max_documentos: { type: "integer", minimum: 1, maximum: 1000, description: "Máximo de documentos de la propuesta (1 a 1.000)." },
+      desde: dia("Solo tickets con fecha desde este día (incluido)."),
+      hasta: dia("Solo tickets con fecha hasta este día (incluido)."),
+    }, ["empresa_id", "tipo", "max_documentos"]),
 ];
 
-/** Herramientas que van a holded-proxy (sus resultados no se guardan). */
+/** Herramientas que van a holded-proxy o, la de proponer, a holded-acciones
+ *  (sus resultados no se guardan). */
 export const esHolded = (nombre: string) => nombre.startsWith("holded_");
 
 /** Definiciones para la API de Claude (orden estable: no romper la caché).

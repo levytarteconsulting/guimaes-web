@@ -54,6 +54,7 @@ test("enlaces crm: → destino de nav()", () => {
   assert.deepEqual(destinoCrm(`crm:contacto/${ID}`), { name: "contact", id: ID });
   assert.deepEqual(destinoCrm(`crm:deal/${ID}`), { name: "deal", id: ID });
   assert.deepEqual(destinoCrm(`crm:whatsapp/${ID}`), { name: "whatsapp", id: ID });
+  assert.deepEqual(destinoCrm(`crm:accion/${ID}`), { name: "acciones", id: ID });
   assert.deepEqual(destinoCrm(`crm:correo/${ID}`), { name: "inbox", id: null });
   assert.equal(destinoCrm("crm:empresa/no-es-uuid"), null);
   assert.equal(destinoCrm(`crm:config/${ID}`), null);

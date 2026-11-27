@@ -110,3 +110,10 @@ verify_jwt = true
 [functions.holded-proxy]
 entrypoint = "../supabase-functions/holded-proxy/index.ts"
 verify_jwt = true
+
+# Acciones (escritura) en Holded con aprobación humana. verify_jwt = false
+# porque pg_cron llama sin JWT (x-hook-secret); el código exige el secreto
+# o el JWT de un usuario activo del CRM.
+[functions.holded-acciones]
+entrypoint = "../supabase-functions/holded-acciones/index.ts"
+verify_jwt = false

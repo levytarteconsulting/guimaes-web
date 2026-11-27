@@ -296,7 +296,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 16);   // 12 del CRM + 4 de Holded
+  assert.equal(params.tools!.length, 17);   // 12 del CRM + 4 consultas de Holded + proponer acción
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -585,7 +585,7 @@ const E2 = "e2000000-0000-0000-0000-000000000002";
 const DATOS_HOLDED = { totales_por_moneda: { EUR: { documentos: 3, base: 1234.56 } }, documentos: [{ contacto: "Cliente Inventado" }] };
 
 test("Holded: las herramientas holded_* coinciden con lo que acepta holded-proxy", () => {
-  const hs = HERRAMIENTAS.filter((h) => esHolded(h.name));
+  const hs = HERRAMIENTAS.filter((h) => esHolded(h.name) && h.name !== "holded_proponer_accion");
   assert.deepEqual(hs.map((h) => h.name.slice(7)).sort(), [...TIPOS].sort());
   const ejemplo: Record<string, unknown> = { tipo: "emitidas", desde: "2026-01-01", hasta: "2026-03-31", estado: "overdue",
     contacto_id: "abc123", rectificativas: true, limite: 10, nombre: "Proveedor" };
@@ -691,6 +691,21 @@ test("Holded: holded-proxy tiene más plazo que las RPC (45 s), y se corta si no
 
 test("index.ts llama a holded-proxy con el JWT del usuario, nunca con la service role", () => {
   const index = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-  assert.match(index, /functions\/v1\/holded-proxy/);
+  assert.match(index, /"holded-proxy"/);
   assert.match(index, /Authorization: `Bearer \$\{jwt\}`/);
+});
+
+test("Acciones: el asistente solo puede PROPONER (aprobar_tickets_venta) y va a holded-acciones con el JWT", () => {
+  assert.deepEqual(validarEntrada("holded_proponer_accion", { empresa_id: E1, tipo: "aprobar_tickets_venta", max_documentos: 1000, desde: "2026-01-01" }),
+    { ok: true, holded: { consulta: "proponer_accion", empresa_id: E1, params: { tipo: "aprobar_tickets_venta", max_documentos: 1000, desde: "2026-01-01" } } });
+  assert.equal(validarEntrada("holded_proponer_accion", { empresa_id: E1, tipo: "borrar_facturas", max_documentos: 5 }).ok, false);
+  assert.equal(validarEntrada("holded_proponer_accion", { empresa_id: E1, tipo: "aprobar_tickets_venta", max_documentos: 1001 }).ok, false);
+  assert.equal(validarEntrada("holded_proponer_accion", { empresa_id: E1, tipo: "aprobar_tickets_venta" }).ok, false);
+  assert.ok(esHolded("holded_proponer_accion"), "su resultado no se guarda en el historial");
+  const nombres = HERRAMIENTAS.map((h) => h.name).join(" ");
+  assert.doesNotMatch(nombres, /aprobar_accion|ejecutar|cancelar_accion|holded_aprobar/, "no hay herramienta para aprobar o ejecutar");
+  const index = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(index, /functions\/v1\/\$\{accion \? "holded-acciones" : "holded-proxy"\}/);
+  assert.match(index, /accion: "proponer", origen: "agente"/);
+  assert.doesNotMatch(index, /accion: "ejecutar"|HOLDED_ACCIONES_CRON_SECRET|x-hook-secret/);
 });
