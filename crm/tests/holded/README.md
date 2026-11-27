@@ -31,10 +31,23 @@ Sin tocar producción ni Holded:
   - 8A/8B/8C, que 8B se niega sin el secreto en Vault y no se repite.
   - Propuestas solo por service_role; un documento no puede estar en dos propuestas vivas; política
     automática con topes; aprobar solo rol admin, con el número si son más de 100; caducidad a las 72 h.
-  - Cupo de acciones (0 por defecto: no se ejecuta nada), reintentos sin gastar cupo, 3 intentos,
+  - Cupo de acciones (0 por defecto en esta migración; 50 desde la de operaciones), reintentos sin gastar cupo, 3 intentos,
     atascados más de 5 min, pausar, reanudar, cancelar, completar, pg_cron.
-- `../../supabase-functions/holded-acciones/holded-acciones_test.ts` (Deno): lista cerrada (solo GET
-  `/sales-receipts`, GET `/usage` y POST `/sales-receipts/{id}/approve`), un usuario no puede
+- `holded-operaciones.test.mjs` (PGlite): `crm/supabase-holded-operaciones.sql` (9A/9B/9C) encima de
+  la anterior, con una acción de tickets a medias antes de migrar (sigue funcionando después).
+  - Catálogo de 232 operaciones; propuestas genéricas de 1 a 100 peticiones que tienen que casar
+    con la operación; políticas (las de riesgo alto no pueden ser automáticas); CONFIRMAR para
+    aprobar las de riesgo alto; POST atascado o sin respuesta → «desconocido», PUT/DELETE a la cola;
+    aviso de cupo (50 por defecto); purga diaria a los 90 días de cuerpos y estado anterior.
+- `generar-catalogo.py`: genera `holded-acciones/catalogo.json`, `agente/holded-referencia.json` y
+  el catálogo de la migración desde la especificación oficial (`https://api.holded.com/openapi/es.json`,
+  descargada a mano): `python3 generar-catalogo.py <ruta del es.json>`.
+- `../../supabase-functions/holded-acciones/holded-operaciones_test.ts` (Deno): cada una de las 232
+  operaciones se propone (con GET del estado actual si cambia algo) y se ejecuta con la petición
+  exacta; rutas y métodos fuera de la lista rechazados; lotes por ids y por cuerpos; campos
+  obligatorios; aviso de PUT que pierde campos; POST 5xx → desconocido; catálogo = SQL.
+- `../../supabase-functions/holded-acciones/holded-acciones_test.ts` (Deno): lista cerrada (escrituras
+  del catálogo, GET `/sales-receipts`, `/usage` y el GET por id del documento), un usuario no puede
   ejecutar, propuesta en días completos con exclusiones y avisos, ritmo de 40/min, Retry-After,
   pausa por 429 mensual/401/403/402.
 - `crear-tickets-demo.ts`: crea 3 tickets de prueba pendientes en DEMO CLAUDE (lo lanzas tú con

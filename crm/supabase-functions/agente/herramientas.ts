@@ -17,7 +17,8 @@ type Propiedad =
   | { type: "string"; description: string; format?: "uuid" | "fecha" | "dia"; enum?: string[]; maxLength?: number; minLength?: number }
   | { type: "integer"; description: string; minimum: number; maximum: number }
   | { type: "boolean"; description: string }
-  | { type: "array"; description: string; items: { type: "string"; enum: string[] }; maxItems: number };
+  | { type: "array"; description: string; items: { type: "string"; enum: string[] }; maxItems: number }
+  | { type: "object"; description: string; maxBytes: number };
 
 export type Herramienta = {
   name: string;
@@ -174,6 +175,34 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
   herramienta("holded_tesoreria",
     "Holded de una empresa cliente: cuentas de tesorería (bancos, caja) con su saldo según Holded.",
     { empresa_id: empresaHolded }, ["empresa_id"]),  // ---------------------------------------------------------------- Holded: acciones (holded-acciones)
+  herramienta("holded_proponer_operacion",
+    "PROPONE cualquier otra operación de escritura en Holded de una empresa cliente (crear, modificar o borrar contactos, " +
+    "productos, presupuestos, facturas en borrador, gastos…), para que un administrador la revise y la apruebe en Acciones. " +
+    "NO ejecuta nada. Solo operaciones de la lista cerrada de la API v2: antes, consulta holded_documentacion y usa " +
+    "exactamente sus rutas y nombres de campos. Para aprobar tickets de venta usa holded_proponer_accion.",
+    {
+      empresa_id: empresaHolded,
+      metodo: { type: "string", enum: ["POST", "PUT", "PATCH", "DELETE"], description: "Método HTTP de la operación (de holded_documentacion)." },
+      ruta: { type: "string", minLength: 2, maxLength: 300,
+              description: "Ruta de la API v2 sin /api/v2, con los ids reales de Holded: /contacts, /invoices/6b09… " +
+                           "Con lote.ids, pon {id} donde va cada id: /contacts/{id}." },
+      cuerpo: { type: "object", maxBytes: 60_000,
+                description: "Cuerpo JSON exacto de la petición, con los campos de holded_documentacion. Sin cuerpo en DELETE y en las que no lo llevan. " +
+                             "Ojo: PUT reemplaza el documento entero (incluye todos los campos que deban quedarse)." },
+      lote: { type: "object", maxBytes: 60_000,
+              description: "Opcional, para la misma operación sobre varios documentos (como mucho 100): { \"ids\": [ids de Holded] } " +
+                           "(con {id} en la ruta y el mismo cuerpo) o { \"cuerpos\": [un cuerpo por documento] }." },
+      descripcion: { type: "string", minLength: 3, maxLength: 300,
+                     description: "Qué hace, en castellano y con los datos clave, para quien la aprueba: \"Emitir factura en borrador a Cliente X por 500 € + 21 % IVA\"." },
+    }, ["empresa_id", "metodo", "ruta", "descripcion"]),
+  herramienta("holded_documentacion",
+    "Referencia de la API v2 de Holded (de su documentación oficial): temas, operaciones de escritura con su ruta, campos " +
+    "obligatorios, todos los campos y ejemplos, y las lecturas de cada tema. Úsala antes de proponer una operación: no adivines " +
+    "rutas ni nombres de campos. No llama a Holded ni gasta cupo.",
+    {
+      tema: { type: "string", maxLength: 80, description: "Tema (\"Facturas\", \"Contactos\", \"Productos\"…) o palabras a buscar. Sin tema ni operación, lista los temas." },
+      operacion: { type: "string", maxLength: 120, description: "Una operación concreta, por su id (create_invoice) o \"MÉTODO /ruta\" (POST /invoices)." },
+    }),
   herramienta("holded_proponer_accion",
     "PROPONE una acción de escritura en Holded de una empresa cliente para que un administrador la revise y la apruebe en la " +
     "pantalla Acciones del CRM. NO ejecuta nada: solo prepara la propuesta (resumen, muestra, excluidos y avisos). " +
@@ -201,6 +230,7 @@ export const HERRAMIENTAS_API: Anthropic.Beta.BetaTool[] = HERRAMIENTAS.map((h) 
   input_schema: {
     ...h.input_schema,
     properties: Object.fromEntries(Object.entries(h.input_schema.properties).map(([k, p]) => {
+      if (p.type === "object") return [k, { type: "object", description: p.description }];
       if ("format" in p && (p.format === "fecha" || p.format === "dia")) {
         const { format: _f, ...resto } = p;
         return [k, resto];
@@ -218,6 +248,7 @@ export type LlamadaHolded = { consulta: string; empresa_id: string; params: Reco
 export type Validacion =
   | { ok: true; rpc: string; args: Record<string, unknown> }
   | { ok: true; holded: LlamadaHolded }
+  | { ok: true; local: "documentacion"; args: { tema?: string; operacion?: string } }
   | { ok: false; error: string };
 
 /** Valida la entrada del modelo y la traduce a la llamada RPC (o a holded-proxy). */
@@ -260,6 +291,10 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
       case "boolean":
         if (typeof v !== "boolean") return mal("tiene que ser true o false");
         break;
+      case "object":
+        if (typeof v !== "object" || Array.isArray(v)) return mal("tiene que ser un objeto JSON");
+        if (new TextEncoder().encode(JSON.stringify(v)).length > p.maxBytes) return mal(`como mucho ${Math.round(p.maxBytes / 1000)} KB`);
+        break;
       case "array":
         if (!Array.isArray(v) || v.length > p.maxItems) return mal(`tiene que ser una lista de como mucho ${p.maxItems}`);
         if (v.some((x) => typeof x !== "string" || !p.items.enum.includes(x))) return mal(`valores válidos: ${p.items.enum.join(", ")}`);
@@ -267,6 +302,7 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
     }
     args[k] = v;
   }
+  if (h.name === "holded_documentacion") return { ok: true, local: "documentacion", args: args as { tema?: string; operacion?: string } };
   if (esHolded(h.name)) {
     const { empresa_id, ...params } = args;
     return { ok: true, holded: { consulta: h.name.slice("holded_".length), empresa_id: String(empresa_id).toLowerCase(), params } };

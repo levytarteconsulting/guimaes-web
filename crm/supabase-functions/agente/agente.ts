@@ -28,6 +28,7 @@
 
 import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { esHolded, HERRAMIENTAS_API, type LlamadaHolded, validarEntrada } from "./herramientas.ts";
+import { consultarDocumentacion } from "./documentacion.ts";
 import { type AdminResumen, construirSistema } from "./sistema.ts";
 
 export const MODELO_POR_DEFECTO = "claude-sonnet-5-5";
@@ -441,7 +442,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         let espera: ReturnType<typeof setTimeout> | undefined;
         const limiteMs = "holded" in v ? holdedMs : herramientaMs;
         let datos = await Promise.race([
-          "holded" in v ? db.holded(v.holded) : db.rpc(v.rpc, v.args),
+          "holded" in v ? db.holded(v.holded) : "local" in v ? Promise.resolve(consultarDocumentacion(v.args)) : db.rpc(v.rpc, v.args),
           new Promise((_, no) => { espera = setTimeout(() => no({ code: "timeout", message: "tiempo agotado" }), limiteMs); }),
         ]).finally(() => clearTimeout(espera));
         if ("holded" in v) {

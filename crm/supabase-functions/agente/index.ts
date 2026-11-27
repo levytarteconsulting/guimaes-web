@@ -80,12 +80,15 @@ function db(jwt: string): Db {
     async holded(llamada) {
       // proponer_accion va a holded-acciones (solo crea la propuesta; aprobar
       // y ejecutar no se pueden pedir desde aquí); el resto, a holded-proxy.
-      const accion = llamada.consulta === "proponer_accion";
+      const operacion = llamada.consulta === "proponer_operacion";
+      const accion = llamada.consulta === "proponer_accion" || operacion;
       const { tipo, ...parametros } = llamada.params;
       const res = await fetch(`${url}/functions/v1/${accion ? "holded-acciones" : "holded-proxy"}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${jwt}`, apikey: anonKey, "Content-Type": "application/json" },
-        body: JSON.stringify(accion
+        body: JSON.stringify(operacion
+          ? { accion: "proponer_operacion", origen: "agente", empresa_id: llamada.empresa_id, ...llamada.params }
+          : accion
           ? { accion: "proponer", origen: "agente", empresa_id: llamada.empresa_id, tipo, parametros }
           : llamada),
         signal: AbortSignal.timeout(44_000),

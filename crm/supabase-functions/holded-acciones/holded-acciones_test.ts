@@ -87,24 +87,28 @@ function montar(h: ReturnType<typeof holded>, b = base(), extra: Partial<Deps> =
 const sinClave = (x: unknown) => { const s = JSON.stringify(x); assert(!s.includes(CLAVE.slice(4, 20)) && !s.includes(CLAVE.slice(-12)), "aparece la clave"); };
 
 // ================================================================= LISTA CERRADA
-Deno.test("lista cerrada: solo GET /sales-receipts, GET /usage y POST /sales-receipts/{id}/approve", () => {
+Deno.test("lista cerrada: solo las escrituras del catálogo, las lecturas de propuesta y el GET por id del documento", () => {
   let salio = 0;
   const f = fetchAcciones(() => { salio++; return Promise.resolve(new Response("{}")); });
   const no: [string, string][] = [
-    ["POST", "/sales-receipts"], ["PUT", `/sales-receipts/${hex(1)}`], ["PATCH", `/sales-receipts/${hex(1)}`],
-    ["DELETE", `/sales-receipts/${hex(1)}`], ["POST", `/sales-receipts/${hex(1)}/pay`], ["POST", `/sales-receipts/${hex(1)}/send`],
-    ["POST", `/invoices/${hex(1)}/approve`], ["POST", "/invoices/bulk/approve"], ["POST", "/sales-receipts/abc/approve"],
-    ["POST", `/sales-receipts/${hex(1)}/approve/`], ["POST", `/sales-receipts/${hex(1)}/approve?x=1`], ["GET", "/invoices"],
-    ["GET", `/sales-receipts/${hex(1)}`], ["GET", "/contacts"], ["DELETE", "/sales-receipts"], ["HEAD", "/usage"],
+    ["PATCH", `/sales-receipts/${hex(1)}`], ["POST", `/sales-receipts/${hex(1)}/attachments`], ["POST", `/sales-receipts/${hex(1)}/pagar`],
+    ["POST", "/sales-receipts/abc/approve"], ["POST", `/sales-receipts/${hex(1)}/approve/`], ["POST", `/sales-receipts/${hex(1)}/approve?x=1`],
+    ["DELETE", "/sales-receipts"], ["PUT", "/contacts"], ["POST", "/contacts/../account/users"], ["POST", "/contacts/%2e%2e/account/users"], ["POST", "//contacts"], ["POST", "/./contacts"], ["POST", `/contacts/${"AB".repeat(12)}/shipping-addresses`],
+    ["GET", "/invoices"], ["GET", "/contacts"], ["GET", `/contacts/${hex(1)}/attachments`], ["HEAD", "/usage"],
+    ["POST", "/numbering-series/inventado"], ["DELETE", `/crm/funnels/${hex(1)}?reassign_to_funnel_id=abc`], ["OPTIONS", "/contacts"],
   ];
   for (const [m, ruta] of no) assertThrows(() => f(HOLDED_BASE + ruta, { method: m }), Error, "no permitida", `${m} ${ruta}`);
   assertThrows(() => f(`https://evil.example.com/api/v2/sales-receipts/${hex(1)}/approve`, { method: "POST" }), Error, "no permitida");
   assertThrows(() => f(`http://api.holded.com/api/v2/sales-receipts/${hex(1)}/approve`, { method: "POST" }), Error, "no permitida");
+  assertThrows(() => f(`https://api.holded.com/api/v1/sales-receipts/${hex(1)}/approve`, { method: "POST" }), Error, "no permitida");
   assertEquals(salio, 0, "no sale ninguna petición fuera de la lista");
-  f(HOLDED_BASE + "/sales-receipts?limit=1", { method: "GET" });
-  f(HOLDED_BASE + "/usage", { method: "GET" });
-  f(HOLDED_BASE + `/sales-receipts/${hex(1)}/approve`, { method: "POST" });
-  assertEquals(salio, 3);
+  const si: [string, string][] = [
+    ["GET", "/sales-receipts?limit=1"], ["GET", "/usage"], ["POST", `/sales-receipts/${hex(1)}/approve`], ["GET", `/invoices/${hex(1)}`],
+    ["POST", "/contacts"], ["PUT", `/contacts/${hex(1)}`], ["DELETE", `/invoices/${hex(1)}`], ["POST", "/numbering-series/invoice"],
+    ["DELETE", `/crm/funnels/${hex(1)}?reassign_to_funnel_id=${hex(2)}`],
+  ];
+  for (const [m, ruta] of si) f(HOLDED_BASE + ruta, { method: m });
+  assertEquals(salio, si.length);
 });
 
 Deno.test("lista cerrada: aprobarTicket rechaza un id que no es de Holded", async () => {
@@ -119,7 +123,8 @@ Deno.test("lista cerrada: el código solo tiene una escritura y todo fetch va en
   const leerSin = (f: string) => Deno.readTextFileSync(new URL(f, import.meta.url)).split("\n")
     .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*")).join("\n");
   const op = leerSin("./operaciones.ts");
-  assertEquals(op.match(/method: "POST"/g)?.length, 1, "una sola llamada POST");
+  assertEquals(op.match(/method: "POST"/g)?.length, 1, "una sola llamada POST fija (aprobar ticket)");
+  assertEquals(op.match(/method: metodo/g)?.length, 1, "y una genérica, siempre detrás de fetchAcciones");
   assert(!/\b(PUT|PATCH|DELETE)\b/.test(op));
   assertEquals(leerSin("./index.ts").match(/\bfetch\(/g)?.length, 1);
   assertMatch(leerSin("./index.ts"), /fetchAcciones\(\(u, init\) => fetch\(u, init\)\)/);

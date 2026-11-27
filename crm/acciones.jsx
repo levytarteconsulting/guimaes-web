@@ -1,22 +1,28 @@
 import React from "react";
 /* GUIMAES CRM — Acciones en Holded (solo rol admin).
-   Propuestas de escritura en Holded (por ahora: aprobar tickets de venta)
-   que prepara el asistente o el operador. Aquí se revisan (resumen, muestra,
+   Propuestas de escritura en Holded que prepara el asistente o el operador:
+   aprobar tickets de venta, o cualquier operación de la lista cerrada de la
+   API v2 (crear, modificar, borrar…), con la petición exacta y el estado
+   actual de cada documento para comparar. Aquí se revisan (resumen, muestra,
    excluidos y avisos), se aprueban o rechazan y, una vez aprobadas, se sigue
    su ejecución, que hace la Edge Function holded-acciones en segundo plano
    (pg_cron, cada minuto): pausar, reanudar y cancelar. Aprobar más de 100
-   documentos exige escribir el número. También el cupo mensual de acciones
-   por empresa. Ver crm/supabase-holded-acciones.sql. */
+   documentos exige escribir el número; aprobar una de riesgo alto, escribir
+   CONFIRMAR. También el cupo mensual de acciones por empresa y las políticas
+   (aprobación o automática con límites). Ver crm/supabase-holded-acciones.sql
+   y crm/supabase-holded-operaciones.sql. */
 const { useState: aState, useEffect: aEffect, useMemo: aMemo } = React;
 
-const TIPOS = { aprobar_tickets_venta: "Aprobar tickets de venta" };
+const TIPOS = { aprobar_tickets_venta: "Aprobar tickets de venta", operacion: "Operación en Holded" };
+const esOp = (a) => a.tipo === "operacion";
+const titulo = (a) => esOp(a) ? (a.descripcion || (a.resumen || {}).descripcion || "Operación en Holded") : (TIPOS[a.tipo] || a.tipo);
 const ESTADOS = {
   propuesta: ["Propuesta", "var(--warn)"], aprobada: ["Aprobada · en cola", "var(--accent, #2563eb)"],
   en_curso: ["En curso", "var(--accent, #2563eb)"], pausada: ["Pausada", "var(--warn)"],
   completada: ["Completada", "var(--ok, #16a34a)"], cancelada: ["Cancelada", "var(--muted, #6b7280)"],
   rechazada: ["Rechazada", "var(--muted, #6b7280)"],
 };
-const COLUMNAS = "id, created_at, updated_at, empresa_id, tipo, parametros, resumen, avisos, estado, motivo_estado, origen, propuesta_por, aprobada_por, aprobada_at, rechazada_por, cerrada_por, iniciada_at, terminada_at, expira_at, llamadas_lectura, llamadas_escritura";
+const COLUMNAS = "id, created_at, updated_at, empresa_id, tipo, parametros, resumen, avisos, estado, motivo_estado, origen, propuesta_por, aprobada_por, aprobada_at, rechazada_por, cerrada_por, iniciada_at, terminada_at, expira_at, llamadas_lectura, llamadas_escritura, operacion, riesgo, descripcion, purgada_at";
 const fmtFecha = (s) => { try { return new Date(s).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Madrid" }); } catch (e) { return s || ""; } };
 const fmtDia = (s) => { if (!s) return "—"; const [y, m, d] = String(s).split("-"); return d ? `${d}/${m}/${y}` : s; };
 const eur = (n, moneda) => { try { return Number(n).toLocaleString("es-ES", { style: "currency", currency: (moneda && moneda.length === 3) ? moneda : "EUR" }); } catch (e) { return String(n); } };
@@ -36,6 +42,13 @@ async function rpc(fn, args) {
 function Estado({ a }) {
   const [txt, color] = caducada(a) ? ["Caducada", "var(--muted, #6b7280)"] : (ESTADOS[a.estado] || [a.estado, undefined]);
   return <span style={{ fontSize: 12, fontWeight: 600, color, whiteSpace: "nowrap" }}>{txt}</span>;
+}
+
+function Riesgo({ r }) {
+  if (!r) return null;
+  const alto = r === "alto";
+  return <span style={{ fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 4, whiteSpace: "nowrap",
+    color: alto ? "#fff" : "var(--muted, #6b7280)", background: alto ? "var(--danger, #dc2626)" : "var(--line, #e5e7eb)" }}>{alto ? "RIESGO ALTO" : "riesgo normal"}</span>;
 }
 
 function Barra({ p }) {
@@ -79,13 +92,13 @@ export function Acciones({ toast, nav, focusId }) {
     {!lista && !err && <p className="muted" style={{ fontSize: 13 }}>Cargando…</p>}
     {lista && !visibles.length && <p className="muted" style={{ fontSize: 13 }}>{filtro === "abiertas" ? "No hay acciones abiertas." : "Todavía no hay acciones."}</p>}
     {visibles.length > 0 && <div className="card"><div className="tbl-wrap"><table className="tbl"><thead><tr>
-      <th>Creada</th><th>Empresa</th><th>Acción</th><th style={{ textAlign: "right" }}>Documentos</th><th>Fechas</th><th style={{ textAlign: "right" }}>Total</th><th>Estado</th><th>Propuesta por</th></tr></thead><tbody>
+      <th>Creada</th><th>Empresa</th><th>Acción</th><th style={{ textAlign: "right" }}>Documentos</th><th>Fechas / petición</th><th style={{ textAlign: "right" }}>Total</th><th>Estado</th><th>Propuesta por</th></tr></thead><tbody>
       {visibles.map((a) => <tr key={a.id} style={{ cursor: "pointer", background: a.id === sel ? "var(--hover, rgba(0,0,0,.04))" : undefined }} onClick={() => setSel(a.id)}>
         <td className="mono" style={{ fontSize: 12.5 }}>{fmtFecha(a.created_at)}</td>
         <td><b>{nombreEmpresa(a.empresa_id)}</b></td>
-        <td>{TIPOS[a.tipo] || a.tipo}</td>
+        <td style={{ maxWidth: 360 }}>{titulo(a)} {esOp(a) && <Riesgo r={a.riesgo} />}</td>
         <td className="mono" style={{ textAlign: "right" }}>{(a.resumen || {}).documentos ?? "—"}</td>
-        <td className="mono" style={{ fontSize: 12.5 }}>{fmtDia((a.resumen || {}).desde)} – {fmtDia((a.resumen || {}).hasta)}</td>
+        <td className="mono" style={{ fontSize: 12.5 }}>{esOp(a) ? <span className="muted">{(a.resumen || {}).metodo} {(a.resumen || {}).ruta}</span> : <>{fmtDia((a.resumen || {}).desde)} – {fmtDia((a.resumen || {}).hasta)}</>}</td>
         <td className="mono" style={{ textAlign: "right" }}>{(a.resumen || {}).total != null ? eur(a.resumen.total, a.resumen.moneda) : "—"}</td>
         <td><Estado a={a} /></td>
         <td style={{ fontSize: 12.5 }}>{quienPropuso(a)}</td>
@@ -94,13 +107,14 @@ export function Acciones({ toast, nav, focusId }) {
 
     {actual && <Detalle key={actual.id} a={actual} toast={toast} nav={nav} onCambio={cargar} onCerrar={() => setSel(null)} />}
     <Cupos toast={toast} version={version} />
+    <Politicas toast={toast} />
   </div>;
 }
 
 function Detalle({ a, toast, nav, onCambio, onCerrar }) {
   const [extra, setExtra] = aState(null);          // { muestra, excluidos }
   const [prog, setProg] = aState(null);
-  const [modal, setModal] = aState("");            // aprobar | rechazar | cancelar
+  const [modal, setModal] = aState("");            // aprobar | rechazar | cancelar | cupo
   const [busy, setBusy] = aState(false);
   const r = a.resumen || {};
 
@@ -137,10 +151,11 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
 
   return <div className="card" style={{ marginTop: 16 }}><div className="card__body">
     <div className="row" style={{ alignItems: "center", gap: 10, marginBottom: 6 }}>
-      <div style={{ fontWeight: 700, fontFamily: "var(--display)", fontSize: 16 }}>{TIPOS[a.tipo] || a.tipo} · <a style={{ cursor: "pointer" }} onClick={() => nav && nav("empresa", a.empresa_id)}>{nombreEmpresa(a.empresa_id)}</a></div>
-      <Estado a={a} />
+      <div style={{ fontWeight: 700, fontFamily: "var(--display)", fontSize: 16 }}>{titulo(a)} · <a style={{ cursor: "pointer" }} onClick={() => nav && nav("empresa", a.empresa_id)}>{nombreEmpresa(a.empresa_id)}</a></div>
+      <Estado a={a} />{esOp(a) && <Riesgo r={a.riesgo} />}
       <div style={{ flex: 1 }}></div>
       {a.estado === "propuesta" && !caducada(a) && <>
+        {(a.avisos || []).some((x) => /CUPO/.test(x)) && <button className="btn btn--ghost" disabled={busy} onClick={() => setModal("cupo")}>Ampliar cupo…</button>}
         <button className="btn btn--ghost" disabled={busy} onClick={() => setModal("rechazar")}>Rechazar</button>
         <button className="btn btn--primary" disabled={busy} onClick={() => setModal("aprobar")}><Icon name="check" size={15} />Aprobar…</button></>}
       {viva(a) && <button className="btn btn--ghost" disabled={busy} onClick={() => hacer("holded_acciones_pausar", {}, "Acción pausada")}>Pausar</button>}
@@ -157,19 +172,23 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
     </p>
     {a.motivo_estado && <p style={{ fontSize: 13, color: a.estado === "pausada" ? "var(--warn)" : undefined }}><b>Motivo:</b> {a.motivo_estado}</p>}
 
-    <div className="row" style={{ gap: 28, flexWrap: "wrap", margin: "10px 0 14px" }}>
+    {esOp(a) && <div className="row" style={{ gap: 28, flexWrap: "wrap", margin: "10px 0 14px" }}>
+      {[["Petición", `${r.metodo || ""} ${r.ruta || ""}`], ["Operación", r.resumen_operacion || a.operacion], ["Tema", r.tema || "—"], ["Elementos", r.documentos]].map(([k, v]) =>
+        <div key={k}><div className="muted" style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".04em" }}>{k}</div><div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{v}</div></div>)}
+    </div>}
+    {!esOp(a) && <div className="row" style={{ gap: 28, flexWrap: "wrap", margin: "10px 0 14px" }}>
       {[["Documentos", r.documentos], ["Desde", fmtDia(r.desde)], ["Hasta", fmtDia(r.hasta)], ["Base", eur(r.base, r.moneda)], ["IVA", eur(r.iva, r.moneda)], ["Total", eur(r.total, r.moneda)], ["Excluidos", r.excluidos ?? 0]].map(([k, v]) =>
         <div key={k}><div className="muted" style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".04em" }}>{k}</div><div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{v}</div></div>)}
-    </div>
+    </div>}
 
     {prog && prog.total > 0 && <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 600, fontSize: 13 }}>Progreso</div>
       <Barra p={prog} />
-      <div className="mono" style={{ fontSize: 12.5 }}>{prog.ok} aprobados · {prog.error} con error · {prog.pendiente + prog.en_proceso} pendientes{prog.omitido ? ` · ${prog.omitido} omitidos` : ""} de {prog.total}
+      <div className="mono" style={{ fontSize: 12.5 }}>{prog.ok} {esOp(a) ? "hechos" : "aprobados"} · {prog.error} con error{prog.desconocido ? ` · ${prog.desconocido} sin respuesta (revisar en Holded)` : ""} · {prog.pendiente + prog.en_proceso} pendientes{prog.omitido ? ` · ${prog.omitido} omitidos` : ""} de {prog.total}
         {" · "}{a.llamadas_escritura} llamadas de escritura y {a.llamadas_lectura} de lectura{duracion != null ? ` · ${duracion} min` : ""}{prog.ultimo_at ? ` · último: ${fmtFecha(prog.ultimo_at)}` : ""}</div>
-      {prog.errores && prog.errores.length > 0 && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 13, color: "var(--danger)" }}>{prog.error} con error{prog.errores.length < prog.error ? ` (se muestran ${prog.errores.length})` : ""}</summary>
-        <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Id en Holded</th><th>Código</th><th>Motivo</th></tr></thead><tbody>
-          {prog.errores.map((e) => <tr key={e.holded_id}><td className="mono" style={{ fontSize: 12 }}>{e.holded_id}</td><td className="mono">{e.codigo ?? "—"}</td><td style={{ fontSize: 12.5 }}>{e.error}</td></tr>)}
+      {prog.errores && prog.errores.length > 0 && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 13, color: "var(--danger)" }}>{prog.error + (prog.desconocido || 0)} con error o sin respuesta{prog.errores.length < prog.error ? ` (se muestran ${prog.errores.length})` : ""}</summary>
+        <div className="tbl-wrap"><table className="tbl"><thead><tr><th>{esOp(a) ? "Petición" : "Id en Holded"}</th><th>Código</th><th>Motivo</th></tr></thead><tbody>
+          {prog.errores.map((e, i) => <tr key={e.orden || e.holded_id || i}><td className="mono" style={{ fontSize: 12 }}>{esOp(a) ? `#${e.orden} ${e.ruta || ""}` : e.holded_id}</td><td className="mono">{e.codigo ?? "—"}</td><td style={{ fontSize: 12.5 }}>{e.error}</td></tr>)}
         </tbody></table></div></details>}
     </div>}
 
@@ -178,7 +197,8 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{a.avisos.map((x, i) => <li key={i} style={{ color: /^⚠/.test(x) ? "var(--danger)" : undefined, marginBottom: 3 }}>{x}</li>)}</ul>
     </div>}
 
-    {extra && extra.muestra && extra.muestra.length > 0 && <details open={a.estado === "propuesta"} style={{ marginBottom: 10 }}>
+    {esOp(a) && <Peticiones a={a} />}
+    {!esOp(a) && extra && extra.muestra && extra.muestra.length > 0 && <details open={a.estado === "propuesta"} style={{ marginBottom: 10 }}>
       <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Muestra ({extra.muestra.length} documentos repartidos por el rango)</summary>
       <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Fecha</th><th>Cliente</th><th>Descripción</th><th style={{ textAlign: "right" }}>Base</th><th style={{ textAlign: "right" }}>IVA</th><th style={{ textAlign: "right" }}>Total</th><th>Id en Holded</th></tr></thead><tbody>
         {extra.muestra.map((d) => <tr key={d.id}><td className="mono" style={{ fontSize: 12.5 }}>{fmtDia(d.fecha)}</td><td>{d.contacto || "—"}</td><td style={{ fontSize: 12.5 }}>{d.descripcion || "—"}</td>
@@ -194,7 +214,8 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
       </tbody></table></div>
     </details>}
 
-    {modal === "aprobar" && <ModalAprobar a={a} busy={busy} onCancel={() => setModal("")} onOk={(n) => hacer("holded_acciones_aprobar", { p_confirmacion: n }, "Aprobada: empieza en menos de un minuto")} />}
+    {modal === "aprobar" && <ModalAprobar a={a} busy={busy} onCancel={() => setModal("")} onOk={(n, t) => hacer("holded_acciones_aprobar", { p_confirmacion: n, p_texto: t }, "Aprobada: empieza en menos de un minuto")} />}
+    {modal === "cupo" && <ModalCupo a={a} toast={toast} onCancel={() => setModal("")} onOk={() => { setModal(""); onCambio(); }} />}
     {modal === "rechazar" && <ModalRechazar busy={busy} onCancel={() => setModal("")} onOk={(m) => hacer("holded_acciones_rechazar", { p_motivo: m }, "Propuesta rechazada")} />}
     {modal === "cancelar" && <Modal title="Cancelar la acción" onClose={() => !busy && setModal("")} footer={<>
       <button className="btn btn--ghost" onClick={() => setModal("")} disabled={busy}>Volver</button>
@@ -205,22 +226,107 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
 }
 
 function ModalAprobar({ a, busy, onCancel, onOk }) {
-  const n = (a.resumen || {}).documentos || 0;
+  const r = a.resumen || {};
+  const n = r.documentos || 0;
   const [valor, setValor] = aState("");
+  const [texto, setTexto] = aState("");
+  const alto = esOp(a) && a.riesgo === "alto";
   const exige = n > 100;
-  const valido = !exige || Number(valor.trim()) === n;
-  return <Modal title={`Aprobar: ${TIPOS[a.tipo] || a.tipo}`} onClose={() => !busy && onCancel()} footer={<>
+  const valido = (!exige || Number(valor.trim()) === n) && (!alto || texto.trim().toUpperCase() === "CONFIRMAR");
+  return <Modal title={`Aprobar: ${titulo(a)}`} onClose={() => !busy && onCancel()} footer={<>
     <button className="btn btn--ghost" onClick={onCancel} disabled={busy}>Volver</button>
-    <button className="btn btn--primary" onClick={() => onOk(exige ? n : null)} disabled={busy || !valido}>{busy ? "Aprobando…" : `Aprobar ${n} documentos`}</button></>}>
-    <p>Se aprobarán en Holded <b>{n}</b> tickets de venta de <b>{nombreEmpresa(a.empresa_id)}</b>, del {fmtDia((a.resumen || {}).desde)} al {fmtDia((a.resumen || {}).hasta)}, por un total de <b>{eur((a.resumen || {}).total, (a.resumen || {}).moneda)}</b>.</p>
-    <ul style={{ fontSize: 13, paddingLeft: 18 }}>
-      <li>Cada ticket recibe su número de serie y deja de poder modificarse o borrarse en Holded.</li>
-      <li>Si la cuenta tiene VeriFactu, cada uno se registra y se envía a la AEAT: no se puede deshacer.</li>
-      <li>Se hace en segundo plano, unos 40 por minuto. Puedes pausar o cancelar lo que falte, pero no deshacer lo ya aprobado.</li>
-    </ul>
+    <button className={"btn " + (alto ? "btn--danger" : "btn--primary")} onClick={() => onOk(exige ? n : null, alto ? texto.trim() : null)} disabled={busy || !valido}>{busy ? "Aprobando…" : esOp(a) ? `Aprobar ${n === 1 ? "la operación" : `${n} operaciones`}` : `Aprobar ${n} documentos`}</button></>}>
+    {esOp(a) ? <>
+      <p>{a.descripcion} — en <b>{nombreEmpresa(a.empresa_id)}</b>.</p>
+      <p className="mono" style={{ fontSize: 13 }}>{r.metodo} {r.ruta}{n > 1 ? ` × ${n}` : ""} <Riesgo r={a.riesgo} /></p>
+      <ul style={{ fontSize: 13, paddingLeft: 18 }}>
+        {r.metodo === "DELETE" && <li>Borrar en Holded no se puede deshacer.</li>}
+        {r.metodo === "PUT" && <li>PUT reemplaza el documento entero: revisa que el cuerpo incluya todo lo que deba quedarse.</li>}
+        <li>Se hace en segundo plano, una petición tras otra. Puedes pausar o cancelar lo que falte, pero no deshacer lo ya hecho.</li>
+        <li>Si Holded no responde a una creación, no se repite sola (podría duplicarla): queda «sin respuesta» para revisarla.</li>
+      </ul>
+      {alto && <label style={{ display: "block", fontSize: 13, marginTop: 10, color: "var(--danger)" }}>Es una operación de riesgo alto. Para aprobarla, escribe <b>CONFIRMAR</b>:
+        <input className="inp mono" style={{ display: "block", width: 180, marginTop: 6 }} value={texto} onChange={(e) => setTexto(e.target.value)} autoFocus /></label>}
+    </> : <>
+      <p>Se aprobarán en Holded <b>{n}</b> tickets de venta de <b>{nombreEmpresa(a.empresa_id)}</b>, del {fmtDia(r.desde)} al {fmtDia(r.hasta)}, por un total de <b>{eur(r.total, r.moneda)}</b>.</p>
+      <ul style={{ fontSize: 13, paddingLeft: 18 }}>
+        <li>Cada ticket recibe su número de serie y deja de poder modificarse o borrarse en Holded.</li>
+        <li>Si la cuenta tiene VeriFactu, cada uno se registra y se envía a la AEAT: no se puede deshacer.</li>
+        <li>Se hace en segundo plano, unos 40 por minuto. Puedes pausar o cancelar lo que falte, pero no deshacer lo ya aprobado.</li>
+      </ul>
+    </>}
     {exige && <label style={{ display: "block", fontSize: 13, marginTop: 10 }}>Para confirmar, escribe el número de documentos (<b>{n}</b>):
-      <input className="inp mono" style={{ display: "block", width: 140, marginTop: 6 }} inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus /></label>}
+      <input className="inp mono" style={{ display: "block", width: 140, marginTop: 6 }} inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus={!alto} /></label>}
   </Modal>;
+}
+
+// Ampliar el cupo de acciones de la empresa desde la propia propuesta.
+function ModalCupo({ a, toast, onCancel, onOk }) {
+  const [u, setU] = aState(null);
+  const [valor, setValor] = aState("");
+  const [busy, setBusy] = aState(false);
+  const n = (a.resumen || {}).documentos || 0;
+  aEffect(() => { (async () => {
+    try {
+      const f = ((await rpc("holded_acciones_uso_mes", {})) || []).find((x) => x.empresa_id === a.empresa_id) || { usadas: 0, cupo: 0 };
+      setU(f); setValor(String(Math.max(f.cupo, f.usadas + n)));
+    } catch (e) { setU({ usadas: 0, cupo: 0 }); }
+  })(); }, [a.id]);
+  const v = Number(valor);
+  const ok = Number.isInteger(v) && v >= 0 && v <= 100000;
+  const guardar = async () => {
+    setBusy(true);
+    try { await rpc("holded_cambiar_cupo_acciones", { p_empresa_id: a.empresa_id, p_cupo: v }); toast("Cupo de acciones ampliado"); onOk(); }
+    catch (e) { toast("No se pudo cambiar el cupo: " + errorTexto(e)); }
+    setBusy(false);
+  };
+  return <Modal title={`Cupo de acciones de ${nombreEmpresa(a.empresa_id)}`} onClose={() => !busy && onCancel()} footer={<>
+    <button className="btn btn--ghost" onClick={onCancel} disabled={busy}>Volver</button>
+    <button className="btn btn--primary" onClick={guardar} disabled={busy || !ok || !u}>{busy ? "Guardando…" : "Guardar cupo"}</button></>}>
+    {!u ? <p className="muted">Cargando…</p> : <>
+      <p style={{ fontSize: 13 }}>Este mes lleva <b>{u.usadas}</b> de <b>{u.cupo}</b>. Esta propuesta necesita <b>{n}</b>: con un cupo de <b>{u.usadas + n}</b> o más cabe entera.</p>
+      <label style={{ fontSize: 13 }}>Nuevo cupo mensual
+        <input className="inp mono" style={{ display: "block", width: 140, marginTop: 6 }} type="number" min="0" max="100000" value={valor} onChange={(e) => setValor(e.target.value)} autoFocus /></label>
+      <p className="muted" style={{ fontSize: 12.5 }}>El aviso de la propuesta no cambia, pero al ejecutarse ya no se pausará por cupo.</p>
+    </>}
+  </Modal>;
+}
+
+// Peticiones exactas de una operación, con el estado actual leído al proponer.
+const json = (x) => { try { return JSON.stringify(x, null, 2); } catch (e) { return String(x); } };
+const POR_PAGINA = 10;
+function Peticiones({ a }) {
+  const n = (a.resumen || {}).documentos || 0;
+  const [desde, setDesde] = aState(1);
+  const [filas, setFilas] = aState(null);
+  const [err, setErr] = aState("");
+  aEffect(() => { (async () => {
+    try { setFilas(await rpc("holded_acciones_peticiones", { p_accion: a.id, p_desde: desde, p_n: POR_PAGINA })); setErr(""); }
+    catch (e) { setErr(errorTexto(e)); }
+  })(); }, [a.id, desde, a.estado]);
+  const crea = !/\{/.test(String((a.resumen || {}).ruta || "")) && (a.resumen || {}).metodo === "POST";
+  const caja = { margin: 0, padding: 8, fontSize: 11.5, maxHeight: 320, overflow: "auto", background: "var(--hover, rgba(0,0,0,.04))", borderRadius: 6, whiteSpace: "pre-wrap", wordBreak: "break-word" };
+  return <details open={a.estado === "propuesta"} style={{ marginBottom: 10 }}>
+    <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Peticiones exactas ({n}){n > POR_PAGINA ? ` · ${desde}–${Math.min(n, desde + POR_PAGINA - 1)}` : ""}</summary>
+    {err && <p style={{ color: "var(--danger)", fontSize: 13 }}>{err}</p>}
+    {a.purgada_at && <p className="muted" style={{ fontSize: 12.5 }}>Cuerpos y estado anterior borrados el {fmtFecha(a.purgada_at)} (se guardan 90 días). Quedan método, ruta, resultado e id.</p>}
+    {!filas && !err && <p className="muted" style={{ fontSize: 13 }}>Cargando…</p>}
+    {(filas || []).map((p) => <div key={p.orden} style={{ borderTop: "1px solid var(--line, #e5e7eb)", padding: "8px 0" }}>
+      <div className="mono" style={{ fontSize: 12.5, marginBottom: 6 }}>#{p.orden} <b>{p.metodo} {p.ruta}</b>
+        {" · "}<span style={{ color: p.estado === "ok" ? "var(--ok, #16a34a)" : ["error", "desconocido"].includes(p.estado) ? "var(--danger)" : undefined }}>{p.estado === "desconocido" ? "sin respuesta" : p.estado}</span>
+        {p.codigo ? ` · ${p.codigo}` : ""}{p.resultado_id ? ` · id ${p.resultado_id}` : ""}</div>
+      {p.error && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 6 }}>{p.error}</div>}
+      {!p.purgado && <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}><div className="muted" style={{ fontSize: 11.5 }}>Estado actual en Holded (al proponer)</div>
+          <pre style={caja}>{p.estado_anterior == null ? (crea ? "— (se crea nuevo)" : "No se ha leído") : p.estado_anterior.no_encontrado ? "No existe en Holded (404)" : json(p.estado_anterior)}</pre></div>
+        <div style={{ flex: 1, minWidth: 0 }}><div className="muted" style={{ fontSize: 11.5 }}>Cuerpo que se envía</div>
+          <pre style={caja}>{p.cuerpo == null ? "— (sin cuerpo)" : json(p.cuerpo)}</pre></div>
+      </div>}
+    </div>)}
+    {n > POR_PAGINA && <div className="row" style={{ gap: 6, marginTop: 6 }}>
+      <button className="btn btn--sm btn--ghost" disabled={desde <= 1} onClick={() => setDesde(Math.max(1, desde - POR_PAGINA))}>Anteriores</button>
+      <button className="btn btn--sm btn--ghost" disabled={desde + POR_PAGINA > n} onClick={() => setDesde(desde + POR_PAGINA)}>Siguientes</button></div>}
+  </details>;
 }
 
 function ModalRechazar({ busy, onCancel, onOk }) {
@@ -257,7 +363,7 @@ function Cupos({ toast, version }) {
       <div style={{ flex: 1 }}></div>
       {filas.length > visibles.length && <button className="btn btn--sm btn--ghost" onClick={() => setVerTodas(true)}>Ver todas ({filas.length})</button>}
     </div>
-    <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Documentos que se pueden tocar en Holded cada mes, aparte del tope de consultas del asistente. Con 0 no se ejecuta nada; al llegar al cupo, la acción se pausa hasta que lo subas o empiece el mes siguiente.</p>
+    <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Documentos que se pueden tocar en Holded cada mes, aparte del tope de consultas del asistente. Por defecto, 50 al mes. Con 0 no se ejecuta nada; al llegar al cupo, la acción se pausa hasta que lo subas o empiece el mes siguiente.</p>
     {!uso && <p className="muted" style={{ fontSize: 13 }}>Cargando…</p>}
     {uso && !visibles.length && <p className="muted" style={{ fontSize: 13 }}>Ninguna empresa tiene cupo de acciones. {filas.length > 0 && <a style={{ cursor: "pointer" }} onClick={() => setVerTodas(true)}>Asignar uno</a>}</p>}
     {visibles.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th style={{ textAlign: "right" }}>Usadas / cupo</th><th></th></tr></thead><tbody>
@@ -273,5 +379,68 @@ function Cupos({ toast, version }) {
           : <button className="btn btn--sm btn--ghost" title="Cambiar el cupo" onClick={() => setEdit({ id: f.empresa_id, valor: String(f.cupo) })}><Icon name="edit" size={13} /></button>}</td>
       </tr>)}
     </tbody></table></div>}
+  </div></div>;
+}
+
+// ---------------------------------------------------------------- políticas por empresa y operación
+// Por defecto todo necesita aprobación. «Automática» solo para operaciones de
+// riesgo normal y con un máximo de elementos por propuesta (y de importe en
+// los tickets); la base de datos rechaza las automáticas de riesgo alto.
+function Politicas({ toast }) {
+  const [empresas, setEmpresas] = aState(null);
+  const [ops, setOps] = aState([]);
+  const [pols, setPols] = aState([]);
+  const [nuevo, setNuevo] = aState(null);   // { empresa_id, tipo, max_documentos, max_importe }
+  const [busy, setBusy] = aState(false);
+  const cargar = async () => {
+    try { setEmpresas(await rpc("holded_acciones_uso_mes", {})); } catch (e) { setEmpresas([]); }
+    const o = await Auth.client.from("holded_operaciones").select("id, metodo, ruta, tema, resumen, riesgo").order("tema").order("id");
+    setOps(o.data || []);
+    const p = await Auth.client.from("holded_acciones_politicas").select("empresa_id, tipo, modo, max_documentos, max_importe, updated_at");
+    setPols(p.data || []);
+  };
+  aEffect(() => { cargar(); }, []);
+  const normales = ops.filter((o) => o.riesgo === "normal");
+  const nombreOp = (t) => {
+    if (t === "aprobar_tickets_venta") return TIPOS[t];
+    const o = ops.find((x) => x.id === t);
+    return o ? `${o.resumen} (${o.metodo} ${o.ruta})` : t;
+  };
+  const cambiar = async (args, ok) => {
+    setBusy(true);
+    try { await rpc("holded_cambiar_politica", args); toast(ok); setNuevo(null); await cargar(); }
+    catch (e) { toast("No se pudo cambiar la política: " + errorTexto(e)); }
+    setBusy(false);
+  };
+  const tickets = nuevo && nuevo.tipo === "aprobar_tickets_venta";
+  const maxDoc = nuevo ? Number(nuevo.max_documentos) : 0;
+  const validoNuevo = nuevo && nuevo.empresa_id && nuevo.tipo && Number.isInteger(maxDoc) && maxDoc >= 1 && maxDoc <= 1000
+    && (!tickets || Number(nuevo.max_importe) > 0);
+  return <div className="card" style={{ marginTop: 20 }}><div className="card__body">
+    <div className="row" style={{ alignItems: "center", marginBottom: 8 }}>
+      <div style={{ fontWeight: 700, fontFamily: "var(--display)" }}>Políticas por empresa y operación</div>
+      <div style={{ flex: 1 }}></div>
+      {!nuevo && <button className="btn btn--sm btn--ghost" onClick={() => setNuevo({ empresa_id: "", tipo: "", max_documentos: "10", max_importe: "" })}><Icon name="plus" size={13} />Añadir automática</button>}
+    </div>
+    <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Por defecto, todas las propuestas necesitan la aprobación de un administrador. Una operación «automática» se aprueba sola si no pasa de los límites. Las de riesgo alto (borrar, aprobar o emitir, enviar, pagos, bancos, contabilidad…) nunca pueden ser automáticas.</p>
+    {!pols.length && <p className="muted" style={{ fontSize: 13 }}>No hay ninguna automática: todo necesita aprobación.</p>}
+    {pols.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th>Operación</th><th style={{ textAlign: "right" }}>Máx. elementos</th><th style={{ textAlign: "right" }}>Máx. importe</th><th></th></tr></thead><tbody>
+      {pols.map((p) => <tr key={p.empresa_id + p.tipo}>
+        <td>{nombreEmpresa(p.empresa_id)}</td><td style={{ fontSize: 12.5 }}>{nombreOp(p.tipo)}</td>
+        <td className="mono" style={{ textAlign: "right" }}>{p.max_documentos}</td><td className="mono" style={{ textAlign: "right" }}>{p.max_importe != null ? eur(p.max_importe) : "—"}</td>
+        <td style={{ width: 1, whiteSpace: "nowrap" }}><button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => cambiar({ p_empresa_id: p.empresa_id, p_tipo: p.tipo, p_modo: "aprobacion", p_max_documentos: null, p_max_importe: null }, "Vuelve a necesitar aprobación")}>Volver a aprobación</button></td>
+      </tr>)}
+    </tbody></table></div>}
+    {nuevo && <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}>
+      <label style={{ fontSize: 12.5 }}>Empresa<select className="inp" style={{ display: "block", marginTop: 4 }} value={nuevo.empresa_id} onChange={(e) => setNuevo({ ...nuevo, empresa_id: e.target.value })}>
+        <option value="">—</option>{(empresas || []).map((f) => <option key={f.empresa_id} value={f.empresa_id}>{nombreEmpresa(f.empresa_id)}</option>)}</select></label>
+      <label style={{ fontSize: 12.5, flex: 1, minWidth: 260 }}>Operación (solo riesgo normal)<select className="inp" style={{ display: "block", marginTop: 4, width: "100%" }} value={nuevo.tipo} onChange={(e) => setNuevo({ ...nuevo, tipo: e.target.value })}>
+        <option value="">—</option><option value="aprobar_tickets_venta">{TIPOS.aprobar_tickets_venta}</option>
+        {normales.map((o) => <option key={o.id} value={o.id}>{o.tema} · {o.resumen} ({o.metodo} {o.ruta})</option>)}</select></label>
+      <label style={{ fontSize: 12.5 }}>Máx. elementos<input className="inp mono" style={{ display: "block", marginTop: 4, width: 90 }} type="number" min="1" max="1000" value={nuevo.max_documentos} onChange={(e) => setNuevo({ ...nuevo, max_documentos: e.target.value })} /></label>
+      {tickets && <label style={{ fontSize: 12.5 }}>Máx. importe (€)<input className="inp mono" style={{ display: "block", marginTop: 4, width: 110 }} type="number" min="1" value={nuevo.max_importe} onChange={(e) => setNuevo({ ...nuevo, max_importe: e.target.value })} /></label>}
+      <button className="btn btn--sm btn--primary" disabled={busy || !validoNuevo} onClick={() => cambiar({ p_empresa_id: nuevo.empresa_id, p_tipo: nuevo.tipo, p_modo: "automatica", p_max_documentos: maxDoc, p_max_importe: tickets ? Number(nuevo.max_importe) : null }, "Política guardada")}>Guardar</button>
+      <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setNuevo(null)}>Cancelar</button>
+    </div>}
   </div></div>;
 }

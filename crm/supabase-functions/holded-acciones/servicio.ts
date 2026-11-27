@@ -7,6 +7,10 @@
 //       con x-hook-secret (el operador). Solo lee Holded y crea la propuesta
 //       en estado «propuesta» (o «aprobada» si la política de la empresa es
 //       automática y está dentro de sus topes). Nunca ejecuta.
+//   { accion: "proponer_operacion", empresa_id, metodo, ruta, cuerpo?, lote?, descripcion, origen? }
+//       igual que «proponer», para CUALQUIER escritura de la lista cerrada
+//       (catalogo.json): valida, lee el estado actual de lo que cambia y crea
+//       la propuesta. Nunca ejecuta.
 //   { accion: "ejecutar" }
 //       solo con x-hook-secret (pg_cron, cada minuto). Reclama lotes de
 //       acciones YA APROBADAS en el CRM y los ejecuta respetando el ritmo por
@@ -20,7 +24,9 @@
 // y nunca se devuelve ni se registra.
 
 import type { Fetch } from "../_shared/holded.ts";
-import { aprobarTicket, detalleError, OPERACIONES } from "./operaciones.ts";
+import { aprobarTicket, detalleError, OPERACIONES, peticion } from "./operaciones.ts";
+import { encontrarOperacion } from "./catalogo.ts";
+import { construirOperacion } from "./operacion.ts";
 import { construir, ErrorPropuesta, validarParams } from "./propuesta.ts";
 import { inspeccionar, validarInspeccion } from "./inspeccion.ts";
 
@@ -72,6 +78,14 @@ export async function atender(deps: Deps, cabeceras: { authorization: string; ho
   if (b.accion === "ejecutar") {
     if (quien !== "cron") return r(403, { error: "La ejecución solo la lanza el sistema, tras la aprobación en el CRM." });
     return r(200, await ejecutar(deps));
+  }
+  if (b.accion === "proponer_operacion") {
+    try {
+      return await proponerOperacion(deps, quien, b);
+    } catch (e) {
+      log("holded-acciones: proponer_operacion", e instanceof Error ? limpiar(e.message).slice(0, 200) : "error");
+      return r(500, { error: "No se ha podido preparar la propuesta." });
+    }
   }
   if (b.accion === "inspeccionar") {
     if (quien !== "cron") return r(403, { error: "Solo para el operador." });
@@ -143,8 +157,42 @@ async function proponer(deps: Deps, quien: "cron" | { uid: string }, b: Record<s
   });
 }
 
+// ---------------------------------------------------------------- proponer una operación
+async function proponerOperacion(deps: Deps, quien: "cron" | { uid: string }, b: Record<string, unknown>) {
+  const empresa = typeof b.empresa_id === "string" && RE_UUID.test(b.empresa_id) ? b.empresa_id.toLowerCase() : null;
+  if (!empresa) return r(400, { error: "empresa_id no válido." });
+  const origen = quien === "cron" ? "operador" : b.origen === "agente" ? "agente" : "crm";
+  const c = await deps.rpc("holded_clave_de", { p_empresa: empresa });
+  const clave = typeof c.data === "string" ? c.data : null;
+  if (c.error || !clave) return r(200, { ok: false, codigo: "sin_conexion", mensaje: "Esta empresa no tiene Holded conectado en el CRM." });
+  let p;
+  try {
+    p = await construirOperacion(clave, b, deps.fetchHolded, { ahora: deps.ahora });
+  } catch (e) {
+    if (e instanceof ErrorPropuesta) return r(200, { ok: false, codigo: e.codigo, mensaje: e.message });
+    throw e;
+  }
+  const cr = await deps.rpc("holded_acciones_crear_operacion", {
+    p_usuario: quien === "cron" ? null : quien.uid, p_origen: origen, p_empresa: empresa, p_operacion: p.operacion.id,
+    p_descripcion: p.descripcion, p_resumen: p.resumen, p_muestra: p.muestra, p_avisos: p.avisos,
+    p_peticiones: p.peticiones.map((x) => ({ metodo: x.metodo, ruta: x.ruta, holded_id: x.holded_id ?? null,
+                                             ...(x.cuerpo !== undefined ? { cuerpo: x.cuerpo } : {}),
+                                             ...(x.estado_anterior !== undefined ? { estado_anterior: x.estado_anterior } : {}) })),
+    p_llamadas: p.llamadas,
+  });
+  if (cr.error) {
+    if (cr.error.code === "42501") return r(403, { error: "Solo para usuarios activos del CRM." });
+    if (["22023", "GU010", "23514"].includes(cr.error.code ?? "")) return r(200, { ok: false, codigo: cr.error.code, mensaje: limpiar(cr.error.message) });
+    throw new Error(cr.error.message);
+  }
+  const d = cr.data as { id: string; estado: string; documentos: number; riesgo: string };
+  return r(200, { ok: true, propuesta: { id: d.id, estado: d.estado, riesgo: d.riesgo, resumen: p.resumen, avisos: p.avisos } });
+}
+
 // ---------------------------------------------------------------- ejecutar
-type Resultado = { id: string; estado: "ok" | "error" | "pendiente"; codigo?: number | null; error?: string | null };
+type Resultado = { id?: string; orden?: number; estado: "ok" | "error" | "pendiente" | "desconocido"; codigo?: number | null;
+                  error?: string | null; resultado_id?: string | null };
+type PeticionLote = { orden: number; metodo: string; ruta: string; cuerpo: unknown };
 
 export async function ejecutar(deps: Deps) {
   const ahora = deps.ahora ?? Date.now;
@@ -163,8 +211,8 @@ export async function ejecutar(deps: Deps) {
   while (ahora() - inicio < PLAZO_EJECUCION_MS - intervalo) {
     const rc = await deps.rpc("holded_acciones_reclamar", { p_max: LOTE });
     if (rc.error) { log("holded-acciones: reclamar", rc.error.code); break; }
-    const lote = rc.data as { accion_id: string; empresa_id: string; tipo: string; ids: string[] } | null;
-    if (!lote || !lote.ids?.length) break;
+    const lote = rc.data as { accion_id: string; empresa_id: string; tipo: string; ids?: string[]; operacion?: string; peticiones?: PeticionLote[] } | null;
+    if (!lote || !(lote.ids?.length || lote.peticiones?.length)) break;
     resumen.lotes++;
 
     if (!claves.has(lote.empresa_id)) {
@@ -177,50 +225,67 @@ export async function ejecutar(deps: Deps) {
     let llamadas = 0;
     let cortar = false;
 
-    if (!clave || lote.tipo !== "aprobar_tickets_venta") {
-      pausar = !clave ? "La empresa ya no tiene la clave de Holded" : "Tipo de acción no permitido";
-      for (const id of lote.ids) res.push({ id, estado: "pendiente" });
+    // Cada elemento: un ticket (por id) o una petición de una operación (por orden).
+    const esOp = lote.tipo === "operacion";
+    const trabajos: (Partial<PeticionLote> & { id?: string })[] = esOp ? (lote.peticiones ?? []) : (lote.ids ?? []).map((id) => ({ id }));
+    const clv = (t: { id?: string; orden?: number }) => (esOp ? { orden: (t as PeticionLote).orden } : { id: t.id });
+    const fueraDeLista = esOp && (lote.peticiones ?? []).some((p) => encontrarOperacion(p.metodo, p.ruta)?.op.id !== lote.operacion);
+    if (!clave || !(lote.tipo === "aprobar_tickets_venta" || esOp) || fueraDeLista) {
+      pausar = !clave ? "La empresa ya no tiene la clave de Holded" : fueraDeLista ? "Petición fuera de la lista cerrada de Holded" : "Tipo de acción no permitido";
+      for (const t of trabajos) res.push({ ...clv(t), estado: "pendiente" });
     } else {
-      for (let i = 0; i < lote.ids.length; i++) {
-        const id = lote.ids[i];
-        if (pausar || cortar || ahora() - inicio >= PLAZO_EJECUCION_MS) { res.push({ id, estado: "pendiente" }); continue; }
+      for (let i = 0; i < trabajos.length; i++) {
+        const t = trabajos[i];
+        const k = clv(t);
+        if (pausar || cortar || ahora() - inicio >= PLAZO_EJECUCION_MS) { res.push({ ...k, estado: "pendiente" }); continue; }
         // Ritmo: como mucho porMinuto llamadas por minuto.
         const espera = proxima - ahora();
         if (espera > 0) await esperar(espera);
         proxima = Math.max(ahora(), proxima) + intervalo;
 
-        let h = await aprobarTicket(clave, id, deps.fetchHolded);
+        const llamar = () => esOp
+          ? peticion(clave, (t as PeticionLote).metodo, (t as PeticionLote).ruta, (t as PeticionLote).cuerpo, deps.fetchHolded)
+          : aprobarTicket(clave, t.id!, deps.fetchHolded);
+        let h = await llamar();
         llamadas++;
         if (h.status === 429 && h.ventana !== "month") {
           const s = h.retryAfter ?? 5;
           if (s <= MAX_ESPERA_429_S && ahora() - inicio + s * 1000 < PLAZO_EJECUCION_MS) {
             await esperar(s * 1000);
             proxima = ahora() + intervalo;
-            h = await aprobarTicket(clave, id, deps.fetchHolded);
+            h = await llamar();
             llamadas++;
           }
         }
         const st = h.status;
-        if (st >= 200 && st < 300) res.push({ id, estado: "ok", codigo: st });
-        else if (st === 429 && h.ventana === "month") {
-          res.push({ id, estado: "pendiente", codigo: st }); pausar = "Holded: cupo mensual de la API de la cuenta agotado";
+        // Un POST sin respuesta puede haberse hecho: no se repite solo (podría duplicar).
+        const noRepetir = esOp && (t as PeticionLote).metodo === "POST";
+        if (st >= 200 && st < 300) {
+          const rid = h.datos && typeof h.datos === "object" ? (h.datos as Record<string, unknown>).id : null;
+          res.push({ ...k, estado: "ok", codigo: st, ...(typeof rid === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(rid) ? { resultado_id: rid } : {}) });
+        } else if (st === 429 && h.ventana === "month") {
+          res.push({ ...k, estado: "pendiente", codigo: st }); pausar = "Holded: cupo mensual de la API de la cuenta agotado";
         } else if (st === 429) {
-          res.push({ id, estado: "pendiente", codigo: st }); cortar = true;   // sigue en la próxima ejecución
+          res.push({ ...k, estado: "pendiente", codigo: st }); cortar = true;   // sigue en la próxima ejecución
         } else if (st === 401 || st === 403) {
-          res.push({ id, estado: "pendiente", codigo: st });
-          pausar = st === 401 ? "Holded rechaza la clave de la empresa (401)" : "La clave de Holded no tiene permiso para aprobar tickets (403)";
+          res.push({ ...k, estado: "pendiente", codigo: st });
+          pausar = st === 401 ? "Holded rechaza la clave de la empresa (401)"
+            : esOp ? "La clave de Holded no tiene permiso para esta operación (403)" : "La clave de Holded no tiene permiso para aprobar tickets (403)";
         } else if (st === 402) {
-          res.push({ id, estado: "pendiente", codigo: st }); pausar = "Holded: se ha alcanzado el límite anual de facturas del plan (402)";
+          res.push({ ...k, estado: "pendiente", codigo: st }); pausar = "Holded: se ha alcanzado el límite anual de facturas del plan (402)";
+        } else if ((st === 0 || st >= 500) && noRepetir) {
+          res.push({ ...k, estado: "desconocido", codigo: st || null,
+                     error: (st ? `Holded ${st}` : "Sin respuesta de Holded") + ": puede que se haya hecho; revísalo en Holded antes de repetirlo" });
         } else if (st === 0 || st >= 500) {
-          res.push({ id, estado: "pendiente", codigo: st || null, error: st ? `Holded ${st}` : "Sin respuesta de Holded" });
+          res.push({ ...k, estado: "pendiente", codigo: st || null, error: st ? `Holded ${st}` : "Sin respuesta de Holded" });
         } else {
-          res.push({ id, estado: "error", codigo: st,
+          res.push({ ...k, estado: "error", codigo: st,
                      error: (st === 404 ? "No encontrado en Holded" : `Holded ${st}`) + (detalleError(h.datos) ? `: ${detalleError(h.datos)}` : "") });
         }
       }
     }
     resumen.llamadas += llamadas;
-    for (const x of res) resumen[x.estado === "pendiente" ? "reintentar" : x.estado]++;
+    for (const x of res) resumen[x.estado === "pendiente" ? "reintentar" : x.estado === "desconocido" ? "error" : x.estado]++;
     const fin = await deps.rpc("holded_acciones_resultado", {
       p_accion: lote.accion_id, p_resultados: res, p_llamadas: llamadas, p_pausar: pausar,
     });

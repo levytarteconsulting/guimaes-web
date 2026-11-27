@@ -296,7 +296,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 17);   // 12 del CRM + 4 consultas de Holded + proponer acción
+  assert.equal(params.tools!.length, 19);   // 12 del CRM + 4 consultas de Holded + proponer acción/operación + documentación
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -585,7 +585,7 @@ const E2 = "e2000000-0000-0000-0000-000000000002";
 const DATOS_HOLDED = { totales_por_moneda: { EUR: { documentos: 3, base: 1234.56 } }, documentos: [{ contacto: "Cliente Inventado" }] };
 
 test("Holded: las herramientas holded_* coinciden con lo que acepta holded-proxy", () => {
-  const hs = HERRAMIENTAS.filter((h) => esHolded(h.name) && h.name !== "holded_proponer_accion");
+  const hs = HERRAMIENTAS.filter((h) => esHolded(h.name) && !["holded_proponer_accion", "holded_proponer_operacion", "holded_documentacion"].includes(h.name));
   assert.deepEqual(hs.map((h) => h.name.slice(7)).sort(), [...TIPOS].sort());
   const ejemplo: Record<string, unknown> = { tipo: "emitidas", desde: "2026-01-01", hasta: "2026-03-31", estado: "overdue",
     contacto_id: "abc123", rectificativas: true, limite: 10, nombre: "Proveedor" };
@@ -708,4 +708,41 @@ test("Acciones: el asistente solo puede PROPONER (aprobar_tickets_venta) y va a 
   assert.match(index, /functions\/v1\/\$\{accion \? "holded-acciones" : "holded-proxy"\}/);
   assert.match(index, /accion: "proponer", origen: "agente"/);
   assert.doesNotMatch(index, /accion: "ejecutar"|HOLDED_ACCIONES_CRON_SECRET|x-hook-secret/);
+});
+
+test("Operaciones: holded_proponer_operacion solo propone, valida el cuerpo como objeto y va a holded-acciones", () => {
+  const ok = validarEntrada("holded_proponer_operacion", { empresa_id: E1, metodo: "POST", ruta: "/contacts", cuerpo: { name: "Cliente Inventado" },
+    descripcion: "Crear el contacto Cliente Inventado" });
+  assert.deepEqual(ok, { ok: true, holded: { consulta: "proponer_operacion", empresa_id: E1,
+    params: { metodo: "POST", ruta: "/contacts", cuerpo: { name: "Cliente Inventado" }, descripcion: "Crear el contacto Cliente Inventado" } } });
+  assert.equal(validarEntrada("holded_proponer_operacion", { empresa_id: E1, metodo: "GET", ruta: "/contacts", descripcion: "Leer" }).ok, false);
+  assert.equal(validarEntrada("holded_proponer_operacion", { empresa_id: E1, metodo: "POST", ruta: "/contacts", cuerpo: ["a"], descripcion: "Crear" }).ok, false);
+  assert.equal(validarEntrada("holded_proponer_operacion", { empresa_id: E1, metodo: "POST", ruta: "/contacts", cuerpo: { n: "x".repeat(70_000) }, descripcion: "Crear" }).ok, false);
+  assert.equal(validarEntrada("holded_proponer_operacion", { empresa_id: E1, metodo: "POST", ruta: "/contacts" }).ok, false, "sin descripción");
+  assert.ok(esHolded("holded_proponer_operacion"), "su resultado no se guarda");
+  const api = HERRAMIENTAS_API.find((h) => h.name === "holded_proponer_operacion")!;
+  assert.deepEqual((api.input_schema as Msg).properties.cuerpo, { type: "object", description: (api.input_schema as Msg).properties.cuerpo.description },
+    "a la API de Claude no le llega maxBytes");
+  const index = fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(index, /accion: "proponer_operacion", origen: "agente"/);
+});
+
+test("Documentación: temas, un tema con campos obligatorios y ejemplos, una operación, búsqueda; sin llamar a Holded", async () => {
+  const { consultarDocumentacion, MAX_RESPUESTA } = await import("./documentacion.ts");
+  const t = consultarDocumentacion({}) as Msg;
+  assert.ok(t.temas.length >= 40 && t.temas.some((x: Msg) => x.tema === "Facturas"));
+  assert.equal(t.fuente, "https://api.holded.com/openapi/es.json");
+  const f = consultarDocumentacion({ tema: "facturas" }) as Msg;
+  assert.equal(f.tema, "Facturas");
+  const crear = f.operaciones.find((o: Msg) => o.operacion === "create_invoice");
+  assert.deepEqual([crear.metodo, crear.ruta], ["POST", "/invoices"]);
+  assert.deepEqual(crear.requeridos, ["contact_id", "items"]);
+  assert.ok(JSON.stringify(f).length <= MAX_RESPUESTA + 2000);
+  const o = consultarDocumentacion({ operacion: "POST /contacts" }) as Msg;
+  assert.equal(o.operacion.operacion, "create_contact");
+  assert.ok(Object.keys(o.operacion.campos).length > 3);
+  assert.ok(o.lecturas.some((l: string) => l.startsWith("GET /contacts")));
+  assert.ok((consultarDocumentacion({ tema: "presupuesto" }) as Msg).operaciones?.length || (consultarDocumentacion({ tema: "presupuesto" }) as Msg).tema);
+  assert.match((consultarDocumentacion({ operacion: "borrar_todo" }) as Msg).error, /No hay ninguna operación/);
+  assert.deepEqual(validarEntrada("holded_documentacion", { tema: "Facturas" }), { ok: true, local: "documentacion", args: { tema: "Facturas" } });
 });
