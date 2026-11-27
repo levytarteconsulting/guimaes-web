@@ -1,0 +1,4466 @@
+{
+ "fuente": "https://api.holded.com/openapi/es.json",
+ "titulo": "Holded API",
+ "version": "1.0.0",
+ "generado": "2026-11-27",
+ "operaciones": [
+  {
+   "id": "inviteAccountUser",
+   "metodo": "POST",
+   "ruta": "/account/users",
+   "tema": "Cuenta",
+   "resumen": "Invitar a un usuario a la cuenta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuenta: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "email",
+    "role_id"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_account_user_invitation",
+   "metodo": "DELETE",
+   "ruta": "/account/users/invitations/{invitationId}",
+   "tema": "Cuenta",
+   "resumen": "Revocar invitación de usuario",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "invitationId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_account_user",
+   "metodo": "PUT",
+   "ruta": "/account/users/{userId}",
+   "tema": "Cuenta",
+   "resumen": "Actualizar rol de usuario",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuenta: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "role"
+   ],
+   "params": {
+    "userId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_account_user",
+   "metodo": "DELETE",
+   "ruta": "/account/users/{userId}",
+   "tema": "Cuenta",
+   "resumen": "Eliminar usuario de la cuenta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "userId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_accounting_account",
+   "metodo": "POST",
+   "ruta": "/accounting-accounts",
+   "tema": "Contabilidad",
+   "resumen": "Crear una cuenta contable",
+   "riesgo": "alto",
+   "motivo_riesgo": "Contabilidad: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "prefix",
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_booking",
+   "metodo": "POST",
+   "ruta": "/bookings",
+   "tema": "Reservas",
+   "resumen": "Crear una reserva",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "location_id",
+    "service_id",
+    "date_time",
+    "language"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_booking",
+   "metodo": "PUT",
+   "ruta": "/bookings/{bookingId}",
+   "tema": "Reservas",
+   "resumen": "Actualizar una reserva",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "bookingId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/bookings/{bookingId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_booking",
+   "metodo": "DELETE",
+   "ruta": "/bookings/{bookingId}",
+   "tema": "Reservas",
+   "resumen": "Borrar una reserva",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "bookingId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/bookings/{bookingId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_contact_group",
+   "metodo": "POST",
+   "ruta": "/contact-groups",
+   "tema": "Grupos de contactos",
+   "resumen": "Crear un grupo de contactos",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_contact_group",
+   "metodo": "PUT",
+   "ruta": "/contact-groups/{contactGroupId}",
+   "tema": "Grupos de contactos",
+   "resumen": "Actualizar un grupo de contactos",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "contactGroupId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contact-groups/{contactGroupId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_contact_group",
+   "metodo": "DELETE",
+   "ruta": "/contact-groups/{contactGroupId}",
+   "tema": "Grupos de contactos",
+   "resumen": "Borrar un grupo de contactos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "contactGroupId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contact-groups/{contactGroupId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_contact",
+   "metodo": "POST",
+   "ruta": "/contacts",
+   "tema": "Contactos",
+   "resumen": "Crear un contacto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "bulk_archive_contacts",
+   "metodo": "POST",
+   "ruta": "/contacts/bulk-archive",
+   "tema": "Contactos",
+   "resumen": "Archivar contactos en bloque",
+   "riesgo": "alto",
+   "motivo_riesgo": "Operación sensible",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_ids"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "bulk_delete_contacts",
+   "metodo": "POST",
+   "ruta": "/contacts/bulk-delete",
+   "tema": "Contactos",
+   "resumen": "Borrar contactos en bloque",
+   "riesgo": "alto",
+   "motivo_riesgo": "Operación sensible",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_ids"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_contact",
+   "metodo": "PUT",
+   "ruta": "/contacts/{contactId}",
+   "tema": "Contactos",
+   "resumen": "Actualizar un contacto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_contact",
+   "metodo": "DELETE",
+   "ruta": "/contacts/{contactId}",
+   "tema": "Contactos",
+   "resumen": "Borrar un contacto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "patch_contact",
+   "metodo": "PATCH",
+   "ruta": "/contacts/{contactId}",
+   "tema": "Contactos",
+   "resumen": "Actualizar algunos campos de un contacto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_contact_shipping_address",
+   "metodo": "POST",
+   "ruta": "/contacts/{contactId}/shipping-addresses",
+   "tema": "Contactos",
+   "resumen": "Crear una dirección de envío de un contacto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_contact_shipping_address",
+   "metodo": "PUT",
+   "ruta": "/contacts/{contactId}/shipping-addresses/{shippingId}",
+   "tema": "Contactos",
+   "resumen": "Actualizar una dirección de envío de un contacto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    },
+    "shippingId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_contact_shipping_address",
+   "metodo": "DELETE",
+   "ruta": "/contacts/{contactId}/shipping-addresses/{shippingId}",
+   "tema": "Contactos",
+   "resumen": "Eliminar una dirección de envío de un contacto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "contactId": {
+     "tipo": "id"
+    },
+    "shippingId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/contacts/{contactId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_credit_note",
+   "metodo": "POST",
+   "ruta": "/credit-notes",
+   "tema": "Facturas rectificativas",
+   "resumen": "Crear una factura rectificativa (abono)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_credit_note",
+   "metodo": "PUT",
+   "ruta": "/credit-notes/{creditNoteId}",
+   "tema": "Facturas rectificativas",
+   "resumen": "Actualizar una factura rectificativa (abono)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_credit_note",
+   "metodo": "DELETE",
+   "ruta": "/credit-notes/{creditNoteId}",
+   "tema": "Facturas rectificativas",
+   "resumen": "Borrar una factura rectificativa (abono)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_credit_note",
+   "metodo": "POST",
+   "ruta": "/credit-notes/{creditNoteId}/approve",
+   "tema": "Facturas rectificativas",
+   "resumen": "Aprobar una factura rectificativa",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_credit_note_payment",
+   "metodo": "POST",
+   "ruta": "/credit-notes/{creditNoteId}/payments",
+   "tema": "Facturas rectificativas",
+   "resumen": "Registrar un pago de factura rectificativa",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_credit_note_pipeline",
+   "metodo": "PUT",
+   "ruta": "/credit-notes/{creditNoteId}/pipeline",
+   "tema": "Facturas rectificativas",
+   "resumen": "Cambiar la fase de una factura rectificativa o abono (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_credit_note",
+   "metodo": "POST",
+   "ruta": "/credit-notes/{creditNoteId}/send",
+   "tema": "Facturas rectificativas",
+   "resumen": "Enviar factura rectificativa (abono) por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "creditNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/credit-notes/{creditNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_crm_deal",
+   "metodo": "POST",
+   "ruta": "/crm/deals",
+   "tema": "Oportunidades v2",
+   "resumen": "Crear una oportunidad del CRM",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "funnel_id",
+    "stage_id"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_crm_deal",
+   "metodo": "DELETE",
+   "ruta": "/crm/deals/{dealId}",
+   "tema": "Oportunidades v2",
+   "resumen": "Borrar una oportunidad del CRM",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_crm_deal",
+   "metodo": "PATCH",
+   "ruta": "/crm/deals/{dealId}",
+   "tema": "Oportunidades v2",
+   "resumen": "Actualizar una oportunidad del CRM",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "lose_crm_deal",
+   "metodo": "POST",
+   "ruta": "/crm/deals/{dealId}/lose",
+   "tema": "Oportunidades v2",
+   "resumen": "Marcar una oportunidad del CRM como perdida",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "move_crm_deal_to_stage",
+   "metodo": "POST",
+   "ruta": "/crm/deals/{dealId}/move",
+   "tema": "Oportunidades v2",
+   "resumen": "Mover una oportunidad del CRM a una etapa",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "stage_id"
+   ],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "reopen_crm_deal",
+   "metodo": "POST",
+   "ruta": "/crm/deals/{dealId}/reopen",
+   "tema": "Oportunidades v2",
+   "resumen": "Reabrir una oportunidad del CRM",
+   "riesgo": "normal",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "win_crm_deal",
+   "metodo": "POST",
+   "ruta": "/crm/deals/{dealId}/win",
+   "tema": "Oportunidades v2",
+   "resumen": "Marcar una oportunidad del CRM como ganada",
+   "riesgo": "normal",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "dealId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/deals/{dealId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_crm_funnel",
+   "metodo": "POST",
+   "ruta": "/crm/funnels",
+   "tema": "Embudos v2",
+   "resumen": "Crear un embudo del CRM",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "stages"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_crm_funnel",
+   "metodo": "DELETE",
+   "ruta": "/crm/funnels/{funnelId}",
+   "tema": "Embudos v2",
+   "resumen": "Borrar un embudo del CRM",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "funnelId": {
+     "tipo": "id"
+    }
+   },
+   "query": {
+    "reassign_to_funnel_id": {
+     "tipo": "id",
+     "obligatorio": false
+    }
+   },
+   "lectura": "/crm/funnels/{funnelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_crm_funnel",
+   "metodo": "PATCH",
+   "ruta": "/crm/funnels/{funnelId}",
+   "tema": "Embudos v2",
+   "resumen": "Actualizar un embudo del CRM",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "funnelId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/crm/funnels/{funnelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "convert_document",
+   "metodo": "POST",
+   "ruta": "/documents/convert",
+   "tema": "Documentos",
+   "resumen": "Convertir un documento a otro tipo",
+   "riesgo": "alto",
+   "motivo_riesgo": "Convierte un documento en otro",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "source_type",
+    "source_id",
+    "target_type"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_employee_time",
+   "metodo": "PUT",
+   "ruta": "/employee-times/{timeId}",
+   "tema": "Control horario de empleados",
+   "resumen": "Actualizar un registro de tiempo de empleado (parte de horas, jornada)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "start_at",
+    "end_at"
+   ],
+   "params": {
+    "timeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employee-times/{timeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_employee_time",
+   "metodo": "DELETE",
+   "ruta": "/employee-times/{timeId}",
+   "tema": "Control horario de empleados",
+   "resumen": "Borrar un registro de tiempo de empleado (parte de horas, jornada)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "timeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employee-times/{timeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_employee",
+   "metodo": "POST",
+   "ruta": "/employees",
+   "tema": "Empleados",
+   "resumen": "Crear un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "last_name",
+    "email"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_employee",
+   "metodo": "PUT",
+   "ruta": "/employees/{employeeId}",
+   "tema": "Empleados",
+   "resumen": "Actualizar un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_employee",
+   "metodo": "DELETE",
+   "ruta": "/employees/{employeeId}",
+   "tema": "Empleados",
+   "resumen": "Borrar un empleado",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "clock_in",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/clock-in",
+   "tema": "Control horario de empleados",
+   "resumen": "Fichar entrada de un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "clock_out",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/clock-out",
+   "tema": "Control horario de empleados",
+   "resumen": "Fichar salida de un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_employee_contract",
+   "metodo": "PUT",
+   "ruta": "/employees/{employeeId}/contract",
+   "tema": "Empleados",
+   "resumen": "Actualizar el contrato activo de un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contractType",
+    "startDate"
+   ],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "pause",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/pause",
+   "tema": "Control horario de empleados",
+   "resumen": "Iniciar pausa de un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_time_off",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/time-offs",
+   "tema": "Ausencias y vacaciones",
+   "resumen": "Solicitar una ausencia",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "time_off_type_id",
+    "start_date",
+    "end_date"
+   ],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_time_off",
+   "metodo": "PUT",
+   "ruta": "/employees/{employeeId}/time-offs/{timeOffId}",
+   "tema": "Ausencias y vacaciones",
+   "resumen": "Actualizar una ausencia",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "end_date"
+   ],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    },
+    "timeOffId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}/time-offs/{timeOffId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_employee_time",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/times",
+   "tema": "Control horario de empleados",
+   "resumen": "Crear un registro de tiempo para un empleado (parte de horas, jornada)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "start_at",
+    "end_at"
+   ],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "unpause",
+   "metodo": "POST",
+   "ruta": "/employees/{employeeId}/unpause",
+   "tema": "Control horario de empleados",
+   "resumen": "Finalizar pausa de un empleado",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "employeeId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/employees/{employeeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_estimate",
+   "metodo": "POST",
+   "ruta": "/estimates",
+   "tema": "Presupuestos",
+   "resumen": "Crear un presupuesto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_estimate",
+   "metodo": "PUT",
+   "ruta": "/estimates/{estimateId}",
+   "tema": "Presupuestos",
+   "resumen": "Actualizar un presupuesto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_estimate",
+   "metodo": "DELETE",
+   "ruta": "/estimates/{estimateId}",
+   "tema": "Presupuestos",
+   "resumen": "Borrar un presupuesto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "accept_estimate",
+   "metodo": "POST",
+   "ruta": "/estimates/{estimateId}/accept",
+   "tema": "Presupuestos",
+   "resumen": "Aceptar un presupuesto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_estimate",
+   "metodo": "POST",
+   "ruta": "/estimates/{estimateId}/approve",
+   "tema": "Presupuestos",
+   "resumen": "Aprobar un presupuesto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_estimate_pipeline",
+   "metodo": "PUT",
+   "ruta": "/estimates/{estimateId}/pipeline",
+   "tema": "Presupuestos",
+   "resumen": "Cambiar la fase de presupuesto (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "reject_estimate",
+   "metodo": "POST",
+   "ruta": "/estimates/{estimateId}/reject",
+   "tema": "Presupuestos",
+   "resumen": "Rechazar un presupuesto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_estimate",
+   "metodo": "POST",
+   "ruta": "/estimates/{estimateId}/send",
+   "tema": "Presupuestos",
+   "resumen": "Enviar presupuesto por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "estimateId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/estimates/{estimateId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_event",
+   "metodo": "POST",
+   "ruta": "/events",
+   "tema": "Eventos",
+   "resumen": "Crear un evento",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "start_date"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_event",
+   "metodo": "PUT",
+   "ruta": "/events/{eventId}",
+   "tema": "Eventos",
+   "resumen": "Actualizar un evento",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "eventId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/events/{eventId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_event",
+   "metodo": "DELETE",
+   "ruta": "/events/{eventId}",
+   "tema": "Eventos",
+   "resumen": "Borrar un evento",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "eventId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/events/{eventId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_expenses_account",
+   "metodo": "POST",
+   "ruta": "/expenses-accounts",
+   "tema": "Cuentas de gastos",
+   "resumen": "Crear una cuenta de gastos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuentas de gastos: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "account_num"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_expenses_account",
+   "metodo": "PUT",
+   "ruta": "/expenses-accounts/{expensesAccountId}",
+   "tema": "Cuentas de gastos",
+   "resumen": "Actualizar una cuenta de gastos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuentas de gastos: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "expensesAccountId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/expenses-accounts/{expensesAccountId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_expenses_account",
+   "metodo": "DELETE",
+   "ruta": "/expenses-accounts/{expensesAccountId}",
+   "tema": "Cuentas de gastos",
+   "resumen": "Borrar una cuenta de gastos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "expensesAccountId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/expenses-accounts/{expensesAccountId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_funnel",
+   "metodo": "POST",
+   "ruta": "/funnels",
+   "tema": "Embudos",
+   "resumen": "Crear un embudo",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_funnel",
+   "metodo": "PUT",
+   "ruta": "/funnels/{funnelId}",
+   "tema": "Embudos",
+   "resumen": "Actualizar un embudo",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "funnelId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/funnels/{funnelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_funnel",
+   "metodo": "DELETE",
+   "ruta": "/funnels/{funnelId}",
+   "tema": "Embudos",
+   "resumen": "Borrar un embudo",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "funnelId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/funnels/{funnelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_inbox",
+   "metodo": "PUT",
+   "ruta": "/inbox/{incomingDocumentId}",
+   "tema": "Bandeja de entrada",
+   "resumen": "Actualizar un documento entrante",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "incomingDocumentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/inbox/{incomingDocumentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_inbox",
+   "metodo": "DELETE",
+   "ruta": "/inbox/{incomingDocumentId}",
+   "tema": "Bandeja de entrada",
+   "resumen": "Borrar un documento entrante",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "incomingDocumentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/inbox/{incomingDocumentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "attach_inbox",
+   "metodo": "POST",
+   "ruta": "/inbox/{incomingDocumentId}/attach",
+   "tema": "Bandeja de entrada",
+   "resumen": "Adjuntar documento entrante a un documento contable",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "documentId",
+    "documentType"
+   ],
+   "params": {
+    "incomingDocumentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/inbox/{incomingDocumentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "export_inbox",
+   "metodo": "POST",
+   "ruta": "/inbox/{incomingDocumentId}/export",
+   "tema": "Bandeja de entrada",
+   "resumen": "Convertir documento entrante en documento de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Convierte un documento entrante en compra",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "incomingDocumentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/inbox/{incomingDocumentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_invoice",
+   "metodo": "POST",
+   "ruta": "/invoices",
+   "tema": "Facturas",
+   "resumen": "Crear una factura",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "bulk_delete_invoices",
+   "metodo": "DELETE",
+   "ruta": "/invoices",
+   "tema": "Facturas",
+   "resumen": "Borrar facturas en lote",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "bulk_approve_invoices",
+   "metodo": "POST",
+   "ruta": "/invoices/bulk/approve",
+   "tema": "Facturas",
+   "resumen": "Aprobar facturas en lote: todas las pendientes de aprobar o una selección",
+   "riesgo": "alto",
+   "motivo_riesgo": "Operación en lote de Holded",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "bulk_cancel_invoices",
+   "metodo": "POST",
+   "ruta": "/invoices/bulk/cancel",
+   "tema": "Facturas",
+   "resumen": "Cancelar facturas en bloque",
+   "riesgo": "alto",
+   "motivo_riesgo": "Operación en lote de Holded",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "ids"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_invoice",
+   "metodo": "PUT",
+   "ruta": "/invoices/{invoiceId}",
+   "tema": "Facturas",
+   "resumen": "Actualizar una factura",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_invoice",
+   "metodo": "DELETE",
+   "ruta": "/invoices/{invoiceId}",
+   "tema": "Facturas",
+   "resumen": "Borrar una factura",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_invoice",
+   "metodo": "POST",
+   "ruta": "/invoices/{invoiceId}/approve",
+   "tema": "Facturas",
+   "resumen": "Aprobar una factura",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "cancel_invoice",
+   "metodo": "POST",
+   "ruta": "/invoices/{invoiceId}/cancel",
+   "tema": "Facturas",
+   "resumen": "Cancelar una factura",
+   "riesgo": "alto",
+   "motivo_riesgo": "Anula un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_invoice_payment",
+   "metodo": "POST",
+   "ruta": "/invoices/{invoiceId}/payments",
+   "tema": "Facturas",
+   "resumen": "Registrar un pago de factura",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_invoice_pipeline",
+   "metodo": "PUT",
+   "ruta": "/invoices/{invoiceId}/pipeline",
+   "tema": "Facturas",
+   "resumen": "Cambiar la fase de factura (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_invoice",
+   "metodo": "POST",
+   "ruta": "/invoices/{invoiceId}/send",
+   "tema": "Facturas",
+   "resumen": "Enviar factura por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "invoiceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/invoices/{invoiceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_lead",
+   "metodo": "POST",
+   "ruta": "/leads",
+   "tema": "Oportunidades",
+   "resumen": "Crear una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "funnel_id",
+    "contact_id",
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_lead",
+   "metodo": "PUT",
+   "ruta": "/leads/{leadId}",
+   "tema": "Oportunidades",
+   "resumen": "Actualizar una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_lead",
+   "metodo": "DELETE",
+   "ruta": "/leads/{leadId}",
+   "tema": "Oportunidades",
+   "resumen": "Borrar una oportunidad",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_lead_dates",
+   "metodo": "PUT",
+   "ruta": "/leads/{leadId}/dates",
+   "tema": "Oportunidades",
+   "resumen": "Actualizar fechas de una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_lead_note",
+   "metodo": "PUT",
+   "ruta": "/leads/{leadId}/notes",
+   "tema": "Oportunidades",
+   "resumen": "Actualizar una nota de oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "note_id"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_lead_note",
+   "metodo": "POST",
+   "ruta": "/leads/{leadId}/notes",
+   "tema": "Oportunidades",
+   "resumen": "Crear una nota en una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "title",
+    "description"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_lead_stage",
+   "metodo": "PUT",
+   "ruta": "/leads/{leadId}/stage",
+   "tema": "Oportunidades",
+   "resumen": "Actualizar la etapa de una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "stage_id"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_lead_task",
+   "metodo": "PUT",
+   "ruta": "/leads/{leadId}/tasks",
+   "tema": "Oportunidades",
+   "resumen": "Actualizar una tarea de oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "task_id",
+    "name"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_lead_task",
+   "metodo": "POST",
+   "ruta": "/leads/{leadId}/tasks",
+   "tema": "Oportunidades",
+   "resumen": "Crear una tarea en una oportunidad",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_lead_task",
+   "metodo": "DELETE",
+   "ruta": "/leads/{leadId}/tasks",
+   "tema": "Oportunidades",
+   "resumen": "Borrar una tarea de oportunidad",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "task_id"
+   ],
+   "params": {
+    "leadId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/leads/{leadId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_ledger_entry",
+   "metodo": "POST",
+   "ruta": "/ledger-entries",
+   "tema": "Contabilidad",
+   "resumen": "Crear un asiento contable (apunte del libro diario)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Contabilidad: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "date",
+    "lines"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_ledger_entry",
+   "metodo": "DELETE",
+   "ruta": "/ledger-entries/{ledgerEntryId}",
+   "tema": "Contabilidad",
+   "resumen": "Borrar un asiento contable",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "ledgerEntryId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/ledger-entries/{ledgerEntryId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_numbering_series",
+   "metodo": "POST",
+   "ruta": "/numbering-series/{type}",
+   "tema": "Series de numeración",
+   "resumen": "Crear una serie de numeración",
+   "riesgo": "alto",
+   "motivo_riesgo": "Series de numeración: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "format"
+   ],
+   "params": {
+    "type": {
+     "tipo": "enum",
+     "valores": [
+      "invoice",
+      "salesreceipt",
+      "creditnote",
+      "estimate",
+      "proform",
+      "waybill",
+      "salesorder",
+      "purchase",
+      "purchaserefund",
+      "order",
+      "purchaseshipment",
+      "receiptnote",
+      "productionorder"
+     ]
+    }
+   },
+   "lectura": "/numbering-series/{type}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_numbering_series",
+   "metodo": "PUT",
+   "ruta": "/numbering-series/{type}/{numberingSeriesId}",
+   "tema": "Series de numeración",
+   "resumen": "Actualizar una serie de numeración",
+   "riesgo": "alto",
+   "motivo_riesgo": "Series de numeración: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "format"
+   ],
+   "params": {
+    "type": {
+     "tipo": "enum",
+     "valores": [
+      "invoice",
+      "salesreceipt",
+      "creditnote",
+      "estimate",
+      "proform",
+      "waybill",
+      "salesorder",
+      "purchase",
+      "purchaserefund",
+      "order",
+      "purchaseshipment",
+      "receiptnote",
+      "productionorder"
+     ]
+    },
+    "numberingSeriesId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/numbering-series/{type}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_numbering_series",
+   "metodo": "DELETE",
+   "ruta": "/numbering-series/{type}/{numberingSeriesId}",
+   "tema": "Series de numeración",
+   "resumen": "Borrar una serie de numeración",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "type": {
+     "tipo": "enum",
+     "valores": [
+      "invoice",
+      "salesreceipt",
+      "creditnote",
+      "estimate",
+      "proform",
+      "waybill",
+      "salesorder",
+      "purchase",
+      "purchaserefund",
+      "order",
+      "purchaseshipment",
+      "receiptnote",
+      "productionorder"
+     ]
+    },
+    "numberingSeriesId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/numbering-series/{type}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_payment_method",
+   "metodo": "POST",
+   "ruta": "/payment-methods",
+   "tema": "Métodos de pago",
+   "resumen": "Crear un método de pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Métodos de pago: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_payment_method",
+   "metodo": "PUT",
+   "ruta": "/payment-methods/{paymentMethodId}",
+   "tema": "Métodos de pago",
+   "resumen": "Actualizar un método de pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Métodos de pago: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "paymentMethodId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payment-methods/{paymentMethodId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_payment_method",
+   "metodo": "DELETE",
+   "ruta": "/payment-methods/{paymentMethodId}",
+   "tema": "Métodos de pago",
+   "resumen": "Borrar un método de pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "paymentMethodId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payment-methods/{paymentMethodId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_payment",
+   "metodo": "POST",
+   "ruta": "/payments",
+   "tema": "Pagos",
+   "resumen": "Crear un pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "amount",
+    "date",
+    "type"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_payment",
+   "metodo": "PUT",
+   "ruta": "/payments/{paymentId}",
+   "tema": "Pagos",
+   "resumen": "Actualizar un pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Pagos: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "paymentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payments/{paymentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_payment",
+   "metodo": "DELETE",
+   "ruta": "/payments/{paymentId}",
+   "tema": "Pagos",
+   "resumen": "Borrar un pago",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "paymentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payments/{paymentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_payslip",
+   "metodo": "POST",
+   "ruta": "/payslips",
+   "tema": "Nóminas",
+   "resumen": "Crear nóminas en bloque",
+   "riesgo": "alto",
+   "motivo_riesgo": "Nóminas: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "employee_ids",
+    "liquidation_period_start_date"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_payslip",
+   "metodo": "DELETE",
+   "ruta": "/payslips/{payslipId}",
+   "tema": "Nóminas",
+   "resumen": "Borrar una nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "payslipId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payslips/{payslipId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_payslip",
+   "metodo": "POST",
+   "ruta": "/payslips/{payslipId}/approve",
+   "tema": "Nóminas",
+   "resumen": "Aprobar una nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "payslipId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payslips/{payslipId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_payslip_payment",
+   "metodo": "POST",
+   "ruta": "/payslips/{payslipId}/payments",
+   "tema": "Nóminas",
+   "resumen": "Registrar un pago de nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "payslipId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payslips/{payslipId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_payslip_payment",
+   "metodo": "DELETE",
+   "ruta": "/payslips/{payslipId}/payments/{paymentId}",
+   "tema": "Nóminas",
+   "resumen": "Eliminar un pago de una nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "payslipId": {
+     "tipo": "id"
+    },
+    "paymentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/payslips/{payslipId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_price_list",
+   "metodo": "POST",
+   "ruta": "/price-lists",
+   "tema": "Tarifas",
+   "resumen": "Crear una tarifa",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_price_list",
+   "metodo": "DELETE",
+   "ruta": "/price-lists/{priceListId}",
+   "tema": "Tarifas",
+   "resumen": "Borrar una tarifa",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "priceListId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/price-lists/{priceListId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_price_list",
+   "metodo": "PATCH",
+   "ruta": "/price-lists/{priceListId}",
+   "tema": "Tarifas",
+   "resumen": "Actualizar una tarifa",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "priceListId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/price-lists/{priceListId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_production_order",
+   "metodo": "POST",
+   "ruta": "/production-orders",
+   "tema": "Órdenes de producción",
+   "resumen": "Crear una orden de producción",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "manufactured_product"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_production_order",
+   "metodo": "PUT",
+   "ruta": "/production-orders/{productionOrderId}",
+   "tema": "Órdenes de producción",
+   "resumen": "Actualizar una orden de producción",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "productionOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/production-orders/{productionOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_production_order",
+   "metodo": "DELETE",
+   "ruta": "/production-orders/{productionOrderId}",
+   "tema": "Órdenes de producción",
+   "resumen": "Borrar una orden de producción",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "productionOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/production-orders/{productionOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_product",
+   "metodo": "POST",
+   "ruta": "/products",
+   "tema": "Productos",
+   "resumen": "Crear un producto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "kind",
+    "has_stock",
+    "for_sale",
+    "for_purchase"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_product",
+   "metodo": "PUT",
+   "ruta": "/products/{productId}",
+   "tema": "Productos",
+   "resumen": "Actualizar un producto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "for_sale",
+    "for_purchase",
+    "archived"
+   ],
+   "params": {
+    "productId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/products/{productId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_product",
+   "metodo": "DELETE",
+   "ruta": "/products/{productId}",
+   "tema": "Productos",
+   "resumen": "Borrar un producto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "productId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/products/{productId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_product_stock",
+   "metodo": "PUT",
+   "ruta": "/products/{productId}/stock",
+   "tema": "Productos",
+   "resumen": "Actualizar el stock de un producto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "warehouse_id",
+    "stock_variation"
+   ],
+   "params": {
+    "productId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/products/{productId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_proforma",
+   "metodo": "POST",
+   "ruta": "/proformas",
+   "tema": "Proformas",
+   "resumen": "Crear una proforma",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_proforma",
+   "metodo": "PUT",
+   "ruta": "/proformas/{proformaId}",
+   "tema": "Proformas",
+   "resumen": "Actualizar una proforma",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "proformaId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/proformas/{proformaId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_proforma",
+   "metodo": "DELETE",
+   "ruta": "/proformas/{proformaId}",
+   "tema": "Proformas",
+   "resumen": "Borrar una proforma",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "proformaId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/proformas/{proformaId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_proforma",
+   "metodo": "POST",
+   "ruta": "/proformas/{proformaId}/approve",
+   "tema": "Proformas",
+   "resumen": "Aprobar una proforma",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "proformaId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/proformas/{proformaId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_proforma_pipeline",
+   "metodo": "PUT",
+   "ruta": "/proformas/{proformaId}/pipeline",
+   "tema": "Proformas",
+   "resumen": "Cambiar la fase de proforma (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "proformaId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/proformas/{proformaId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_proforma",
+   "metodo": "POST",
+   "ruta": "/proformas/{proformaId}/send",
+   "tema": "Proformas",
+   "resumen": "Enviar proforma por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "proformaId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/proformas/{proformaId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_project",
+   "metodo": "POST",
+   "ruta": "/projects",
+   "tema": "Proyectos",
+   "resumen": "Crear un proyecto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_project",
+   "metodo": "PUT",
+   "ruta": "/projects/{projectId}",
+   "tema": "Proyectos",
+   "resumen": "Actualizar un proyecto",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "projectId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/projects/{projectId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_project",
+   "metodo": "DELETE",
+   "ruta": "/projects/{projectId}",
+   "tema": "Proyectos",
+   "resumen": "Borrar un proyecto",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "projectId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/projects/{projectId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_project_time",
+   "metodo": "POST",
+   "ruta": "/projects/{projectId}/times",
+   "tema": "Control de tiempo en proyectos",
+   "resumen": "Crear un registro de tiempo en un proyecto (parte de horas, jornada)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "duration"
+   ],
+   "params": {
+    "projectId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/projects/{projectId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_project_time",
+   "metodo": "PUT",
+   "ruta": "/projects/{projectId}/times/{timeId}",
+   "tema": "Control de tiempo en proyectos",
+   "resumen": "Actualizar un registro de tiempo de proyecto (parte de horas, jornada)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "timeId": {
+     "tipo": "id"
+    },
+    "projectId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/projects/{projectId}/times/{timeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_project_time",
+   "metodo": "DELETE",
+   "ruta": "/projects/{projectId}/times/{timeId}",
+   "tema": "Control de tiempo en proyectos",
+   "resumen": "Borrar un registro de tiempo de proyecto (parte de horas, jornada)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "timeId": {
+     "tipo": "id"
+    },
+    "projectId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/projects/{projectId}/times/{timeId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase_order",
+   "metodo": "POST",
+   "ruta": "/purchase-orders",
+   "tema": "Pedidos de compra",
+   "resumen": "Crear un pedido de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_purchase_order",
+   "metodo": "PUT",
+   "ruta": "/purchase-orders/{purchaseOrderId}",
+   "tema": "Pedidos de compra",
+   "resumen": "Actualizar un pedido de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_purchase_order",
+   "metodo": "DELETE",
+   "ruta": "/purchase-orders/{purchaseOrderId}",
+   "tema": "Pedidos de compra",
+   "resumen": "Borrar un pedido de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_purchase_order",
+   "metodo": "POST",
+   "ruta": "/purchase-orders/{purchaseOrderId}/approve",
+   "tema": "Pedidos de compra",
+   "resumen": "Aprobar un pedido de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_purchase_order_pipeline",
+   "metodo": "PUT",
+   "ruta": "/purchase-orders/{purchaseOrderId}/pipeline",
+   "tema": "Pedidos de compra",
+   "resumen": "Cambiar la fase de pedido de compra (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "receive_purchase_order",
+   "metodo": "POST",
+   "ruta": "/purchase-orders/{purchaseOrderId}/receive",
+   "tema": "Pedidos de compra",
+   "resumen": "Recibir unidades de un pedido de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "items"
+   ],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_purchase_order",
+   "metodo": "POST",
+   "ruta": "/purchase-orders/{purchaseOrderId}/send",
+   "tema": "Pedidos de compra",
+   "resumen": "Enviar pedido de compra por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "purchaseOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-orders/{purchaseOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase_receipt",
+   "metodo": "POST",
+   "ruta": "/purchase-receipts",
+   "tema": "Tickets de compra",
+   "resumen": "Crear un ticket de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_purchase_receipt",
+   "metodo": "PUT",
+   "ruta": "/purchase-receipts/{purchaseReceiptId}",
+   "tema": "Tickets de compra",
+   "resumen": "Actualizar un ticket de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "purchaseReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-receipts/{purchaseReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_purchase_receipt",
+   "metodo": "DELETE",
+   "ruta": "/purchase-receipts/{purchaseReceiptId}",
+   "tema": "Tickets de compra",
+   "resumen": "Borrar un ticket de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-receipts/{purchaseReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase_shipment",
+   "metodo": "POST",
+   "ruta": "/purchase-shipments",
+   "tema": "Albaranes de compra",
+   "resumen": "Crear un albarán de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_purchase_shipment",
+   "metodo": "PUT",
+   "ruta": "/purchase-shipments/{purchaseShipmentId}",
+   "tema": "Albaranes de compra",
+   "resumen": "Actualizar un albarán de compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "purchaseShipmentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-shipments/{purchaseShipmentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_purchase_shipment",
+   "metodo": "DELETE",
+   "ruta": "/purchase-shipments/{purchaseShipmentId}",
+   "tema": "Albaranes de compra",
+   "resumen": "Borrar un albarán de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseShipmentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-shipments/{purchaseShipmentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_purchase_shipment",
+   "metodo": "POST",
+   "ruta": "/purchase-shipments/{purchaseShipmentId}/approve",
+   "tema": "Albaranes de compra",
+   "resumen": "Aprobar un albarán de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseShipmentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchase-shipments/{purchaseShipmentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase",
+   "metodo": "POST",
+   "ruta": "/purchases",
+   "tema": "Compras",
+   "resumen": "Crear una compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase_refund",
+   "metodo": "POST",
+   "ruta": "/purchases/refund",
+   "tema": "Compras",
+   "resumen": "Crear una compra rectificativa",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra una devolución",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_purchase",
+   "metodo": "PUT",
+   "ruta": "/purchases/{purchaseId}",
+   "tema": "Compras",
+   "resumen": "Actualizar una compra",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "purchaseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchases/{purchaseId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_purchase",
+   "metodo": "DELETE",
+   "ruta": "/purchases/{purchaseId}",
+   "tema": "Compras",
+   "resumen": "Borrar una compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchases/{purchaseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_purchase",
+   "metodo": "POST",
+   "ruta": "/purchases/{purchaseId}/approve",
+   "tema": "Compras",
+   "resumen": "Aprobar una compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "purchaseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchases/{purchaseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_purchase_payment",
+   "metodo": "POST",
+   "ruta": "/purchases/{purchaseId}/payments",
+   "tema": "Compras",
+   "resumen": "Registrar un pago de compra",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "amount"
+   ],
+   "params": {
+    "purchaseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchases/{purchaseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_purchase_pipeline",
+   "metodo": "PUT",
+   "ruta": "/purchases/{purchaseId}/pipeline",
+   "tema": "Compras",
+   "resumen": "Cambiar la fase de compra (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "purchaseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/purchases/{purchaseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_receipt_note",
+   "metodo": "POST",
+   "ruta": "/receipt-notes",
+   "tema": "Rectificativas de venta",
+   "resumen": "Crear una rectificativa de ticket de venta (nota de recibo)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_receipt_note",
+   "metodo": "PUT",
+   "ruta": "/receipt-notes/{receiptNoteId}",
+   "tema": "Rectificativas de venta",
+   "resumen": "Actualizar una rectificativa de ticket de venta (nota de recibo)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_receipt_note",
+   "metodo": "DELETE",
+   "ruta": "/receipt-notes/{receiptNoteId}",
+   "tema": "Rectificativas de venta",
+   "resumen": "Borrar una rectificativa de ticket de venta (nota de recibo)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_receipt_note",
+   "metodo": "POST",
+   "ruta": "/receipt-notes/{receiptNoteId}/approve",
+   "tema": "Rectificativas de venta",
+   "resumen": "Aprobar una rectificativa de ticket de venta (nota de recibo)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_receipt_note_payment",
+   "metodo": "POST",
+   "ruta": "/receipt-notes/{receiptNoteId}/payments",
+   "tema": "Rectificativas de venta",
+   "resumen": "Registrar un pago de rectificativa de ticket de venta (nota de recibo)",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_receipt_note_pipeline",
+   "metodo": "PUT",
+   "ruta": "/receipt-notes/{receiptNoteId}/pipeline",
+   "tema": "Rectificativas de venta",
+   "resumen": "Cambiar la fase de la rectificativa de ticket de venta o nota de recibo (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_receipt_note",
+   "metodo": "POST",
+   "ruta": "/receipt-notes/{receiptNoteId}/send",
+   "tema": "Rectificativas de venta",
+   "resumen": "Enviar rectificativa de ticket de venta (nota de recibo) por correo electrónico",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "receiptNoteId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/receipt-notes/{receiptNoteId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_invoice_recurring",
+   "metodo": "POST",
+   "ruta": "/recurring-invoices",
+   "tema": "Facturas recurrentes",
+   "resumen": "Crear una factura recurrente",
+   "riesgo": "alto",
+   "motivo_riesgo": "Facturas recurrentes: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items",
+    "periodicity"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_invoice_recurring",
+   "metodo": "PUT",
+   "ruta": "/recurring-invoices/{invoiceRecurringId}",
+   "tema": "Facturas recurrentes",
+   "resumen": "Actualizar una factura recurrente",
+   "riesgo": "alto",
+   "motivo_riesgo": "Facturas recurrentes: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "invoiceRecurringId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/recurring-invoices/{invoiceRecurringId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_invoice_recurring",
+   "metodo": "DELETE",
+   "ruta": "/recurring-invoices/{invoiceRecurringId}",
+   "tema": "Facturas recurrentes",
+   "resumen": "Borrar una factura recurrente",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "invoiceRecurringId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/recurring-invoices/{invoiceRecurringId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "skip_recurring_occurrence",
+   "metodo": "POST",
+   "ruta": "/recurring-invoices/{invoiceRecurringId}/skip",
+   "tema": "Facturas recurrentes",
+   "resumen": "Omitir una ocurrencia de factura recurrente",
+   "riesgo": "alto",
+   "motivo_riesgo": "Salta una emisión recurrente",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "date"
+   ],
+   "params": {
+    "invoiceRecurringId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/recurring-invoices/{invoiceRecurringId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_salary_record",
+   "metodo": "POST",
+   "ruta": "/salary-records",
+   "tema": "Registros de nómina",
+   "resumen": "Crear un registro de nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registros de nómina: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "employee_id",
+    "date",
+    "accounting_account_id"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_salary_record",
+   "metodo": "PUT",
+   "ruta": "/salary-records/{salaryRecordId}",
+   "tema": "Registros de nómina",
+   "resumen": "Actualizar un registro de nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registros de nómina: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "accounting_account_id",
+    "is_draft"
+   ],
+   "params": {
+    "salaryRecordId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/salary-records/{salaryRecordId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_salary_record",
+   "metodo": "DELETE",
+   "ruta": "/salary-records/{salaryRecordId}",
+   "tema": "Registros de nómina",
+   "resumen": "Borrar un registro de nómina",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salaryRecordId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/salary-records/{salaryRecordId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_sales_channel",
+   "metodo": "POST",
+   "ruta": "/sales-channels",
+   "tema": "Canales de venta",
+   "resumen": "Crear un canal de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "account_num"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_sales_channel",
+   "metodo": "PUT",
+   "ruta": "/sales-channels/{salesChannelId}",
+   "tema": "Canales de venta",
+   "resumen": "Actualizar un canal de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "salesChannelId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-channels/{salesChannelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_sales_channel",
+   "metodo": "DELETE",
+   "ruta": "/sales-channels/{salesChannelId}",
+   "tema": "Canales de venta",
+   "resumen": "Borrar un canal de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesChannelId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-channels/{salesChannelId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders",
+   "tema": "Pedidos de venta",
+   "resumen": "Crear un pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_sales_order",
+   "metodo": "PUT",
+   "ruta": "/sales-orders/{salesOrderId}",
+   "tema": "Pedidos de venta",
+   "resumen": "Actualizar un pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_sales_order",
+   "metodo": "DELETE",
+   "ruta": "/sales-orders/{salesOrderId}",
+   "tema": "Pedidos de venta",
+   "resumen": "Borrar un pedido de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "accept_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/accept",
+   "tema": "Pedidos de venta",
+   "resumen": "Aceptar un pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/approve",
+   "tema": "Pedidos de venta",
+   "resumen": "Aprobar un pedido de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "cancel_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/cancel",
+   "tema": "Pedidos de venta",
+   "resumen": "Cancelar un pedido de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Anula un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_sales_order_pipeline",
+   "metodo": "PUT",
+   "ruta": "/sales-orders/{salesOrderId}/pipeline",
+   "tema": "Pedidos de venta",
+   "resumen": "Cambiar la fase de pedido de venta (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/send",
+   "tema": "Pedidos de venta",
+   "resumen": "Enviar pedido de venta por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "ship_sales_order",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/ship",
+   "tema": "Pedidos de venta",
+   "resumen": "Enviar todos los artículos de un pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "ship_sales_order_by_lines",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/ship-by-lines",
+   "tema": "Pedidos de venta",
+   "resumen": "Envío parcial de un pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_sales_order_tracking",
+   "metodo": "PUT",
+   "ruta": "/sales-orders/{salesOrderId}/tracking",
+   "tema": "Pedidos de venta",
+   "resumen": "Actualizar información de seguimiento del pedido de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "salesOrderId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-orders/{salesOrderId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_sales_receipt",
+   "metodo": "POST",
+   "ruta": "/sales-receipts",
+   "tema": "Tickets de venta",
+   "resumen": "Crear un ticket de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_sales_receipt",
+   "metodo": "PUT",
+   "ruta": "/sales-receipts/{salesReceiptId}",
+   "tema": "Tickets de venta",
+   "resumen": "Actualizar un ticket de venta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_sales_receipt",
+   "metodo": "DELETE",
+   "ruta": "/sales-receipts/{salesReceiptId}",
+   "tema": "Tickets de venta",
+   "resumen": "Borrar un ticket de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_sales_receipt",
+   "metodo": "POST",
+   "ruta": "/sales-receipts/{salesReceiptId}/approve",
+   "tema": "Tickets de venta",
+   "resumen": "Aprobar un ticket de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_sales_receipt_payment",
+   "metodo": "POST",
+   "ruta": "/sales-receipts/{salesReceiptId}/payments",
+   "tema": "Tickets de venta",
+   "resumen": "Registrar un pago de ticket de venta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Registra pagos o cobros",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_sales_receipt_pipeline",
+   "metodo": "PUT",
+   "ruta": "/sales-receipts/{salesReceiptId}/pipeline",
+   "tema": "Tickets de venta",
+   "resumen": "Cambiar la fase de ticket de venta (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_sales_receipt",
+   "metodo": "POST",
+   "ruta": "/sales-receipts/{salesReceiptId}/send",
+   "tema": "Tickets de venta",
+   "resumen": "Enviar ticket de venta por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "salesReceiptId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/sales-receipts/{salesReceiptId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_service",
+   "metodo": "POST",
+   "ruta": "/services",
+   "tema": "Servicios",
+   "resumen": "Crear un servicio",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_service",
+   "metodo": "PUT",
+   "ruta": "/services/{serviceId}",
+   "tema": "Servicios",
+   "resumen": "Actualizar un servicio",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "serviceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/services/{serviceId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_service",
+   "metodo": "DELETE",
+   "ruta": "/services/{serviceId}",
+   "tema": "Servicios",
+   "resumen": "Borrar un servicio",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "serviceId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/services/{serviceId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_assignment",
+   "metodo": "POST",
+   "ruta": "/shift-assignments",
+   "tema": "Asignaciones de turnos",
+   "resumen": "Asignar un turno a uno o varios empleados en un rango de fechas",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "calendar_id",
+    "shift_id",
+    "employee_ids",
+    "start_date"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "batch_delete_assignments",
+   "metodo": "POST",
+   "ruta": "/shift-assignments/batch-delete",
+   "tema": "Asignaciones de turnos",
+   "resumen": "Eliminar asignaciones de turnos en lote",
+   "riesgo": "alto",
+   "motivo_riesgo": "Operación sensible",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "calendar_id"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_shift_calendar",
+   "metodo": "POST",
+   "ruta": "/shift-calendars",
+   "tema": "Calendarios de turnos",
+   "resumen": "Crear un calendario de turnos",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_shift_calendar",
+   "metodo": "PUT",
+   "ruta": "/shift-calendars/{calendarId}",
+   "tema": "Calendarios de turnos",
+   "resumen": "Actualizar un calendario de turnos",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {
+    "calendarId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-calendars/{calendarId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_shift_calendar",
+   "metodo": "DELETE",
+   "ruta": "/shift-calendars/{calendarId}",
+   "tema": "Calendarios de turnos",
+   "resumen": "Eliminar un calendario de turnos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "calendarId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-calendars/{calendarId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_assignment",
+   "metodo": "PUT",
+   "ruta": "/shift-calendars/{calendarId}/assignments/{assignmentId}",
+   "tema": "Asignaciones de turnos",
+   "resumen": "Actualizar una asignación de turno",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "shift_id",
+    "employee_id",
+    "date",
+    "name",
+    "color"
+   ],
+   "params": {
+    "calendarId": {
+     "tipo": "id"
+    },
+    "assignmentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-calendars/{calendarId}/assignments/{assignmentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_assignment",
+   "metodo": "DELETE",
+   "ruta": "/shift-calendars/{calendarId}/assignments/{assignmentId}",
+   "tema": "Asignaciones de turnos",
+   "resumen": "Eliminar una asignación de turno",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "calendarId": {
+     "tipo": "id"
+    },
+    "assignmentId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-calendars/{calendarId}/assignments/{assignmentId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "publish_shift_calendar",
+   "metodo": "POST",
+   "ruta": "/shift-calendars/{calendarId}/publish",
+   "tema": "Calendarios de turnos",
+   "resumen": "Publicar un calendario de turnos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Publica",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "calendarId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-calendars/{calendarId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_recurrency",
+   "metodo": "PUT",
+   "ruta": "/shift-recurrencies/{recurrencyId}",
+   "tema": "Recurrencias de turnos",
+   "resumen": "Actualizar una recurrencia de turnos",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "scope",
+    "shift_id",
+    "name",
+    "color",
+    "start_date",
+    "end_date",
+    "employee_ids"
+   ],
+   "params": {
+    "recurrencyId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shift-recurrencies/{recurrencyId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_recurrency",
+   "metodo": "DELETE",
+   "ruta": "/shift-recurrencies/{recurrencyId}",
+   "tema": "Recurrencias de turnos",
+   "resumen": "Eliminar una recurrencia de turnos",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "recurrencyId": {
+     "tipo": "id"
+    }
+   },
+   "query": {
+    "from_date": {
+     "tipo": "texto",
+     "obligatorio": false
+    }
+   },
+   "lectura": "/shift-recurrencies/{recurrencyId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_shift",
+   "metodo": "POST",
+   "ruta": "/shifts",
+   "tema": "Turnos",
+   "resumen": "Crear un turno",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "color"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_shift",
+   "metodo": "PUT",
+   "ruta": "/shifts/{shiftId}",
+   "tema": "Turnos",
+   "resumen": "Actualizar un turno",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "color"
+   ],
+   "params": {
+    "shiftId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shifts/{shiftId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_shift",
+   "metodo": "DELETE",
+   "ruta": "/shifts/{shiftId}",
+   "tema": "Turnos",
+   "resumen": "Borrar un turno",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "shiftId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/shifts/{shiftId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_tag",
+   "metodo": "POST",
+   "ruta": "/tags",
+   "tema": "Etiquetas",
+   "resumen": "Crear una etiqueta",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_tag",
+   "metodo": "DELETE",
+   "ruta": "/tags/{tag}",
+   "tema": "Etiquetas",
+   "resumen": "Borrar una etiqueta",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "tag": {
+     "tipo": "texto"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_task",
+   "metodo": "POST",
+   "ruta": "/tasks",
+   "tema": "Tareas",
+   "resumen": "Crear una tarea",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "project_id",
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_task",
+   "metodo": "PUT",
+   "ruta": "/tasks/{taskId}",
+   "tema": "Tareas",
+   "resumen": "Actualizar una tarea",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "taskId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/tasks/{taskId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_task",
+   "metodo": "DELETE",
+   "ruta": "/tasks/{taskId}",
+   "tema": "Tareas",
+   "resumen": "Borrar una tarea",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "taskId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/tasks/{taskId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_banking_account",
+   "metodo": "POST",
+   "ruta": "/treasury/accounts",
+   "tema": "Cuentas bancarias",
+   "resumen": "Crear una cuenta bancaria",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuentas bancarias: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "type"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_bank_movement",
+   "metodo": "POST",
+   "ruta": "/treasury/accounts/{bankingAccountId}/bank-movements",
+   "tema": "Cuentas bancarias",
+   "resumen": "Crear un movimiento bancario manual",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuentas bancarias: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "bankingAccountId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "reconcile_transaction_with_document",
+   "metodo": "POST",
+   "ruta": "/treasury/accounts/{bankingAccountId}/bank-movements/{movementId}/reconcile",
+   "tema": "Cuentas bancarias",
+   "resumen": "Conciliar un movimiento bancario",
+   "riesgo": "alto",
+   "motivo_riesgo": "Concilia movimientos bancarios",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "bankingAccountId": {
+     "tipo": "id"
+    },
+    "movementId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_banking_account",
+   "metodo": "PUT",
+   "ruta": "/treasury/accounts/{id}",
+   "tema": "Cuentas bancarias",
+   "resumen": "Actualizar una cuenta bancaria",
+   "riesgo": "alto",
+   "motivo_riesgo": "Cuentas bancarias: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name",
+    "currency",
+    "accounting_account_id",
+    "auto_sync"
+   ],
+   "params": {
+    "id": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/treasury/accounts/{id}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_banking_account",
+   "metodo": "DELETE",
+   "ruta": "/treasury/accounts/{id}",
+   "tema": "Cuentas bancarias",
+   "resumen": "Borrar una cuenta bancaria",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "id": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/treasury/accounts/{id}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "archive_banking_account",
+   "metodo": "POST",
+   "ruta": "/treasury/accounts/{id}/archive",
+   "tema": "Cuentas bancarias",
+   "resumen": "Archivar una cuenta bancaria",
+   "riesgo": "alto",
+   "motivo_riesgo": "Archiva",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "id": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/treasury/accounts/{id}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_invoicing_forecast",
+   "metodo": "POST",
+   "ruta": "/treasury/cashflow/invoicing-forecasts",
+   "tema": "Previsiones de facturación",
+   "resumen": "Crear una previsión de facturación",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "relatedDocumentId",
+    "relatedDocumentType",
+    "issueDate",
+    "dueDate",
+    "amount",
+    "percentage"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "edit_invoicing_forecast",
+   "metodo": "PUT",
+   "ruta": "/treasury/cashflow/invoicing-forecasts/{forecastId}",
+   "tema": "Previsiones de facturación",
+   "resumen": "Editar una previsión de facturación",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "issueDate",
+    "dueDate",
+    "amount",
+    "percentage"
+   ],
+   "params": {
+    "forecastId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/treasury/cashflow/invoicing-forecasts/{forecastId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_invoicing_forecast",
+   "metodo": "DELETE",
+   "ruta": "/treasury/cashflow/invoicing-forecasts/{forecastId}",
+   "tema": "Previsiones de facturación",
+   "resumen": "Borrar una previsión de facturación",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "forecastId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/treasury/cashflow/invoicing-forecasts/{forecastId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_warehouse",
+   "metodo": "POST",
+   "ruta": "/warehouses",
+   "tema": "Almacenes",
+   "resumen": "Crear un almacén",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "name"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_warehouse",
+   "metodo": "DELETE",
+   "ruta": "/warehouses/{warehouseId}",
+   "tema": "Almacenes",
+   "resumen": "Borrar un almacén",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "warehouseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/warehouses/{warehouseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_warehouse",
+   "metodo": "PATCH",
+   "ruta": "/warehouses/{warehouseId}",
+   "tema": "Almacenes",
+   "resumen": "Actualizar un almacén",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "warehouseId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/warehouses/{warehouseId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_waybill",
+   "metodo": "POST",
+   "ruta": "/waybills",
+   "tema": "Albaranes",
+   "resumen": "Crear un albarán",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "contact_id",
+    "items"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_waybill",
+   "metodo": "PUT",
+   "ruta": "/waybills/{waybillId}",
+   "tema": "Albaranes",
+   "resumen": "Actualizar un albarán",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": true
+  },
+  {
+   "id": "delete_waybill",
+   "metodo": "DELETE",
+   "ruta": "/waybills/{waybillId}",
+   "tema": "Albaranes",
+   "resumen": "Borrar un albarán",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "approve_waybill",
+   "metodo": "POST",
+   "ruta": "/waybills/{waybillId}/approve",
+   "tema": "Albaranes",
+   "resumen": "Aprobar un albarán",
+   "riesgo": "alto",
+   "motivo_riesgo": "Aprueba o emite un documento",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "set_waybill_pipeline",
+   "metodo": "PUT",
+   "ruta": "/waybills/{waybillId}/pipeline",
+   "tema": "Albaranes",
+   "resumen": "Cambiar la fase de albarán (mover de etapa o estado, pipeline)",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "pipeline_id"
+   ],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "send_waybill",
+   "metodo": "POST",
+   "ruta": "/waybills/{waybillId}/send",
+   "tema": "Albaranes",
+   "resumen": "Enviar albarán por email",
+   "riesgo": "alto",
+   "motivo_riesgo": "Envía un documento por correo al cliente",
+   "cuerpo": "json",
+   "requeridos": [],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_waybill_tracking",
+   "metodo": "PUT",
+   "ruta": "/waybills/{waybillId}/tracking",
+   "tema": "Albaranes",
+   "resumen": "Actualizar información de seguimiento del albarán",
+   "riesgo": "normal",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [],
+   "params": {
+    "waybillId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/waybills/{waybillId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "create_webhook",
+   "metodo": "POST",
+   "ruta": "/webhooks",
+   "tema": "Webhooks",
+   "resumen": "Crear un webhook",
+   "riesgo": "alto",
+   "motivo_riesgo": "Webhooks: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "url",
+    "events"
+   ],
+   "params": {},
+   "lectura": null,
+   "reemplaza_todo": false
+  },
+  {
+   "id": "update_webhook",
+   "metodo": "PUT",
+   "ruta": "/webhooks/{webhookId}",
+   "tema": "Webhooks",
+   "resumen": "Actualizar un webhook",
+   "riesgo": "alto",
+   "motivo_riesgo": "Webhooks: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "url",
+    "events"
+   ],
+   "params": {
+    "webhookId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/webhooks/{webhookId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "delete_webhook",
+   "metodo": "DELETE",
+   "ruta": "/webhooks/{webhookId}",
+   "tema": "Webhooks",
+   "resumen": "Eliminar un webhook",
+   "riesgo": "alto",
+   "motivo_riesgo": "Borra datos en Holded",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "webhookId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/webhooks/{webhookId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "disable_webhook",
+   "metodo": "POST",
+   "ruta": "/webhooks/{webhookId}/disable",
+   "tema": "Webhooks",
+   "resumen": "Deshabilitar un webhook",
+   "riesgo": "alto",
+   "motivo_riesgo": "Webhooks: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "json",
+   "cuerpo_obligatorio": true,
+   "requeridos": [
+    "reason"
+   ],
+   "params": {
+    "webhookId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/webhooks/{webhookId}",
+   "reemplaza_todo": false
+  },
+  {
+   "id": "enable_webhook",
+   "metodo": "POST",
+   "ruta": "/webhooks/{webhookId}/enable",
+   "tema": "Webhooks",
+   "resumen": "Habilitar un webhook",
+   "riesgo": "alto",
+   "motivo_riesgo": "Webhooks: datos bancarios, contables, de pagos, nóminas o de acceso a la cuenta",
+   "cuerpo": "ninguno",
+   "requeridos": [],
+   "params": {
+    "webhookId": {
+     "tipo": "id"
+    }
+   },
+   "lectura": "/webhooks/{webhookId}",
+   "reemplaza_todo": false
+  }
+ ],
+ "excluidas": [
+  {
+   "id": "attach_contact_file",
+   "metodo": "POST",
+   "ruta": "/contacts/{contactId}/attachments",
+   "tema": "Contactos",
+   "resumen": "Adjuntar un archivo a un contacto",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_credit_note_file",
+   "metodo": "POST",
+   "ruta": "/credit-notes/{creditNoteId}/attachments",
+   "tema": "Facturas rectificativas",
+   "resumen": "Adjuntar un archivo a una factura rectificativa (abono)",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_estimate_file",
+   "metodo": "POST",
+   "ruta": "/estimates/{estimateId}/attachments",
+   "tema": "Presupuestos",
+   "resumen": "Adjuntar un archivo a un presupuesto",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "upload_inbox",
+   "metodo": "POST",
+   "ruta": "/inbox",
+   "tema": "Bandeja de entrada",
+   "resumen": "Subir un documento al buzón",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_invoice_file",
+   "metodo": "POST",
+   "ruta": "/invoices/{invoiceId}/attachments",
+   "tema": "Facturas",
+   "resumen": "Adjuntar un archivo a una factura",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "upload_product_image",
+   "metodo": "POST",
+   "ruta": "/products/{productId}/images",
+   "tema": "Productos",
+   "resumen": "Subir una imagen de producto",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_proforma_file",
+   "metodo": "POST",
+   "ruta": "/proformas/{proformaId}/attachments",
+   "tema": "Proformas",
+   "resumen": "Adjuntar un archivo a una proforma",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_purchase_order_file",
+   "metodo": "POST",
+   "ruta": "/purchase-orders/{purchaseOrderId}/attachments",
+   "tema": "Pedidos de compra",
+   "resumen": "Adjuntar un archivo a un pedido de compra",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_purchase_file",
+   "metodo": "POST",
+   "ruta": "/purchases/{purchaseId}/attachments",
+   "tema": "Compras",
+   "resumen": "Adjuntar un archivo a una compra",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_receipt_note_file",
+   "metodo": "POST",
+   "ruta": "/receipt-notes/{receiptNoteId}/attachments",
+   "tema": "Rectificativas de venta",
+   "resumen": "Adjuntar un archivo a una rectificativa de ticket de venta (nota de recibo)",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_sales_order_file",
+   "metodo": "POST",
+   "ruta": "/sales-orders/{salesOrderId}/attachments",
+   "tema": "Pedidos de venta",
+   "resumen": "Adjuntar un archivo a un pedido de venta",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_sales_receipt_file",
+   "metodo": "POST",
+   "ruta": "/sales-receipts/{salesReceiptId}/attachments",
+   "tema": "Tickets de venta",
+   "resumen": "Adjuntar un archivo a un ticket de venta",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  },
+  {
+   "id": "attach_waybill_file",
+   "metodo": "POST",
+   "ruta": "/waybills/{waybillId}/attachments",
+   "tema": "Albaranes",
+   "resumen": "Adjuntar un archivo a un albarán",
+   "motivo": "Sube un fichero (multipart/form-data): el asistente no envía ficheros"
+  }
+ ]
+}
