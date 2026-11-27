@@ -1,0 +1,13 @@
+﻿Empresa;CIF;Dirección;Contacto;Empleados;Email;Teléfono;Etapa;Servicio;Etapa;Importe;Frecuencia;RESPONSABLE;Prioridad
+Talleres Ficticios SL;B-111 111 11;Av. Falsa 2, Madrid;Laura Prueba;5;LAURA@ejemplo.invalid;600222333;Nuevo;CFO Externo;Cliente activo;1800;Mensual;Ana Inventada;Alta
+Talleres Ficticios S.L.;B11111111;;Óscar Demo;;;611 444 555;Oportunidad;Planificación Fiscal;Propuesta enviada;3.200,50;anual;ana;media
+Talleres Ficticios SL;B11111111;;Laura Prueba;;laura@ejemplo.invalid;;;CFO Externo;Reunión;;;;
+Consultora Imaginaria SA;A22222222;C/ Inventada 9;Laura Prueba;40;laura@ejemplo.invalid;;;Contable;negociacion;0;;Mario;baja
+Sin Cif Inventada SL;;;Pedro Ejemplo;3.0;;;Cliente activo;Legal y Cumplimiento;Contactado;650 €;Puntual;;
+sin cif inventada sl;;;pedro ejemplo;;;;;;;;;;
+Gestoría de Mentira SL;b33333333;Plaza Ficticia 1;Marta Ensayo;12;marta@ensayo.invalid;600333444.0;propuesta;Asesoría Laboral;Nueva solicitud;480;MENSUAL;Mario Prueba Apellido;
+Gestoría de Mentira SL;B33333333;;Marta Ensayo;;marta@ensayo.invalid;;;Asesoría Laboral;Reunión;500;Mensual;;
+Exportaciones Simuladas SL;B44444444;;;;;;;Expansión LatAm;Perdido;;Trimestral;Ana;Alta
+Datos Erróneos SL;B55555555;;Error Uno;muchos;no-es-un-email;;Lead;Servicio Inventado;Ganado;12,5;Semanal;Nadie;Urgente
+;;;;;;;;;;;;;
+Estudio Supuesto SL;B66666666;;Rich Texto;;rich@texto.invalid;6.00555666E+8;Perdido;s6;perdido;;puntual;;low

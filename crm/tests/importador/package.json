@@ -1,0 +1,11 @@
+{
+  "name": "guimaes-tests-importador",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node importador-sql.test.mjs && node --test importador-util.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.2.17"
+  }
+}
