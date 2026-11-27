@@ -53,10 +53,11 @@ export function Acciones({ toast, nav, focusId }) {
   const [err, setErr] = aState("");
   const [sel, setSel] = aState(focusId || null);
   const [filtro, setFiltro] = aState("abiertas");
+  const [version, setVersion] = aState(0);         // cada recarga de la lista refresca también los cupos
   const cargar = async () => {
     const r = await Auth.client.from("holded_acciones").select(COLUMNAS).order("created_at", { ascending: false }).limit(200);
     if (r.error) { setErr("No se pudieron cargar las acciones: " + errorTexto(r.error)); return; }
-    setErr(""); setLista(r.data || []);
+    setErr(""); setLista(r.data || []); setVersion((v) => v + 1);
   };
   aEffect(() => { cargar(); }, []);
   // Mientras haya algo en marcha, refresca la lista cada 15 s.
@@ -92,7 +93,7 @@ export function Acciones({ toast, nav, focusId }) {
     </tbody></table></div></div>}
 
     {actual && <Detalle key={actual.id} a={actual} toast={toast} nav={nav} onCambio={cargar} onCerrar={() => setSel(null)} />}
-    <Cupos toast={toast} />
+    <Cupos toast={toast} version={version} />
   </div>;
 }
 
@@ -109,7 +110,14 @@ function Detalle({ a, toast, nav, onCambio, onCerrar }) {
       setExtra(x.data || { muestra: [], excluidos: [] });
     })();
   }, [a.id]);
-  const cargarProg = async () => { try { setProg(await rpc("holded_acciones_progreso", { p_accion: a.id })); } catch (e) { /* sin permiso o borrada */ } };
+  const cargarProg = async () => {
+    try {
+      const p = await rpc("holded_acciones_progreso", { p_accion: a.id });
+      setProg(p);
+      // Ha terminado mientras se miraba: refresca la lista (estado y cupos).
+      if (viva(a) && p && p.total > 0 && p.pendiente + p.en_proceso === 0) onCambio();
+    } catch (e) { /* sin permiso o borrada */ }
+  };
   aEffect(() => {
     if (a.estado === "propuesta" || a.estado === "rechazada") return;
     cargarProg();
@@ -226,12 +234,12 @@ function ModalRechazar({ busy, onCancel, onOk }) {
 }
 
 // ---------------------------------------------------------------- cupo de acciones por empresa
-function Cupos({ toast }) {
+function Cupos({ toast, version }) {
   const [uso, setUso] = aState(null);
   const [edit, setEdit] = aState(null);   // { id, valor }
   const [busy, setBusy] = aState(false);
   const cargar = async () => { try { setUso(await rpc("holded_acciones_uso_mes", {})); } catch (e) { setUso([]); } };
-  aEffect(() => { cargar(); }, []);
+  aEffect(() => { cargar(); }, [version]);
   const filas = aMemo(() => (uso || []).slice().sort((x, y) => (y.cupo - x.cupo) || nombreEmpresa(x.empresa_id).localeCompare(nombreEmpresa(y.empresa_id), "es")), [uso]);
   const [verTodas, setVerTodas] = aState(false);
   const visibles = verTodas ? filas : filas.filter((f) => f.cupo > 0 || f.usadas > 0);
