@@ -600,6 +600,21 @@
     if(res.error) throw res.error;
     return cacheAdmin(rowToAdmin(res.data));
   }
+  // Cambia el nombre de un usuario (crm/supabase-admins-nombre.sql): el rol
+  // admin, el de cualquiera; cada usuario, el suyo. Se actualiza el objeto de
+  // USERS en el sitio (la sesión actual apunta a él) y se avisa a la app
+  // para que se vuelva a pintar con el nombre nuevo.
+  async function renombrarAdmin(client, id, nombre){
+    if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
+    var limpio = String(nombre||"").replace(/\s+/g," ").trim();
+    if(!limpio) throw new Error("El nombre es obligatorio.");
+    var res = await client.rpc("admin_renombrar_usuario", {p_admin_id: id, p_nombre: limpio});
+    if(res.error) throw res.error;
+    var u = USERS.find(function(x){return x.id===id;});
+    if(u) u.name = res.data.nombre;
+    try{ window.dispatchEvent(new Event("crm:usuarios")); }catch(e){}
+    return res.data.nombre;
+  }
   async function setAdminActivo(client, id, activo){
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     var res = await client.from("admins").update({activo: activo}).eq("id", id).select().single();
@@ -2268,7 +2283,7 @@
     USERS:USERS, userById:function(id){return USERS.filter(function(u){return u.id===id;})[0];},
     ROLES:ROLES, roleById:roleById,
     rowToAdmin:rowToAdmin, cacheAdmin:cacheAdmin, removeAdminLocal:removeAdminLocal,
-    loadAdmins:loadAdmins, updateAdmin:updateAdmin, setAdminActivo:setAdminActivo,
+    loadAdmins:loadAdmins, updateAdmin:updateAdmin, renombrarAdmin:renombrarAdmin, setAdminActivo:setAdminActivo,
     SERVICES:SERVICES, serviceById:function(id){var m={};SERVICES.forEach(function(s){m[s.id]=s;});return m[id];},
     STAGES:STAGES, stageById:stageById,
     LIFECYCLE:LIFECYCLE, lifecycleById:lifecycleById,
