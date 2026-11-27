@@ -352,3 +352,25 @@ Deno.test("ejecutar: sin clave (revocada) pausa sin llamar; para antes del plazo
   const todos = b2.resultados.flatMap((x: X) => x.p_resultados);
   assertEquals(todos.filter((x: X) => x.estado === "ok").length, h2.pedidas.length, "lo no intentado vuelve a la cola");
 });
+
+// ================================================================= inspeccionar (solo lectura, solo operador)
+Deno.test("inspeccionar: solo el operador, solo GET, recuentos y numeración sin datos de clientes", async () => {
+  const ts = [ticket(1, { date: "2026-11-26", document_number: "LS3-00101" }), ticket(2, { date: "2026-11-26", document_number: "LS3-00102" }),
+              ticket(3, { date: "2026-11-26", document_number: null })];
+  const h = holded(listado(ts));
+  const { pedir, b } = montar(h);
+  const q = { accion: "inspeccionar", empresa_id: EMP, parametros: { desde: "2026-11-26", hasta: "2026-11-26" } };
+  assertEquals((await pedir(q)).status, 403, "un usuario del CRM no puede");
+  assertEquals(h.pedidas.length, 0);
+  const r = (await pedir(q, { hook: CRON })).body as X;
+  assert(h.pedidas.every((p) => p.metodo === "GET" && p.ruta === "/sales-receipts"));
+  assertEquals(h.pedidas[0].params.approval_status, "draft");
+  assertEquals([r.documentos, r.total], [3, 36.3]);
+  assertEquals(r.numeracion.prefijos, { "LS3-": 2, "(sin número)": 1 });
+  assertEquals([r.numeracion.primero, r.numeracion.ultimo], ["LS3-00101", "LS3-00102"]);
+  const s = JSON.stringify(r);
+  assert(!s.includes("Cliente de mostrador") && !s.includes("Venta 1") && !s.includes("Producto"), "sin clientes, conceptos ni líneas");
+  assert(!b.rpcs.some((x) => x.fn === "holded_acciones_crear"), "no crea nada");
+  sinClave(r);
+  assertEquals((await pedir({ ...q, parametros: { desde: "2026-01-01", hasta: "2026-03-01" } }, { hook: CRON })).status, 400, "como mucho 31 días");
+});

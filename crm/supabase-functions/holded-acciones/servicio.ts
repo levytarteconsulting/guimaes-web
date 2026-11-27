@@ -11,6 +11,10 @@
 //       solo con x-hook-secret (pg_cron, cada minuto). Reclama lotes de
 //       acciones YA APROBADAS en el CRM y los ejecuta respetando el ritmo por
 //       minuto y Retry-After. Un usuario no puede pedir «ejecutar».
+//   { accion: "inspeccionar", empresa_id, parametros: { desde, hasta, solo_pendientes?, ids? } }
+//       solo con x-hook-secret (el operador). SOLO LECTURA (GET /sales-receipts):
+//       recuentos, totales, estado de aprobación y numeración, sin clientes ni
+//       conceptos. No crea nada.
 //
 // La clave de cada empresa solo se lee aquí (holded_clave_de, service_role)
 // y nunca se devuelve ni se registra.
@@ -18,6 +22,7 @@
 import type { Fetch } from "../_shared/holded.ts";
 import { aprobarTicket, detalleError, OPERACIONES } from "./operaciones.ts";
 import { construir, ErrorPropuesta, validarParams } from "./propuesta.ts";
+import { inspeccionar, validarInspeccion } from "./inspeccion.ts";
 
 export const PLAZO_EJECUCION_MS = 45_000;       // pg_cron llama cada minuto: sin solaparse
 export const POR_MINUTO_POR_DEFECTO = 40;
@@ -67,6 +72,22 @@ export async function atender(deps: Deps, cabeceras: { authorization: string; ho
   if (b.accion === "ejecutar") {
     if (quien !== "cron") return r(403, { error: "La ejecución solo la lanza el sistema, tras la aprobación en el CRM." });
     return r(200, await ejecutar(deps));
+  }
+  if (b.accion === "inspeccionar") {
+    if (quien !== "cron") return r(403, { error: "Solo para el operador." });
+    const empresa = typeof b.empresa_id === "string" && RE_UUID.test(b.empresa_id) ? b.empresa_id.toLowerCase() : null;
+    if (!empresa) return r(400, { error: "empresa_id no válido." });
+    const v = validarInspeccion(b.parametros);
+    if (!v.ok) return r(400, { error: v.error });
+    const c = await deps.rpc("holded_clave_de", { p_empresa: empresa });
+    if (c.error || typeof c.data !== "string") return r(200, { ok: false, mensaje: "Esta empresa no tiene Holded conectado en el CRM." });
+    try {
+      return r(200, { ok: true, ...(await inspeccionar(c.data, v.params, deps.fetchHolded)) });
+    } catch (e) {
+      if (e instanceof ErrorPropuesta) return r(200, { ok: false, codigo: e.codigo, mensaje: e.message });
+      log("holded-acciones: inspeccionar", e instanceof Error ? limpiar(e.message).slice(0, 200) : "error");
+      return r(500, { error: "No se ha podido inspeccionar." });
+    }
   }
   if (b.accion === "proponer") {
     try {
