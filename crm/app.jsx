@@ -4,6 +4,7 @@ import { Instagram } from "./instagram.jsx";
 import { Asistente, AsistenteBoton, AgenteVista } from "./agente.jsx";
 import { MOBILE_BREAKPOINT, useIsMobile, useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
+import { Importador } from "./importador.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
 
@@ -493,7 +494,7 @@ function NewEmpresa({nav, onClose, onSave}){
       </div>
       <div className="fld-row">
         <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={deal.amount} onChange={setDealField("amount")}/></Field>
-        <Field label="Frecuencia"><select className="inp" value={deal.frequency} onChange={setDealField("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
+        <Field label="Frecuencia"><select className="inp" value={deal.frequency} onChange={setDealField("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option><option value="puntual">Puntual</option></select></Field>
       </div>
       <button className="btn btn--sm btn--ghost" onClick={()=>setAddDealToggle(false)}>Quitar deal</button>
     </>}
@@ -1076,6 +1077,7 @@ function EmpresaDetail({id, nav, toast, user, foco}){
               <KV k="CIF/NIF">{e.cif || "—"}</KV>
               <KV k="Dirección">{e.address || "—"}</KV>
               <KV k="Ciudad">{e.city ? (e.city+(e.province?" ("+e.province+")":"")) : "—"}</KV>
+              <KV k="Empleados">{e.empleados==null ? "—" : e.empleados}</KV>
               <KV k="Contactos">{contactos.length}</KV>
             </div>
             <button className="btn btn--sm btn--ghost" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar empresa</button>
@@ -1333,7 +1335,7 @@ function EmpresaPortalTab({empresa, portal, toast, onCambio}){
   </div>;
 }
 function EditEmpresa({empresa, onClose, onSave}){
-  const [f,setF]=uState({razon_social:empresa.razon_social||"", cif:empresa.cif||"", address:empresa.address||"", city:empresa.city||"", province:empresa.province||""});
+  const [f,setF]=uState({razon_social:empresa.razon_social||"", cif:empresa.cif||"", address:empresa.address||"", city:empresa.city||"", province:empresa.province||"", empleados:empresa.empleados==null?"":String(empresa.empleados)});
   const [saving,setSaving]=uState(false);
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
   const save=async()=>{ setSaving(true); try{ await onSave(f); } finally{ setSaving(false); } };
@@ -1342,6 +1344,7 @@ function EditEmpresa({empresa, onClose, onSave}){
     <Field label="CIF / NIF"><input className="inp" value={f.cif} onChange={set("cif")}/></Field>
     <Field label="Dirección"><input className="inp" value={f.address} onChange={set("address")}/></Field>
     <div className="fld-row"><Field label="Ciudad"><input className="inp" value={f.city} onChange={set("city")}/></Field><Field label="Provincia"><input className="inp" value={f.province} onChange={set("province")}/></Field></div>
+    <Field label="Nº de empleados"><input className="inp" type="number" min="0" step="1" value={f.empleados} onChange={set("empleados")}/></Field>
   </Modal>;
 }
 
@@ -2453,7 +2456,7 @@ function NewDeal({contactId, onClose, onSave}){
     ) : (
       <div className="fld-row">
         <Field label="Importe (€)"><input className="inp" type="number" placeholder="0" value={f.amount} onChange={set("amount")}/></Field>
-        <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="puntual">Puntual</option></select></Field>
+        <Field label="Frecuencia"><select className="inp" value={f.frequency} onChange={set("frequency")}><option value="">— Sin especificar —</option><option value="mensual">Mensual</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option><option value="puntual">Puntual</option></select></Field>
       </div>
     )}
     <Field label="Prioridad"><select className="inp" value={f.priority} onChange={set("priority")}><option value="">— Sin especificar —</option>{CRM.PRIORITIES.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></Field>
@@ -3645,8 +3648,9 @@ function MyAccount({toast}){
 }
 
 /* ============ CONFIG ============ */
-function Config({toast, initialTab, nav}){
-  const [tab,setTab]=uState(initialTab||"servicios");
+function Config({toast, initialTab, nav, user}){
+  const esRolAdmin = !!user && user.role==="admin";
+  const [tab,setTab]=uState(initialTab==="importar" && !esRolAdmin ? "servicios" : (initialTab||"servicios"));
   const [services,setServices]=uState(CRM.SERVICES.map(s=>({...s}))); const [showNewSvc,setNewSvc]=uState(false);
   const [users,setUsers]=uState(CRM.USERS.map(u=>({...u}))); const [showNewUser,setNewUser]=uState(false); const [delUser,setDelUser]=uState(null);
   const activeCount = users.filter(u=>u.activo).length;
@@ -3669,7 +3673,8 @@ function Config({toast, initialTab, nav}){
     toast("Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
-    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"documentos",label:"Documentos"},{id:"automatizaciones",label:"Automatizaciones"},{id:"notificaciones",label:"Notificaciones"},{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
+    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"documentos",label:"Documentos"},{id:"automatizaciones",label:"Automatizaciones"},{id:"notificaciones",label:"Notificaciones"},...(esRolAdmin?[{id:"importar",label:"Importar"}]:[]),{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
+    {tab==="importar" && esRolAdmin && <Importador toast={toast}/>}
     {tab==="documentos" && <Documents nav={nav} toast={toast}/>}
     {tab==="automatizaciones" && <Automations toast={toast}/>}
     {tab==="servicios" && <>
@@ -3962,7 +3967,7 @@ function App(){
   else if(view.name==="whatsapp") screen=<WhatsApp nav={nav} toast={fireToast} focusId={view.id}/>;
   else if(view.name==="inbox") screen=<Inbox nav={nav} toast={fireToast} NewContact={NewContact}/>;
   else if(view.name==="instagram") screen=<Instagram user={user} toast={fireToast}/>;
-  else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id} nav={nav}/>;
+  else if(view.name==="config") screen=<Config key={view.id||"config"} toast={fireToast} initialTab={view.id} nav={nav} user={user}/>;
   const flush = view.name==="pipeline"||view.name==="whatsapp"||view.name==="agente";
   const activeNav = {contact:"contacts", deal:"pipeline", empresa:"empresas"}[view.name] || view.name;
   return <>

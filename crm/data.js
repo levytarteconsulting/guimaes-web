@@ -832,6 +832,7 @@
       address: row.address || "",
       city: row.city || "",
       province: row.province || "",
+      empleados: row.empleados==null ? null : row.empleados,
       provisional_at: row.provisional_at || null,
       archived_at: row.archived_at || null,
       visto_at: row.visto_at===undefined ? undefined : (row.visto_at || null), // null = "Nuevo" (crm/supabase-visto.sql)
@@ -902,6 +903,10 @@
     if(!client) throw new Error("El acceso aún no está configurado (Supabase).");
     var payload = {};
     if(patch.razon_social!==undefined && patch.razon_social.trim()) payload.razon_social = patch.razon_social.trim();
+    if(patch.empleados!==undefined){
+      var n = String(patch.empleados).trim();
+      payload.empleados = n==="" ? null : Math.max(0, parseInt(n,10) || 0);
+    }
     ["cif","address","city","province"].forEach(function(k){
       if(patch[k]!==undefined) payload[k] = patch[k]===""? null : patch[k];
     });
