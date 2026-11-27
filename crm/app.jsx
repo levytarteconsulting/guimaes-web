@@ -3664,6 +3664,18 @@ function Config({toast, initialTab, nav, user}){
     try{ const updated=await CRM.setAdminActivo(Auth.client,u.id,!u.activo); setUsers(us=>us.map(x=>x.id===u.id?updated:x)); toast(updated.activo?"Administrador reactivado":"Administrador desactivado — ya no puede iniciar sesión"); }
     catch(e){ toast("No se pudo cambiar el estado: "+e.message); }
   };
+  const [editNombre,setEditNombre]=uState(null); // {id, valor, busy, error}
+  const puedeRenombrar=(u)=>esRolAdmin || (!!user && u.id===user.id);
+  const guardarNombre=async()=>{
+    const v=editNombre.valor.replace(/\s+/g," ").trim();
+    if(!v){ setEditNombre({...editNombre, error:"El nombre es obligatorio."}); return; }
+    setEditNombre({...editNombre, busy:true, error:""});
+    try{
+      const nombre=await CRM.renombrarAdmin(Auth.client, editNombre.id, v);
+      setUsers(us=>us.map(x=>x.id===editNombre.id?{...x,name:nombre}:x));
+      setEditNombre(null); toast("Nombre actualizado");
+    }catch(e){ setEditNombre(en=>({...en, busy:false, error:e.message||String(e)})); }
+  };
   const addUser=(admin)=>{ CRM.cacheAdmin(admin); setUsers(us=>[...us,admin]); setNewUser(false); toast("Administrador creado — ya puede iniciar sesión con la contraseña temporal"); };
   const confirmRemoveUser=async()=>{
     if(activeCount<=1 && delUser.activo){ toast("No puedes eliminar al último administrador activo."); setDelUser(null); return; }
@@ -3685,7 +3697,14 @@ function Config({toast, initialTab, nav, user}){
       <div className="toolbar"><div className="muted" style={{fontSize:13}}>Administradores con acceso al CRM. Solo estos emails pueden iniciar sesión.</div><div className="toolbar__spacer"></div><button className="btn btn--primary" onClick={()=>setNewUser(true)}><Icon name="plus" size={16}/>Nuevo administrador</button></div>
       <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody>
         {users.map(u=><tr key={u.id}>
-          <td className="row" style={{gap:10}}><Avatar name={u.name} size="md" color={u.color}/><span className="tbl__name">{u.name}</span></td>
+          <td className="row" style={{gap:10}}><Avatar name={u.name} size="md" color={u.color}/>{editNombre && editNombre.id===u.id
+            ? <form className="row" style={{gap:6,flexWrap:"wrap"}} onSubmit={e=>{e.preventDefault(); guardarNombre();}}>
+                <input className="inp" style={{padding:"6px 10px",fontSize:13,width:200}} value={editNombre.valor} autoFocus maxLength={80} aria-label="Nombre" onChange={e=>setEditNombre({...editNombre, valor:e.target.value, error:""})} onKeyDown={e=>{ if(e.key==="Escape") setEditNombre(null); }} disabled={editNombre.busy}/>
+                <button className="btn btn--sm btn--primary" type="submit" disabled={editNombre.busy || !editNombre.valor.trim()}>{editNombre.busy?"Guardando…":"Guardar"}</button>
+                <button className="btn btn--sm btn--ghost" type="button" onClick={()=>setEditNombre(null)} disabled={editNombre.busy}>Cancelar</button>
+                {editNombre.error && <span style={{color:"var(--danger)",fontSize:12,width:"100%"}}>{editNombre.error}</span>}
+              </form>
+            : <><span className="tbl__name">{u.name}</span>{puedeRenombrar(u) && <button className="btn btn--sm btn--ghost" title="Cambiar nombre" onClick={()=>setEditNombre({id:u.id, valor:u.name, busy:false, error:""})}><Icon name="edit" size={14}/></button>}</>}</td>
           <td className="tbl__sub">{u.email}</td>
           <td onClick={e=>e.stopPropagation()}><select className="inp" style={{padding:"6px 10px",fontSize:13,width:"auto"}} value={u.role||"miembro"} onChange={e=>changeRole(u.id,e.target.value)}>{CRM.ROLES.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></td>
           <td>{u.activo? <Badge label="Activo" color="#1F9D6B"/> : <Badge label="Inactivo" color="#6E8298"/>}</td>
@@ -3864,6 +3883,10 @@ function App(){
   // notificación push cuando no había ninguna pestaña abierta ya).
   const initialView = uMemo(()=>parseViewFromSearch(window.location.search), []);
   const [user,setUser]=uState(null);
+  // Un cambio de nombre de usuario (CRM.renombrarAdmin) repinta toda la app:
+  // responsables, tareas, avatares… leen CRM.USERS al pintar.
+  const [,setUsuariosV]=uState(0);
+  uEffect(()=>{ const f=()=>setUsuariosV(v=>v+1); window.addEventListener("crm:usuarios", f); return ()=>window.removeEventListener("crm:usuarios", f); }, []);
   const [view,setView]=uState(initialView); const [toast,fireToast]=useToast();
   const [booting,setBooting]=uState(true); const [recovery,setRecovery]=uState(false);
 
