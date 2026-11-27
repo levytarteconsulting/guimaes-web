@@ -7,6 +7,8 @@
 // Authorization): las herramientas pasan por la RLS y por is_admin(), y la
 // auditoría (agente_conversaciones/_mensajes/_tool_calls) se escribe con ese
 // mismo JWT. Esta función NO usa la service role.
+// Las herramientas holded_* llaman a la Edge Function holded-proxy con ese
+// mismo JWT (holded-proxy es la única que lee las claves de Holded).
 //
 // Entrada (POST, Authorization: Bearer <JWT del usuario del CRM>):
 //   { pregunta, conversacion_id?, contexto?: { vista, id? } }
@@ -26,7 +28,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { createHandler } from "./agente.ts";
-import type { Db, ErrorDb, Modelo } from "./agente.ts";
+import type { Db, ErrorDb, Modelo, RespuestaHolded } from "./agente.ts";
 
 const url = Deno.env.get("SUPABASE_URL")!;
 const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -74,6 +76,20 @@ function db(jwt: string): Db {
     },
     async guardarLlamadas(l) {
       ok(await c.from("agente_tool_calls").insert(l));
+    },
+    async holded(llamada) {
+      const res = await fetch(`${url}/functions/v1/holded-proxy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${jwt}`, apikey: anonKey, "Content-Type": "application/json" },
+        body: JSON.stringify(llamada),
+        signal: AbortSignal.timeout(44_000),
+      });
+      let cuerpo: Record<string, unknown> = {};
+      try { cuerpo = await res.json(); } catch { /* sin JSON */ }
+      if (res.status === 200) return cuerpo as RespuestaHolded;
+      if (res.status === 400 && typeof cuerpo.error === "string") throw { code: "22023", message: cuerpo.error } satisfies ErrorDb;
+      if (res.status === 401 || res.status === 403) throw { code: "42501", message: "holded-proxy" } satisfies ErrorDb;
+      throw { code: String(res.status), message: "holded-proxy" } satisfies ErrorDb;
     },
     async rpc(nombre, args) {
       const r = await c.rpc(nombre, args);

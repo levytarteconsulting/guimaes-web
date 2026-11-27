@@ -21,9 +21,13 @@
 //     siguientes (historialDe lo omite).
 //   * Respuesta en streaming (Server-Sent Events): conversacion, texto,
 //     herramienta, fin, error.
+//   * Holded (herramientas holded_*): van a la Edge Function holded-proxy
+//     con el mismo JWT (db.holded). Sus resultados se usan en la respuesta
+//     en curso pero NO se guardan: en agente_mensajes queda
+//     SIN_GUARDAR_HOLDED en su lugar (la auditoría de la llamada sí).
 
 import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
-import { HERRAMIENTAS_API, validarEntrada } from "./herramientas.ts";
+import { esHolded, HERRAMIENTAS_API, type LlamadaHolded, validarEntrada } from "./herramientas.ts";
 import { type AdminResumen, construirSistema } from "./sistema.ts";
 
 export const MODELO_POR_DEFECTO = "claude-sonnet-5-5";
@@ -33,6 +37,8 @@ export const MAX_VUELTAS = 8;
 export const PLAZO_MS = 120_000;
 export const MIN_PARA_VUELTA_MS = 15_000;      // no se empieza una llamada al modelo con menos margen
 export const HERRAMIENTA_MS = 15_000;
+export const HOLDED_MS = 45_000;               // holded-proxy corta a los 40 s
+export const SIN_GUARDAR_HOLDED = "[datos de Holded no guardados]";
 export const PING_MS = 15_000;
 export const MAX_PREGUNTA = 4_000;
 export const MAX_PREGUNTAS_CONVERSACION = 40;
@@ -64,6 +70,9 @@ export type NuevaLlamada = {
   filas: number | null; bytes: number | null; es_error: boolean; error: string | null; duracion_ms: number | null;
 };
 export type ErrorDb = { code?: string; message?: string };
+export type RespuestaHolded =
+  | { ok: true; datos: unknown; desde_cache?: boolean; truncado?: boolean; motivo_truncado?: string }
+  | { ok: false; codigo?: string; mensaje: string };
 
 /** Base de datos con el JWT del usuario (RLS). */
 export interface Db {
@@ -77,6 +86,9 @@ export interface Db {
   guardarLlamadas(l: NuevaLlamada[]): Promise<void>;
   /** Llama a una RPC agente_*. Lanza ErrorDb si falla. */
   rpc(nombre: string, args: Record<string, unknown>): Promise<unknown>;
+  /** Llama a holded-proxy con el JWT del usuario. Devuelve su respuesta
+   *  ({ ok, datos… } o { ok: false, mensaje }); lanza ErrorDb si falla. */
+  holded(llamada: LlamadaHolded): Promise<RespuestaHolded>;
 }
 
 export type StreamModelo = AsyncIterable<Anthropic.Beta.BetaRawMessageStreamEvent> & {
@@ -96,7 +108,7 @@ export type Deps = {
   ahora?: () => number;
   log?: (...a: unknown[]) => void;
 };
-export type Opciones = { plazoMs?: number; minParaVueltaMs?: number; herramientaMs?: number; pingMs?: number };
+export type Opciones = { plazoMs?: number; minParaVueltaMs?: number; herramientaMs?: number; holdedMs?: number; pingMs?: number };
 
 // ---------------------------------------------------------------- utilidades
 function cors(req: Request): Record<string, string> {
@@ -179,6 +191,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
   const plazoMs = opciones.plazoMs ?? PLAZO_MS;
   const minParaVuelta = opciones.minParaVueltaMs ?? MIN_PARA_VUELTA_MS;
   const herramientaMs = opciones.herramientaMs ?? HERRAMIENTA_MS;
+  const holdedMs = opciones.holdedMs ?? HOLDED_MS;
   const pingMs = opciones.pingMs ?? PING_MS;
 
   return async function handler(req: Request): Promise<Response> {
@@ -305,7 +318,12 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         historial.push({ role: "user", content: contenidoPregunta });
 
         const guardarResultados = async (resultados: ToolResult[], llamadas: Omit<NuevaLlamada, "mensaje_id" | "conversacion_id">[], mensajeModeloId: string) => {
-          await guardar({ rol: "user", tipo: "herramientas", contenido: resultados, texto: null });
+          // Los datos de Holded solo viven en esta respuesta: al historial
+          // guardado va un marcador (los errores, que no traen datos, sí).
+          const deHolded = new Set(llamadas.filter((l) => esHolded(l.herramienta)).map((l) => l.tool_use_id));
+          const guardables = resultados.map((r) => deHolded.has(r.tool_use_id) && !r.is_error
+            ? { ...r, content: SIN_GUARDAR_HOLDED } : r);
+          await guardar({ rol: "user", tipo: "herramientas", contenido: guardables, texto: null });
           historial.push({ role: "user", content: resultados });
           if (llamadas.length) {
             await db.guardarLlamadas(llamadas.map((l) => ({ ...l, mensaje_id: mensajeModeloId, conversacion_id: conversacionId })));
@@ -421,10 +439,23 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
       }
       try {
         let espera: ReturnType<typeof setTimeout> | undefined;
-        const datos = await Promise.race([
-          db.rpc(v.rpc, v.args),
-          new Promise((_, no) => { espera = setTimeout(() => no({ code: "timeout", message: "tiempo agotado" }), herramientaMs); }),
+        const limiteMs = "holded" in v ? holdedMs : herramientaMs;
+        let datos = await Promise.race([
+          "holded" in v ? db.holded(v.holded) : db.rpc(v.rpc, v.args),
+          new Promise((_, no) => { espera = setTimeout(() => no({ code: "timeout", message: "tiempo agotado" }), limiteMs); }),
         ]).finally(() => clearTimeout(espera));
+        if ("holded" in v) {
+          const h = datos as RespuestaHolded;
+          if (!h || h.ok !== true) {
+            const mensaje = `${(h && "mensaje" in h && h.mensaje) || "No se ha podido consultar Holded."} ` +
+              "No hay datos de Holded para responder: no los supongas ni los estimes.";
+            enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", error: true });
+            return { resultado: resultadoError(u.id, mensaje),
+                     llamada: { ...base, filas: null, bytes: null, es_error: true, error: mensaje.slice(0, 2000), duracion_ms: ahora() - t0 } };
+          }
+          datos = { ...(h.datos as Record<string, unknown>), truncado: h.truncado === true,
+                    ...(h.motivo_truncado ? { motivo_truncado: h.motivo_truncado } : {}), fuente: "Holded" };
+        }
         const texto = serializarResultado(datos);
         const filas = filasDe(datos);
         enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas });

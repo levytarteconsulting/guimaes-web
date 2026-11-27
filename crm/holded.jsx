@@ -7,8 +7,9 @@ import React from "react";
    2) Vista previa: empresa propuesta (por NIF o nombre), elegir otra, crear
       la empresa en el CRM o no conectar; reemplazar la clave si ya había.
    3) Guardar y verificar (llamadas de solo lectura a Holded, de 10 en 10).
-   Lista de conexiones con estado, permisos, uso de la API, verificar de
-   nuevo y revocar. Ver crm/supabase-holded-conexiones.sql. */
+   Lista de conexiones con estado, permisos, uso de la API, llamadas del
+   asistente este mes con su tope (editable), verificar de nuevo y revocar.
+   Ver crm/supabase-holded-conexiones.sql y crm/supabase-holded-consultas.sql. */
 const { useState: hState, useEffect: hEffect, useMemo: hMemo } = React;
 
 export const PERMISOS_HOLDED = [
@@ -37,6 +38,48 @@ export async function cargarConexionesHolded(empresaId) {
   const res = await q;
   if (res.error) throw res.error;
   return res.data || [];
+}
+
+// Llamadas del asistente a Holded este mes y tope, por empresa: { id: {usadas, cupo} }.
+export async function cargarUsoHolded(empresaId) {
+  const res = await Auth.client.rpc("holded_uso_mes", empresaId ? { p_empresa_id: empresaId } : {});
+  if (res.error) throw res.error;
+  return Object.fromEntries((res.data || []).map((x) => [x.empresa_id, { usadas: x.usadas, cupo: x.cupo }]));
+}
+
+async function cambiarCupoHolded(empresaId, cupo) {
+  const res = await Auth.client.rpc("holded_cambiar_cupo", { p_empresa_id: empresaId, p_cupo: cupo });
+  if (res.error) throw res.error;
+  return res.data;
+}
+
+function UsoAsistente({ u }) {
+  if (!u) return <span className="muted">—</span>;
+  const agotado = u.usadas >= u.cupo;
+  return <span className="mono" style={{ fontSize: 12.5, color: agotado ? "var(--danger)" : u.usadas >= u.cupo * 0.8 ? "var(--warn)" : undefined }}
+    title="Llamadas del asistente a Holded este mes (las que salen de la caché no cuentan) / tope mensual">{u.usadas} / {u.cupo}</span>;
+}
+
+function EditarCupo({ empresaId, u, busy, onGuardado, toast }) {
+  const [abierto, setAbierto] = hState(false);
+  const [valor, setValor] = hState("");
+  const [guardando, setGuardando] = hState(false);
+  if (!u) return null;
+  if (!abierto) return <button className="btn btn--sm btn--ghost" disabled={busy} title="Cambiar el tope mensual" onClick={() => { setValor(String(u.cupo)); setAbierto(true); }}><Icon name="edit" size={13} /></button>;
+  const n = Number(valor);
+  const valido = valor.trim() !== "" && Number.isInteger(n) && n >= 0 && n <= 100000;
+  const guardar = async () => {
+    setGuardando(true);
+    try { await cambiarCupoHolded(empresaId, n); toast("Tope de Holded actualizado"); setAbierto(false); await onGuardado(); }
+    catch (e) { toast("No se pudo cambiar el tope: " + errorTexto(e)); }
+    setGuardando(false);
+  };
+  return <span className="row" style={{ gap: 4, display: "inline-flex", alignItems: "center" }}>
+    <input className="inp mono" style={{ width: 80, padding: "4px 6px", fontSize: 12.5 }} type="number" min="0" max="100000" step="1" value={valor}
+      onChange={(e) => setValor(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && valido) guardar(); if (e.key === "Escape") setAbierto(false); }} autoFocus />
+    <button className="btn btn--sm btn--primary" disabled={!valido || guardando} onClick={guardar}>{guardando ? "…" : "Guardar"}</button>
+    <button className="btn btn--sm btn--ghost" disabled={guardando} onClick={() => setAbierto(false)}>Cancelar</button>
+  </span>;
 }
 
 export async function revocarHolded(empresaId) {
@@ -144,11 +187,16 @@ export function HoldedIntegracion({ toast, nav }) {
   const [busy, setBusy] = hState("");
   const [err, setErr] = hState("");
   const [conexiones, setConexiones] = hState(null);
+  const [uso, setUso] = hState({});
   const [revocar, setRevocar] = hState(null);
 
+  const cargarUso = async () => {
+    try { setUso(await cargarUsoHolded()); } catch (e) { setUso({}); }
+  };
   const cargar = async () => {
     try { setConexiones(await cargarConexionesHolded()); }
     catch (e) { setErr("No se pudieron cargar las conexiones: " + errorTexto(e)); }
+    await cargarUso();
   };
   hEffect(() => { cargar(); }, []);
   const porEmpresa = hMemo(() => Object.fromEntries((conexiones || []).map((c) => [c.empresa_id, c])), [conexiones]);
@@ -218,6 +266,8 @@ export function HoldedIntegracion({ toast, nav }) {
   };
 
   const resumenRes = resultado ? resultado.filas.reduce((a, f) => { a[f.resultado] = (a[f.resultado] || 0) + 1; return a; }, {}) : {};
+  // Conexiones guardadas: con empresa existente (conectada), con empresa nueva (creada) y reemplazadas.
+  const nGuardadas = (resumenRes.conectada || 0) + (resumenRes.creada || 0) + (resumenRes.reemplazada || 0);
 
   return <div>
     <div className="toolbar"><div className="muted" style={{ fontSize: 13 }}>Conecta cada empresa con su cuenta de Holded para que el asistente consulte (solo lectura) facturas, contactos y tesorería. Las claves se guardan cifradas en Supabase Vault y no se vuelven a mostrar: solo sus 4 últimos caracteres.</div><div className="toolbar__spacer"></div>
@@ -251,7 +301,7 @@ export function HoldedIntegracion({ toast, nav }) {
 
     {paso === "hecho" && resultado && <div className="card" style={{ marginBottom: 14 }}><div className="card__body">
       <div style={{ fontWeight: 700, fontFamily: "var(--display)" }}>Guardado</div>
-      <p className="muted" style={{ fontSize: 13 }}>{resumenRes.conectada || 0} conectadas · {resumenRes.reemplazada || 0} con la clave reemplazada · {resumenRes.creada || 0} empresas creadas · {resumenRes.omitida || 0} sin conectar. Verificación: {resultado.verif.filter((x) => x.estado === "ok").length} correctas, {resultado.verif.filter((x) => x.estado !== "ok").length} con error.</p>
+      <p className="muted" style={{ fontSize: 13 }}>{nGuardadas} conexiones guardadas ({resumenRes.creada || 0} con empresa nueva en el CRM · {resumenRes.reemplazada || 0} con la clave reemplazada) · {resumenRes.omitida || 0} sin conectar. Verificación: {resultado.verif.filter((x) => x.estado === "ok").length} correctas, {resultado.verif.filter((x) => x.estado !== "ok").length} con error.</p>
       {resultado.filas.some((f) => f.nif_pendiente) && <p style={{ fontSize: 13, color: "var(--warn)" }}>Empresas creadas con NIF pendiente: {resultado.filas.filter((f) => f.nif_pendiente).map((f) => nombreEmpresa(f.empresa_id)).join(", ")}.</p>}
     </div></div>}
 
@@ -263,7 +313,7 @@ export function HoldedIntegracion({ toast, nav }) {
       </div>
       {!conexiones && <p className="muted" style={{ fontSize: 13 }}>Cargando…</p>}
       {conexiones && !conexiones.length && <p className="muted" style={{ fontSize: 13 }}>Ninguna empresa tiene Holded conectado todavía.</p>}
-      {conexiones && conexiones.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th>Estado</th><th>Clave</th><th>Permisos de la clave</th><th>Uso API (mes)</th><th>Verificada</th><th></th></tr></thead><tbody>
+      {conexiones && conexiones.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th>Estado</th><th>Clave</th><th>Permisos de la clave</th><th title="Toda la cuenta de Holded del cliente, según Holded">Uso API Holded (mes)</th><th title="Llamadas del asistente este mes / tope propio por empresa">Asistente (mes / tope)</th><th>Verificada</th><th></th></tr></thead><tbody>
         {conexiones.slice().sort((a, b) => nombreEmpresa(a.empresa_id).localeCompare(nombreEmpresa(b.empresa_id), "es")).map((c) => <tr key={c.empresa_id}>
           <td><a className="tbl__name" style={{ cursor: "pointer" }} onClick={() => nav && nav("empresa", c.empresa_id)}>{nombreEmpresa(c.empresa_id)}</a>
             {c.nif_coincide === false && <div style={{ fontSize: 12, color: "var(--warn)" }}>El NIF de la cuenta de Holded no coincide con el CIF de la empresa</div>}
@@ -272,6 +322,7 @@ export function HoldedIntegracion({ toast, nav }) {
           <td className="mono">••••{c.ultimos4}</td>
           <td><Permisos p={c.permisos} /></td>
           <td><Uso u={c.uso_holded} /></td>
+          <td style={{ whiteSpace: "nowrap" }}><UsoAsistente u={uso[c.empresa_id]} /> <EditarCupo empresaId={c.empresa_id} u={uso[c.empresa_id]} busy={!!busy} onGuardado={cargarUso} toast={toast} /></td>
           <td className="mono" style={{ fontSize: 12.5 }}>{c.verificada_at ? fmtFecha(c.verificada_at) : "—"}</td>
           <td style={{ whiteSpace: "nowrap" }}>
             <button className="btn btn--sm btn--ghost" disabled={!!busy} title="Verificar de nuevo" onClick={() => verificarDeNuevo([c.empresa_id])}><Icon name="refresh" size={14} /></button>
@@ -279,7 +330,7 @@ export function HoldedIntegracion({ toast, nav }) {
           </td>
         </tr>)}
       </tbody></table></div>}
-      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Cada verificación hace 6 llamadas de lectura a Holded, que cuentan en el cupo mensual de la cuenta del cliente.</p>
+      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Cada verificación hace 6 llamadas de lectura a Holded, que cuentan en el cupo mensual de la cuenta del cliente. «Asistente» son las llamadas que ha hecho el asistente este mes (las que salen de su caché de 5 minutos no cuentan) frente al tope propio de cada empresa (150 por defecto): al llegar al tope, el asistente avisa y no consulta más hasta el mes siguiente.</p>
     </div></div>
 
     {revocar && <ModalRevocar empresaId={revocar} busy={!!busy} onCancel={() => setRevocar(null)} onOk={confirmarRevocar} />}
@@ -298,11 +349,13 @@ function ModalRevocar({ empresaId, busy, onCancel, onOk }) {
 // ---------------------------------------------------------------- ficha de empresa
 export function HoldedFicha({ empresaId, esRolAdmin, toast }) {
   const [c, setC] = hState(undefined);   // undefined = cargando; null = sin conexión
+  const [u, setU] = hState(null);
   const [revocar, setRevocar] = hState(false);
   const [busy, setBusy] = hState(false);
   const cargar = async () => {
     try { const l = await cargarConexionesHolded(empresaId); setC(l[0] || null); }
     catch (e) { setC(null); }
+    try { setU((await cargarUsoHolded(empresaId))[empresaId] || null); } catch (e) { setU(null); }
   };
   hEffect(() => { setC(undefined); cargar(); }, [empresaId]);
   if (c === undefined || c === null) return null;
@@ -317,12 +370,14 @@ export function HoldedFicha({ empresaId, esRolAdmin, toast }) {
     <div className="row" style={{ gap: 8, alignItems: "center" }}>
       <b>{c.estado === "ok" ? "Holded conectado" : c.estado === "error" ? "Holded: error" : "Holded sin verificar"}</b>
       <div style={{ flex: 1 }}></div>
+      {u && <span className="mono" style={{ fontSize: 12, whiteSpace: "nowrap", color: u.usadas >= u.cupo ? "var(--danger)" : undefined }} title="Llamadas del asistente a Holded este mes / tope mensual">{u.usadas}/{u.cupo} este mes</span>}
       <EstadoHolded c={c} />
     </div>
     <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>
       {c.verificada_at ? "Verificado el " + fmtDia(c.verificada_at) : "Aún no se ha verificado"} · clave ••••{c.ultimos4}
     </div>
     {c.estado === "error" && c.ultimo_error && <div style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 4 }}>{c.ultimo_error}</div>}
+    {u && u.usadas >= u.cupo && <div style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 4 }}>Tope de llamadas del mes alcanzado: el asistente no consultará Holded hasta el mes que viene.</div>}
     {c.estado === "ok" && faltan.length > 0 && <div style={{ fontSize: 12.5, color: "var(--warn)", marginTop: 4 }}>Sin permiso de {faltan.join(", ")}.</div>}
     {esRolAdmin && <button className="btn btn--sm btn--ghost" style={{ marginTop: 8, width: "100%" }} onClick={() => setRevocar(true)}><Icon name="trash" size={14} />Revocar Holded</button>}
     {revocar && <ModalRevocar empresaId={empresaId} busy={busy} onCancel={() => setRevocar(false)} onOk={ok} />}

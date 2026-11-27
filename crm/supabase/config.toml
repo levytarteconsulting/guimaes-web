@@ -103,3 +103,10 @@ verify_jwt = true
 [functions.holded-conexiones]
 entrypoint = "../supabase-functions/holded-conexiones/index.ts"
 verify_jwt = true
+
+# Holded, bloque 2 (crm/supabase-holded-consultas.sql): consultas de SOLO
+# LECTURA para el asistente. La llama la función agente con el JWT del
+# usuario; lee la clave de Vault con la service role, solo en el servidor.
+[functions.holded-proxy]
+entrypoint = "../supabase-functions/holded-proxy/index.ts"
+verify_jwt = true

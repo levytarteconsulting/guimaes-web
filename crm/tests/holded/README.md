@@ -1,4 +1,4 @@
-# Pruebas de Holded (bloque 1: conexiones)
+# Pruebas de Holded (bloque 1: conexiones; bloque 2: consultas del asistente)
 
 Sin tocar producción ni Holded:
 
@@ -13,9 +13,23 @@ Sin tocar producción ni Holded:
   que las claves no vuelven al navegador, solo GET a `api.holded.com`, permisos por 200/403,
   401/429/red.
 
+- `holded-consultas.test.mjs` (PGlite): `crm/supabase-holded-consultas.sql` encima del bloque 1.
+  - 7A/7B/7C y que 7B no se repite.
+  - Auditoría cerrada a authenticated; `holded_iniciar`/`holded_terminar` solo service_role.
+  - Sin conexión, conexión con error, caché (no cuenta ni mira el cupo), reserva atómica,
+    lo no usado se libera, tope mensual (150 por defecto, editable solo por rol admin), mes de Madrid.
+- `../../supabase-functions/holded-proxy/holded-proxy_test.ts` (Deno): SOLO LECTURA (falla si sale
+  otro método que GET o una ruta fuera de la lista cerrada, o si aparece un método de escritura en
+  el código), cupo, caché de 5 min, 429 por minuto (un reintento) y mensual, 401/403, 5 páginas
+  como máximo, cálculos de facturas, resumen, contactos y tesorería.
+- `../../supabase-functions/agente/agente_test.ts` (Node): herramientas `holded_*` = lo que acepta
+  holded-proxy; el modelo recibe los datos pero el historial guarda `[datos de Holded no guardados]`;
+  sin conexión o sin cupo → error que prohíbe suponer cifras.
+
 ```sh
 cd crm/tests/holded && npm install && npm test
-cd crm/supabase-functions && deno test --allow-read holded-conexiones/ _shared/hoja_test.ts
+cd crm/supabase-functions && deno test --allow-read holded-conexiones/ holded-proxy/ _shared/
+cd crm && node --experimental-strip-types --test supabase-functions/agente/
 ```
 
 ## Sonda contra la cuenta DEMO CLAUDE
