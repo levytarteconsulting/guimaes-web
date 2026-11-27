@@ -90,6 +90,7 @@ function Historial({ refresco, toast }) {
       <button className="btn btn--ghost" onClick={() => setConfirmar(null)} disabled={busy}>Cancelar</button>
       <button className="btn btn--danger" onClick={deshacer} disabled={busy}>{busy ? "Deshaciendo…" : "Deshacer"}</button></>}>
       <p className="muted">Se borrará lo que creó la importación del {fmtFecha(confirmar.created_at)} ({confirmar.archivo || "sin nombre"}): empresas, contactos, negocios y vínculos nuevos. Los campos que rellenó en registros que ya existían vuelven a quedar vacíos.</p>
+      {confirmar.resumen && confirmar.resumen.origen === "holded" && <p className="muted">Este lote viene de Holded: al borrar esas empresas también se revocan sus conexiones con Holded (y sus claves).</p>}
       <p className="muted">Si algo de lo importado se ha cambiado después (ediciones, notas, tareas, documentos, negocios nuevos…), no se deshace nada y verás el motivo.</p>
       {msg && <p style={{ color: "var(--danger)", fontSize: 13 }}>{msg}</p>}
     </Modal>}

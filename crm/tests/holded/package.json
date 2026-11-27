@@ -1,0 +1,11 @@
+{
+  "name": "guimaes-tests-holded",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node holded-sql.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.2.17"
+  }
+}
