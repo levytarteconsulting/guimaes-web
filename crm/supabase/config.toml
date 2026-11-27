@@ -97,3 +97,9 @@ verify_jwt = false
 [functions.agente]
 entrypoint = "../supabase-functions/agente/index.ts"
 verify_jwt = true
+
+# Holded (crm/supabase-holded-conexiones.sql): la llama el CRM con el JWT de
+# un usuario con rol admin; guarda las claves en Vault con la service role.
+[functions.holded-conexiones]
+entrypoint = "../supabase-functions/holded-conexiones/index.ts"
+verify_jwt = true

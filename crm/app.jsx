@@ -5,6 +5,7 @@ import { Asistente, AsistenteBoton, AgenteVista } from "./agente.jsx";
 import { MOBILE_BREAKPOINT, useIsMobile, useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { Inbox, CorreosFicha, useConteoCorreos, noLeidosCache, refrescarNoLeidos } from "./correo.jsx";
 import { Importador } from "./importador.jsx";
+import { HoldedIntegracion, HoldedFicha } from "./holded.jsx";
 /* GUIMAES CRM — App: login, shell, router y todas las pantallas */
 const { useState:uState, useMemo:uMemo, useRef:uRef, useEffect:uEffect } = React;
 
@@ -1080,6 +1081,7 @@ function EmpresaDetail({id, nav, toast, user, foco}){
               <KV k="Empleados">{e.empleados==null ? "—" : e.empleados}</KV>
               <KV k="Contactos">{contactos.length}</KV>
             </div>
+            <HoldedFicha empresaId={id} esRolAdmin={!!user && user.role==="admin"} toast={toast}/>
             <button className="btn btn--sm btn--ghost" style={{width:"100%",marginTop:14}} onClick={()=>setShowEdit(true)}><Icon name="edit" size={15}/>Editar empresa</button>
             <div className="row" style={{gap:8,marginTop:8}}>
               {!e.provisional_at && !e.archived_at && <button className="btn btn--sm btn--ghost" style={{flex:1}} onClick={()=>setShowArchivar(true)}><Icon name="archive" size={15}/>Archivar</button>}
@@ -3650,7 +3652,7 @@ function MyAccount({toast}){
 /* ============ CONFIG ============ */
 function Config({toast, initialTab, nav, user}){
   const esRolAdmin = !!user && user.role==="admin";
-  const [tab,setTab]=uState(initialTab==="importar" && !esRolAdmin ? "servicios" : (initialTab||"servicios"));
+  const [tab,setTab]=uState((initialTab==="importar"||initialTab==="integraciones") && !esRolAdmin ? "servicios" : (initialTab||"servicios"));
   const [services,setServices]=uState(CRM.SERVICES.map(s=>({...s}))); const [showNewSvc,setNewSvc]=uState(false);
   const [users,setUsers]=uState(CRM.USERS.map(u=>({...u}))); const [showNewUser,setNewUser]=uState(false); const [delUser,setDelUser]=uState(null);
   const activeCount = users.filter(u=>u.activo).length;
@@ -3685,8 +3687,9 @@ function Config({toast, initialTab, nav, user}){
     toast("Administrador eliminado y acceso revocado en Supabase");
   };
   return <div className="content">
-    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"documentos",label:"Documentos"},{id:"automatizaciones",label:"Automatizaciones"},{id:"notificaciones",label:"Notificaciones"},...(esRolAdmin?[{id:"importar",label:"Importar"}]:[]),{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
+    <Tabs tabs={[{id:"servicios",label:"Servicios"},{id:"usuarios",label:"Usuarios y roles"},{id:"documentos",label:"Documentos"},{id:"automatizaciones",label:"Automatizaciones"},{id:"notificaciones",label:"Notificaciones"},...(esRolAdmin?[{id:"importar",label:"Importar"},{id:"integraciones",label:"Integraciones"}]:[]),{id:"cuenta",label:"Mi cuenta"}]} active={tab} onChange={setTab}/>
     {tab==="importar" && esRolAdmin && <Importador toast={toast}/>}
+    {tab==="integraciones" && esRolAdmin && <div><div style={{fontWeight:700,fontFamily:"var(--display)",fontSize:17,margin:"4px 0 12px"}}>Holded</div><HoldedIntegracion toast={toast} nav={nav}/></div>}
     {tab==="documentos" && <Documents nav={nav} toast={toast}/>}
     {tab==="automatizaciones" && <Automations toast={toast}/>}
     {tab==="servicios" && <>
