@@ -17,6 +17,7 @@
 
 import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { CICLO_VIDA, ETAPAS, MOTIVOS_PERDIDA, PRIORIDADES, SERVICIOS } from "../_shared/catalogos.ts";
+import { ESQUEMA_SECCIONES, type Informe, validarInforme } from "./informe.ts";
 
 type Propiedad =
   | { type: "string"; description: string; format?: "uuid" | "fecha" | "dia"; enum?: string[]; maxLength?: number; minLength?: number }
@@ -24,7 +25,8 @@ type Propiedad =
   | { type: "number"; description: string; minimum: number; maximum: number }
   | { type: "boolean"; description: string }
   | { type: "array"; description: string; items: { type: "string"; enum?: string[]; format?: "uuid"; maxLength?: number }; maxItems: number }
-  | { type: "object"; description: string; maxBytes: number };
+  | { type: "object"; description: string; maxBytes: number }
+  | { type: "json"; description: string; schema: Record<string, unknown> };   // se valida aparte (p. ej. informe.ts)
 
 export type Herramienta = {
   name: string;
@@ -265,6 +267,17 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
       empresa_id: uuid("Empresa del correo. Obligatoria si hay adjuntos; si no se da, la principal del contacto."),
       documentos: { type: "array", maxItems: 10, items: { type: "string", format: "uuid" }, description: "Ids de documentos de la empresa para adjuntar (como mucho 10, 25 MB en total)." },
     }, ["para", "asunto", "texto"]),
+  herramienta("mostrar_informe",
+    "Enseña al usuario un informe en el chat: texto, tablas y gráficos (barras, líneas o tarta). El CRM lo dibuja y le da botones " +
+    "para descargarlo en PDF (con los logos de Guimaes, la fecha y la fuente), guardarlo en los documentos de una empresa o guardar " +
+    "la petición para regenerarlo más adelante. NO consulta nada: usa SOLO cifras que hayan devuelto las demás herramientas en esta " +
+    "conversación, sin inventar, estimar ni completar valores. Úsala cuando pidan un informe, una tabla o un gráfico.",
+    {
+      titulo: { type: "string", maxLength: 200, description: "Título del informe." },
+      fuente: { type: "string", maxLength: 300, description: "De dónde salen los datos y de qué periodo (p. ej. «CRM, negocios a 28/11/2026» o «Holded de X, facturas emitidas 2026»)." },
+      empresa_id: uuid("Empresa del CRM a la que se refiere el informe, si es de una (para guardarlo en sus documentos)."),
+      secciones: { type: "json", description: ESQUEMA_SECCIONES.description, schema: ESQUEMA_SECCIONES as unknown as Record<string, unknown> },
+    }, ["titulo", "fuente", "secciones"]),
   // ---------------------------------------------------------------- Holded (holded-proxy)
   herramienta("holded_facturas",
     "Holded de una empresa cliente: facturas emitidas (ventas) o recibidas (compras y gastos) de un periodo, con totales " +
@@ -354,6 +367,7 @@ export const HERRAMIENTAS_API: Anthropic.Beta.BetaTool[] = HERRAMIENTAS.map((h) 
     ...h.input_schema,
     properties: Object.fromEntries(Object.entries(h.input_schema.properties).map(([k, p]) => {
       if (p.type === "object") return [k, { type: "object", description: p.description }];
+      if (p.type === "json") return [k, { ...p.schema, description: p.description }];
       if ("format" in p && (p.format === "fecha" || p.format === "dia")) {
         const { format: _f, ...resto } = p;
         return [k, resto];
@@ -372,6 +386,7 @@ export type Validacion =
   | { ok: true; rpc: string; args: Record<string, unknown> }
   | { ok: true; holded: LlamadaHolded }
   | { ok: true; local: "documentacion"; args: { tema?: string; operacion?: string } }
+  | { ok: true; local: "informe"; informe: Informe }
   | { ok: true; propuesta: { tipo: string; registro: string | null; datos: Record<string, unknown> } }
   | { ok: true; correo: Record<string, unknown> }
   | { ok: false; error: string };
@@ -424,6 +439,8 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
         if (typeof v !== "object" || Array.isArray(v)) return mal("tiene que ser un objeto JSON");
         if (new TextEncoder().encode(JSON.stringify(v)).length > p.maxBytes) return mal(`como mucho ${Math.round(p.maxBytes / 1000)} KB`);
         break;
+      case "json":
+        break;
       case "array":
         if (!Array.isArray(v) || v.length > p.maxItems) return mal(`tiene que ser una lista de como mucho ${p.maxItems}`);
         if (v.some((x) => typeof x !== "string")) return mal("tiene que ser una lista de textos");
@@ -435,6 +452,10 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
     args[k] = v;
   }
   if (h.name === "holded_documentacion") return { ok: true, local: "documentacion", args: args as { tema?: string; operacion?: string } };
+  if (h.name === "mostrar_informe") {
+    const r = validarInforme(args);
+    return r.ok ? { ok: true, local: "informe", informe: r.valor } : { ok: false, error: r.error };
+  }
   if (h.name === "proponer_correo") {
     const datos = { ...args } as Record<string, unknown>;
     for (const k of ["contact_id", "empresa_id"]) if (typeof datos[k] === "string") datos[k] = (datos[k] as string).toLowerCase();

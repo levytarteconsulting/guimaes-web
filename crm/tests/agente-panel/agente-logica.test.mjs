@@ -321,3 +321,17 @@ test("acciones de Holded: el evento de fin lleva la acción; al reabrir, su tarj
   const b = burbujasDeHistorial(filas, [{ id: "a1", created_at: "2026-11-28T10:00:04Z", clase: "accion" }]);
   assert.deepEqual(b[1].partes.map((p) => p.accion || p.texto), ["a1", "r1"]);
 });
+
+test("informes: el evento lleva el informe a la parte y el historial lo coloca en su respuesta", () => {
+  const inf = { titulo: "T", fuente: "F", secciones: [{ tipo: "texto", texto: "x" }] };
+  const p = anotarHerramienta([], { id: "t9", nombre: "mostrar_informe", estado: "fin", informe: inf });
+  assert.deepEqual(p[0].informe, inf);
+  const filas = [
+    { orden: 1, rol: "user", tipo: "pregunta", texto: "Gráfico", created_at: "2026-11-28T10:00:00Z" },
+    { orden: 2, rol: "assistant", tipo: "modelo", texto: "Listo.", created_at: "2026-11-28T10:00:05Z" },
+  ];
+  const bs = burbujasDeHistorial(filas, [{ id: "c1", created_at: "2026-11-28T10:00:03Z", clase: "informe", informe: inf }]);
+  assert.equal(bs[1].partes[0].id, "informe-c1");
+  assert.deepEqual(bs[1].partes[0].informe, inf);
+  assert.equal(bs[1].partes[1].texto, "Listo.");
+});

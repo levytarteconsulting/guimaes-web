@@ -487,10 +487,14 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
       try {
         let espera: ReturnType<typeof setTimeout> | undefined;
         let accion: string | undefined;
+        const informe = "local" in v && v.local === "informe" ? v.informe : undefined;
         const limiteMs = "holded" in v ? holdedMs : herramientaMs;
         let datos = await Promise.race([
           "holded" in v ? db.holded(v.holded)
-            : "local" in v ? Promise.resolve(consultarDocumentacion(v.args))
+            : "local" in v ? Promise.resolve(v.local === "informe"
+                ? { mostrado: true, nota: "El usuario ya ve el informe en el chat, con botones para descargarlo en PDF, guardarlo en " +
+                    "documentos o guardar la petición. No repitas sus tablas ni sus cifras: comenta en una o dos frases lo importante." }
+                : consultarDocumentacion(v.args))
             : "propuesta" in v ? db.rpc("agente_proponer", { p_conversacion: conversacionId, p_tool_use_id: u.id, p_tipo: v.propuesta.tipo,
                                                              p_registro: v.propuesta.registro, p_datos: v.propuesta.datos })
             : "correo" in v ? comprobarPruebas(v.correo).then(() =>
@@ -534,10 +538,11 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         const texto = serializarResultado(datos);
         const filas = filasDe(datos);
         enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas, ...(propuesta ? { propuesta } : {}), ...(correo ? { correo } : {}),
-                                ...(accion ? { accion } : {}) });
+                                ...(accion ? { accion } : {}), ...(informe ? { informe } : {}) });
         const tarjeta = propuesta ?? correo ?? accion;
         return { resultado: { type: "tool_result", tool_use_id: u.id, content: texto },
-                 llamada: { ...base, filas, bytes: texto.length, es_error: false, error: null, duracion_ms: ahora() - t0,
+                 llamada: { ...base, ...(informe ? { parametros: informe as unknown as Record<string, unknown> } : {}),
+                            filas, bytes: texto.length, es_error: false, error: null, duracion_ms: ahora() - t0,
                             ...(tarjeta ? { tarjeta_id: tarjeta } : {}) } };
       } catch (e) {
         const err = (e ?? {}) as ErrorDb;
