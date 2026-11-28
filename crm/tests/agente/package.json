@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node agente-sql.test.mjs && node agente-escritura.test.mjs"
+    "test": "node agente-sql.test.mjs && node agente-escritura.test.mjs && node agente-correo.test.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.17"

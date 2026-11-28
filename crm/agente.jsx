@@ -3,9 +3,10 @@ import {
   crearLectorSSE, mensajeDeError, MENSAJE_RED, MENSAJE_CORTE, avisoDeFin, etiquetaHerramienta,
   contextoDeVista, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta,
   idsDocumentos, estadoDocumento, filasPropuesta, filasBorrado, datosEditados, destinoDeCambio, estadoPropuesta,
-  esBorrado, LISTAS_CAMPO, CAMPOS_SI_NO, tablaDeTipo,
+  esBorrado, LISTAS_CAMPO, CAMPOS_SI_NO, tablaDeTipo, estadoCorreo, datosCorreo,
 } from "./agente-logica.js";
 import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
+import { CORREO } from "./correo.jsx";
 /* GUIMAES CRM — Asistente.
    Botón en la topbar + cajón lateral (420 px en escritorio, pantalla completa
    en móvil). Habla con la Edge Function "agente" por SSE (fetch + getReader).
@@ -13,7 +14,10 @@ import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
    agente-logica.js: nunca con innerHTML.
    Las herramientas proponer_* del asistente no escriben: crean una propuesta
    (agente_propuestas) que aquí se pinta como tarjeta. Solo al pulsar
-   Confirmar se llama a agente_confirmar, con la sesión de quien pulsa. */
+   Confirmar se llama a agente_confirmar, con la sesión de quien pulsa.
+   proponer_correo tampoco envía: deja un correo en agente_correos que aquí
+   se pinta como tarjeta; solo el rol admin ve el botón Enviar, que llama a la
+   función correo (accion agente_enviar), y la función vuelve a comprobarlo. */
 const { useState, useRef, useEffect, useCallback, useMemo, useContext } = React;
 
 const MAX_PREGUNTA = 4000;
@@ -249,6 +253,102 @@ function Tarjeta({ id, onNav }) {
     </div>
   );
 }
+/* ---------------- Tarjeta de correo ---------------- */
+const ESTADOS_CORREO = { pendiente: "Sin enviar", enviando: "Enviando…", enviada: "Enviado", cancelada: "Cancelado", caducado: "Caducado" };
+// ¿Quien usa el CRM es rol admin? (el servidor lo vuelve a comprobar al enviar)
+function useSoyRolAdmin() {
+  const [si, setSi] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    Auth.client.auth.getSession().then(({ data }) => {
+      const uid = data && data.session && data.session.user && data.session.user.id;
+      const u = (CRM.USERS || []).find((x) => x.auth_user_id === uid);
+      if (vivo) setSi(!!u && u.role === "admin" && u.activo !== false);
+    }).catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  return si;
+}
+const COLS_CORREO = "id, created_at, auth_user_id, para, cc, cco, asunto, texto, documentos, adjuntos, avisos, contact_id, empresa_id, resumen, estado, expira_at, enviado_por, enviado_at, ultimo_error";
+export function TarjetaCorreo({ id, onNav, onCambio }) {
+  const [c, setC] = useState(null);
+  const [err, setErr] = useState("");
+  const [ed, setEd] = useState(null);       // { para, cc, cco, asunto, texto, documentos } mientras se edita
+  const [busy, setBusy] = useState(false);
+  const soyAdmin = useSoyRolAdmin();
+  const cargar = useCallback(async () => {
+    const { data, error } = await Auth.client.from("agente_correos").select(COLS_CORREO).eq("id", id).maybeSingle();
+    if (error || !data) { setErr("No se ha podido cargar el correo."); return; }
+    setC(data);
+  }, [id]);
+  useEffect(() => { cargar(); }, [cargar]);
+  // Mientras se envía, se vuelve a mirar cada pocos segundos.
+  useEffect(() => { if (!c || c.estado !== "enviando") return; const t = setTimeout(cargar, 4000); return () => clearTimeout(t); }, [c, cargar]);
+  const estado = estadoCorreo(c);
+  const fallo = (e, def) => setErr((e && e.message) || def);
+  const guardar = async () => {
+    setBusy(true); setErr("");
+    const { error } = await Auth.client.rpc("agente_correo_editar", { p_correo: id, p_datos: datosCorreo(c, ed) });
+    if (error) fallo(error, "No se ha podido guardar."); else { setEd(null); await cargar(); }
+    setBusy(false);
+  };
+  const enviar = async () => {
+    setBusy(true); setErr("");
+    try { await CORREO.funcion("agente_enviar", { correo: id }); }
+    catch (e) { fallo(e, "No se ha podido enviar."); }
+    await cargar(); setBusy(false); if (onCambio) onCambio();
+  };
+  const cancelar = async () => {
+    setBusy(true); setErr("");
+    const { error } = await Auth.client.rpc("agente_correo_cancelar", { p_correo: id });
+    if (error) fallo(error, "No se ha podido cancelar.");
+    await cargar(); setBusy(false); if (onCambio) onCambio();
+  };
+  if (!c) return <div className="ag-card ag-card--carga">{err || "Cargando el correo…"}</div>;
+  const nombre = (cid) => (CRM.contactById[cid] || {}).full_name;
+  const empresa = c.empresa_id ? ((CRM.empresaById[c.empresa_id] || {}).razon_social || "empresa") : null;
+  const adjuntos = (c.adjuntos || []).filter((a) => !ed || (ed.documentos || []).includes(a.id));
+  const linea = (k, etiqueta) => (ed ? true : (c[k] || []).length > 0) && <tr><th>{etiqueta}</th><td>
+    {ed ? <input className="inp" value={ed[k]} onChange={(e) => setEd({ ...ed, [k]: e.target.value })} placeholder="email, email…" />
+        : (c[k] || []).join(", ")}</td></tr>;
+  const claseEstado = { enviada: "confirmada", cancelada: "cancelada", caducado: "caducada" }[estado] || "pendiente";
+  return (
+    <div className={"ag-card ag-card--correo ag-card--" + claseEstado}>
+      <div className="ag-card__cab"><b>{c.resumen}</b><span className="ag-card__estado">{ESTADOS_CORREO[estado] || estado}</span></div>
+      <table className="ag-card__tabla"><tbody>
+        <tr><th>De</th><td>info@guimaes.es</td></tr>
+        {linea("para", "Para")}{linea("cc", "CC")}{linea("cco", "CCO")}
+        <tr><th>Asunto</th><td>{ed ? <input className="inp" value={ed.asunto} onChange={(e) => setEd({ ...ed, asunto: e.target.value })} /> : c.asunto}</td></tr>
+        {(c.contact_id || empresa) && <tr><th>Ficha</th><td>
+          {c.contact_id && <a className="ag-link" href="#" onClick={(e) => { e.preventDefault(); onNav({ name: "contact", id: c.contact_id }); }}>{nombre(c.contact_id) || "contacto"}</a>}
+          {c.contact_id && empresa && " · "}
+          {empresa && <a className="ag-link" href="#" onClick={(e) => { e.preventDefault(); onNav({ name: "empresa", id: c.empresa_id }); }}>{empresa}</a>}
+        </td></tr>}
+        {adjuntos.length > 0 && <tr><th>Adjuntos</th><td>{adjuntos.map((a) => <div key={a.id}>
+          📎 {a.nombre}{a.tamano ? ` (${Math.max(1, Math.round(a.tamano / 1024))} KB)` : ""}
+          {ed && <button className="btn btn--sm btn--ghost" onClick={() => setEd({ ...ed, documentos: ed.documentos.filter((x) => x !== a.id) })}>Quitar</button>}
+        </div>)}</td></tr>}
+      </tbody></table>
+      {ed ? <textarea className="inp ag-card__texto" rows={8} value={ed.texto} onChange={(e) => setEd({ ...ed, texto: e.target.value })} />
+          : <div className="ag-card__texto">{c.texto}</div>}
+      {estado === "pendiente" && (c.avisos || []).length > 0 && <div className="ag-card__dup"><b>Avisos:</b><ul>{c.avisos.map((a, i) => <li key={i}>{a}</li>)}</ul></div>}
+      {c.ultimo_error && estado === "pendiente" && <div className="ag-aviso ag-aviso--err" role="alert">No se envió: {c.ultimo_error}</div>}
+      {err && <div className="ag-aviso ag-aviso--err" role="alert">{err}</div>}
+      {estado === "pendiente" && <div className="ag-card__acc">
+        {!ed && soyAdmin && <button className="btn btn--sm btn--primary" disabled={busy} onClick={enviar}>{busy ? "Enviando…" : "Enviar"}</button>}
+        {!ed && <button className="btn btn--sm btn--ghost" disabled={busy}
+          onClick={() => setEd({ para: (c.para || []).join(", "), cc: (c.cc || []).join(", "), cco: (c.cco || []).join(", "), asunto: c.asunto, texto: c.texto, documentos: c.documentos || [] })}>Editar</button>}
+        {ed && <button className="btn btn--sm btn--primary" disabled={busy} onClick={guardar}>Guardar cambios</button>}
+        {ed && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setEd(null)}>Descartar cambios</button>}
+        {!ed && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={cancelar}>Cancelar</button>}
+      </div>}
+      {estado === "pendiente" && !soyAdmin && <div className="ag-card__nota">Lo envía un administrador: lo verá en Acciones → Correos del asistente.</div>}
+      {estado === "enviada" && <div className="ag-card__nota">Enviado desde info@ el {c.enviado_at ? new Date(c.enviado_at).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Madrid" }) : ""}; está en Enviados{c.contact_id || empresa ? " y en la ficha" : ""}.</div>}
+      {estado === "caducado" && <div className="ag-card__nota">Han pasado más de 7 días: pídeselo otra vez al asistente.</div>}
+    </div>
+  );
+}
+
 function CampoEditable({ k, valor, onCambio }) {
   const base = k.split(".").pop();
   if (CAMPOS_SI_NO.has(base)) return <input type="checkbox" checked={!!valor} onChange={(e) => onCambio(e.target.checked)} />;
@@ -277,7 +377,9 @@ function Burbuja({ b, onNav }) {
   const vacia = !b.partes.some((p) => p.tipo === "texto" && p.texto.trim());
   return (
     <div className="ag-msg ag-msg--bot">
-      {b.partes.map((p, i) => p.tipo === "herramienta" && p.propuesta
+      {b.partes.map((p, i) => p.tipo === "herramienta" && p.correo
+        ? <TarjetaCorreo key={p.correo} id={p.correo} onNav={onNav} />
+        : p.tipo === "herramienta" && p.propuesta
         ? <Tarjeta key={p.propuesta} id={p.propuesta} onNav={onNav} />
         : p.tipo === "herramienta"
         ? <Herramienta key={p.id || i} p={p} />
@@ -347,14 +449,16 @@ export function useChatAgente({ view } = {}) {
     const n = ++cargaRef.current;
     setConvId(id); setConvArchivada(archivadas); setBurbujas([]); setAviso(null); setCargando(true);
     try {
-      const [{ data, error }, props] = await Promise.all([
+      const [{ data, error }, props, correos] = await Promise.all([
         Auth.client.from("agente_mensajes")
           .select("orden,rol,tipo,texto,stop_reason,created_at").eq("conversacion_id", id)
           .in("tipo", ["pregunta", "modelo"]).order("orden", { ascending: true }),
         Auth.client.from("agente_propuestas").select("id, created_at").eq("conversacion_id", id).order("created_at"),
+        Auth.client.from("agente_correos").select("id, created_at").eq("conversacion_id", id).order("created_at"),
       ]);
       if (error) throw error;
-      if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data, props.error ? [] : props.data));
+      const tarjetas = [...(props.error ? [] : props.data), ...(correos.error ? [] : correos.data.map((x) => ({ ...x, clase: "correo" })))];
+      if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data, tarjetas));
     } catch (e) {
       if (n === cargaRef.current) setAviso("No se ha podido abrir la conversación.");
     } finally {

@@ -282,3 +282,30 @@ test("propuestas: destino tras confirmar y estado (caducada)", () => {
   assert.equal(estadoPropuesta({ estado: "pendiente", expira_at: "2000-01-01T00:00:00Z" }), "caducada");
   assert.equal(estadoPropuesta({ estado: "confirmada", expira_at: "2000-01-01T00:00:00Z" }), "confirmada");
 });
+
+/* ---------------- Tarjetas de correo ---------------- */
+import { listaEmails, estadoCorreo, datosCorreo } from "../../agente-logica.js";
+
+test("correos: el evento de fin lleva el correo; al reabrir, la tarjeta de correo va en su respuesta", () => {
+  let partes = anotarHerramienta([], { id: "t1", nombre: "proponer_correo", estado: "inicio" });
+  partes = anotarHerramienta(partes, { id: "t1", nombre: "proponer_correo", estado: "fin", correo: ID });
+  assert.equal(partes[0].correo, ID);
+  assert.equal(etiquetaHerramienta("proponer_correo"), "Redactando el correo");
+  const filas = [
+    { orden: 0, rol: "user", tipo: "pregunta", texto: "uno", created_at: "2026-11-28T10:00:00Z" },
+    { orden: 1, rol: "assistant", tipo: "modelo", texto: "r1", created_at: "2026-11-28T10:00:05Z" },
+  ];
+  const b = burbujasDeHistorial(filas, [{ id: "k1", created_at: "2026-11-28T10:00:03Z", clase: "correo" }, { id: "p1", created_at: "2026-11-28T10:00:02Z" }]);
+  assert.deepEqual(b[1].partes.map((p) => p.correo ? "correo:" + p.correo : p.propuesta ? "prop:" + p.propuesta : p.texto), ["prop:p1", "correo:k1", "r1"]);
+});
+
+test("correos: listas de emails, estado (caducado) y datos para editar", () => {
+  assert.deepEqual(listaEmails(" a@x.invalid, b@x.invalid;c@x.invalid  d@x.invalid ,"), ["a@x.invalid", "b@x.invalid", "c@x.invalid", "d@x.invalid"]);
+  assert.deepEqual(listaEmails(""), []);
+  assert.equal(estadoCorreo({ estado: "pendiente", expira_at: "2000-01-01T00:00:00Z" }), "caducado");
+  assert.equal(estadoCorreo({ estado: "enviada", expira_at: "2000-01-01T00:00:00Z" }), "enviada");
+  const c = { para: ["a@x.invalid"], cc: [], cco: [], asunto: "A", texto: "T", documentos: ["d1", "d2"], contact_id: "c1", empresa_id: "e1" };
+  assert.deepEqual(datosCorreo(c), { para: ["a@x.invalid"], cc: [], cco: [], asunto: "A", texto: "T", documentos: ["d1", "d2"], contact_id: "c1", empresa_id: "e1" });
+  assert.deepEqual(datosCorreo(c, { para: "a@x.invalid, b@x.invalid", asunto: "B", documentos: ["d2"] }),
+    { para: ["a@x.invalid", "b@x.invalid"], cc: [], cco: [], asunto: "B", texto: "T", documentos: ["d2"], contact_id: "c1", empresa_id: "e1" });
+});

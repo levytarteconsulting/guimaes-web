@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test, beforeEach } from "node:test";
 import {
   ALIAS, buscarCid, infoEnCabeceras, conCita, createHandler, DIAS_IMPORTACION, esDeInfo, GRAPH, limpiarBorradores, MAX_DIRECTO, nombreFichero,
-  olvidarToken, PRESUPUESTO_MS, TROZO, urlSubidaValida,
+  olvidarToken, PRESUPUESTO_MS, TROZO, urlSubidaValida, permitidosPrueba, AVISO_PRUEBAS,
 } from "./correo.ts";
 import type { AdjuntoDb, Carpeta, Db, Deps, Estado, Fila } from "./correo.ts";
 import { sanearHtml, textoAHtml } from "./sanear.ts";
@@ -92,6 +92,22 @@ class FakeDb implements Db {
   }
   async documento(id: string) { return this.documentos.get(id) ?? null; }
   async descargarDocumento(p: string) { const f = this.ficheros.get(p); if (!f) throw new Error("no está"); return f; }
+  // Correos del asistente.
+  rolesAdmin = new Set(["admin-u-activo"]);
+  correos = new Map<string, any>();
+  auditoria: any[] = [];
+  async esRolAdmin(id: string) { return this.rolesAdmin.has(id); }
+  async reservarCorreoAgente(id: string, adminId: string, ahora: string) {
+    const c = this.correos.get(id);
+    if (!c || c.estado !== "pendiente" || c.expira_at <= ahora) return null;
+    Object.assign(c, { estado: "enviando", enviado_por: adminId, ultimo_error: null });
+    return JSON.parse(JSON.stringify(c));
+  }
+  async correoAgente(id: string) { const c = this.correos.get(id); return c ? { estado: c.estado, expira_at: c.expira_at } : null; }
+  async correoAgenteResuelto(id: string, cambios: Record<string, unknown>) {
+    const c = this.correos.get(id); if (c && c.estado === "enviando") Object.assign(c, cambios);
+  }
+  async auditar(f: any) { this.auditoria.push(f); }
 }
 
 // ---------------------------------------------------------------- Graph simulado
@@ -1022,4 +1038,112 @@ test("importar_historico: corta por tiempo con un cursor y reanuda; cursor ajeno
   assert.equal(db.mensajes.size, 2);
   assert.equal((await jsonDe(d, { accion: "importar_historico", cursor: "https://graph.microsoft.com/v1.0/users/otro/messages?x" }, { "x-hook-secret": CRON })).status, 400);
   assert.equal((await jsonDe(d, { accion: "importar_historico" }, { authorization: "Bearer jwt-inactivo" })).status, 403);
+});
+
+// ================================================================= correos del asistente (agente_enviar)
+const K = "c0aa0000-0000-0000-0000-000000000001";
+const CONTACTO = "cccccccc-0000-0000-0000-000000000001";
+function correoAgente(db: FakeDb, o: Record<string, unknown> = {}) {
+  db.correos.set(K, { id: K, estado: "pendiente", expira_at: "2026-11-19T12:00:00Z", para: ["cliente@ejemplo.invalid"], cc: [], cco: [],
+                      asunto: "Propuesta", texto: "Hola,\n\nadjunto la propuesta.", documentos: [], contact_id: CONTACTO, empresa_id: EMPRESA, ...o });
+}
+
+test("agente_enviar: envía desde info@, guarda el enviado en la ficha y marca la tarjeta; dos clics no envían dos veces", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  const D1 = "dddddddd-0000-0000-0000-000000000011";
+  db.documentos.set(D1, { id: D1, empresa_id: EMPRESA, status: "stored", nombre: "propuesta.pdf", tipo: "application/pdf", storage_path: "p/" + D1, tamano: 500 });
+  db.ficheros.set("p/" + D1, bytes(500));
+  correoAgente(db, { documentos: [D1], cc: ["copia@ejemplo.invalid"] });
+  const r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body, { ok: true, graph_id: "nuevo1", estado: "enviada" });
+  const crear = g.llamadas.find((c) => c.method === "POST" && c.url.endsWith("/messages"))!;
+  assert.equal(crear.body.subject, "Propuesta");
+  assert.deepEqual(crear.body.toRecipients, [{ emailAddress: { address: "cliente@ejemplo.invalid" } }]);
+  assert.match(crear.body.body.content, /<p>Hola,<\/p>\n<p>adjunto la propuesta.<\/p>/);
+  assert.ok(g.llamadas.some((c) => c.method === "PATCH" && c.body?.from?.emailAddress?.address === ALIAS), "from info@");
+  assert.ok(g.llamadas.some((c) => c.method === "POST" && c.url.endsWith("/send")), "enviado");
+  assert.deepEqual(g.adjuntos["nuevo1"].map((a) => a.name), ["propuesta.pdf"]);
+  const fila = db.mensajes.get("nuevo1")!;
+  assert.equal(fila.carpeta, "sentitems");
+  assert.equal(fila.enviado_por, "admin-u-activo");
+  assert.equal(fila.contact_id, CONTACTO, "en la ficha del contacto");
+  assert.equal(fila.empresa_id, EMPRESA, "y de la empresa");
+  const c = db.correos.get(K);
+  assert.equal(c.estado, "enviada"); assert.equal(c.graph_id, "nuevo1"); assert.equal(c.enviado_por, "admin-u-activo");
+  assert.deepEqual(db.auditoria, [{ auth_user_id: "u-activo", accion: "enviar_correo", tabla: "agente_correos", registro_id: K }]);
+  assert.equal(db.borradores.size, 0, "sin borradores colgando");
+  const otra = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(otra.status, 409); assert.match(otra.body.error, /ya está enviada/);
+  assert.equal(g.llamadas.filter((x) => x.url.endsWith("/send")).length, 1);
+});
+
+test("agente_enviar: solo el rol admin; ni miembros, ni inactivos, ni el cron", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  correoAgente(db);
+  db.rolesAdmin.clear();
+  const r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 403); assert.match(r.body.error, /Solo un administrador/);
+  assert.equal((await jsonDe(d, { accion: "agente_enviar", correo: K }, { authorization: "Bearer jwt-inactivo" })).status, 403);
+  assert.equal((await jsonDe(d, { accion: "agente_enviar", correo: K }, { "x-hook-secret": CRON })).status, 403);
+  assert.equal(db.correos.get(K).estado, "pendiente");
+  assert.equal(g.llamadas.length, 0, "sin tocar Graph");
+});
+
+test("agente_enviar: modo de pruebas (AGENTE_CORREO_SOLO) bloquea cualquier otro destinatario, también en CC y CCO", async () => {
+  assert.equal(permitidosPrueba(undefined), null);
+  assert.equal(permitidosPrueba("  "), null);
+  assert.deepEqual([...permitidosPrueba("A@prueba.invalid, b@prueba.invalid;c@prueba.invalid")!], ["a@prueba.invalid", "b@prueba.invalid", "c@prueba.invalid"]);
+  env.AGENTE_CORREO_SOLO = "prueba1@ejemplo.invalid,prueba2@ejemplo.invalid";
+  try {
+    for (const o of [{ para: ["cliente@ejemplo.invalid"] }, { para: ["prueba1@ejemplo.invalid"], cc: ["cliente@ejemplo.invalid"] },
+                     { para: ["prueba1@ejemplo.invalid"], cco: ["cliente@ejemplo.invalid"] }]) {
+      const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+      correoAgente(db, o);
+      const r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+      assert.equal(r.status, 403); assert.equal(r.body.error, AVISO_PRUEBAS);
+      assert.equal(g.llamadas.length, 0, "nada sale hacia Graph");
+      assert.equal(db.correos.get(K).estado, "pendiente", "vuelve a pendiente");
+      assert.equal(db.correos.get(K).ultimo_error, AVISO_PRUEBAS);
+    }
+    const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+    correoAgente(db, { para: ["Prueba1@ejemplo.invalid"], cc: ["prueba2@ejemplo.invalid"] });
+    assert.equal((await jsonDe(d, { accion: "agente_enviar", correo: K })).status, 200, "a las direcciones de prueba, sí");
+    // El resto del correo del CRM no cambia.
+    const g2 = fakeGraph(); const d2 = deps(g2, new FakeDb());
+    assert.equal((await jsonDe(d2, { accion: "enviar", para: ["cliente@ejemplo.invalid"], asunto: "x", texto: "y" })).status, 200);
+  } finally { delete env.AGENTE_CORREO_SOLO; }
+});
+
+test("agente_enviar: caducado, cancelado o inexistente → 409/404; un fallo antes de enviar lo deja pendiente y sin borrador", async () => {
+  const g = fakeGraph(); const db = new FakeDb(); const d = deps(g, db);
+  correoAgente(db, { expira_at: "2026-11-12T11:59:00Z" });
+  let r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 409); assert.match(r.body.error, /caducado/);
+  correoAgente(db, { estado: "cancelada" });
+  r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 409); assert.match(r.body.error, /ya está cancelada/);
+  assert.equal((await jsonDe(d, { accion: "agente_enviar", correo: "dddddddd-0000-0000-0000-00000000dead" })).status, 404);
+  assert.equal((await jsonDe(d, { accion: "agente_enviar" })).status, 400);
+
+  // Documento de otra empresa (cambiado a mano en la tabla): no se envía.
+  const D9 = "dddddddd-0000-0000-0000-000000000019";
+  db.documentos.set(D9, { id: D9, empresa_id: OTRA, status: "stored", nombre: "x.pdf", tipo: "application/pdf", storage_path: "p/" + D9, tamano: 5 });
+  correoAgente(db, { documentos: [D9] });
+  r = await jsonDe(d, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 404);
+  assert.equal(db.correos.get(K).estado, "pendiente");
+  assert.ok(g.borrados.includes("nuevo1") || g.llamadas.some((c) => c.method === "DELETE"), "el borrador de Outlook se borra");
+  assert.equal(db.borradores.size, 0);
+  assert.equal(g.llamadas.filter((c) => c.url.endsWith("/send")).length, 0);
+
+  // Graph falla al enviar.
+  const g3 = fakeGraph(); const db3 = new FakeDb(); const d3 = deps(g3, db3);
+  correoAgente(db3);
+  g3.falla = (c) => c.url.endsWith("/send") ? resp(500, { error: { code: "ErrorInternalServerError" } }) : null;
+  r = await jsonDe(d3, { accion: "agente_enviar", correo: K });
+  assert.equal(r.status, 502);
+  assert.equal(db3.correos.get(K).estado, "pendiente");
+  assert.equal(db3.mensajes.size, 0, "no se registra como enviado");
+  assert.equal(db3.auditoria.length, 0);
 });

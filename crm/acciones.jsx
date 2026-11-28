@@ -1,4 +1,5 @@
 import React from "react";
+import { TarjetaCorreo } from "./agente.jsx";
 /* GUIMAES CRM — Acciones en Holded (solo rol admin).
    Propuestas de escritura en Holded que prepara el asistente o el operador:
    aprobar tickets de venta, o cualquier operación de la lista cerrada de la
@@ -10,7 +11,9 @@ import React from "react";
    documentos exige escribir el número; aprobar una de riesgo alto, escribir
    CONFIRMAR. También el cupo mensual de acciones por empresa y las políticas
    (aprobación o automática con límites). Ver crm/supabase-holded-acciones.sql
-   y crm/supabase-holded-operaciones.sql. */
+   y crm/supabase-holded-operaciones.sql.
+   Arriba, los correos que ha redactado el asistente (agente_correos) y
+   esperan a que un administrador los revise y los envíe. */
 const { useState: aState, useEffect: aEffect, useMemo: aMemo } = React;
 
 const TIPOS = { aprobar_tickets_venta: "Aprobar tickets de venta", operacion: "Operación en Holded" };
@@ -61,6 +64,35 @@ function Barra({ p }) {
   </div>;
 }
 
+// Correos redactados por el asistente sin enviar (de cualquier usuario: el rol admin los ve todos).
+function CorreosAsistente({ nav }) {
+  const [lista, setLista] = aState(null);
+  const [abierto, setAbierto] = aState(null);
+  const cargar = async () => {
+    const r = await Auth.client.from("agente_correos").select("id, created_at, auth_user_id, resumen, expira_at")
+      .eq("estado", "pendiente").gt("expira_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(50);
+    setLista(r.error ? [] : r.data || []);
+  };
+  aEffect(() => { cargar(); }, []);
+  if (!lista || !lista.length) return null;
+  const quien = (uid) => ((CRM.USERS || []).find((u) => u.auth_user_id === uid) || {}).name || "—";
+  const ir = (d) => nav(d.name, d.id);
+  return <div className="card" style={{ marginBottom: 16 }}>
+    <div className="card__body">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <b>Correos del asistente sin enviar</b><span className="muted" style={{ fontSize: 12.5 }}>({lista.length})</span>
+        <div className="toolbar__spacer"></div>
+        <button className="btn btn--sm btn--ghost" onClick={cargar} title="Actualizar"><Icon name="refresh" size={14} /></button>
+      </div>
+      {lista.map((c) => <div key={c.id} style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+        <a href="#" className="ag-link" onClick={(e) => { e.preventDefault(); setAbierto(abierto === c.id ? null : c.id); }}>{c.resumen}</a>
+        <span className="muted" style={{ fontSize: 12.5 }}> · {quien(c.auth_user_id)} · {fmtFecha(c.created_at)}</span>
+        {abierto === c.id && <TarjetaCorreo id={c.id} onNav={ir} onCambio={cargar} />}
+      </div>)}
+    </div>
+  </div>;
+}
+
 export function Acciones({ toast, nav, focusId }) {
   const [lista, setLista] = aState(null);
   const [err, setErr] = aState("");
@@ -81,6 +113,7 @@ export function Acciones({ toast, nav, focusId }) {
   const actual = (lista || []).find((a) => a.id === sel);
 
   return <div>
+    <CorreosAsistente nav={nav} />
     <div className="toolbar">
       <div className="muted" style={{ fontSize: 13, maxWidth: 760 }}>Cambios en Holded que ha propuesto el asistente o el operador. Nada se ejecuta sin que un administrador lo apruebe aquí; después se hace en segundo plano, poco a poco, y se puede pausar o cancelar.</div>
       <div className="toolbar__spacer"></div>

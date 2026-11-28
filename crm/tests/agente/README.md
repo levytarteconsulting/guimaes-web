@@ -19,6 +19,12 @@ Comprueban la migración del agente (bloques 1A, 1B y 1C) en un Postgres en memo
   con empresa nueva; lo editado se valida otra vez; empresas del contacto (principal única);
   negocios, tareas (hecha = archivada), notas; borrar exige BORRAR y usa
   `admin_borrar_contacto`; RLS y auditoría que solo crece.
+- `agente-correo.test.mjs`: `crm/supabase-agente-correo.sql` (11A/11B/11C), emails en
+  `.invalid`. Redactar no envía ni toca el buzón; listas de emails normalizadas
+  («Nombre <x@y>», comas o punto y coma, sin repetir); asunto y texto (con saltos);
+  empresa principal del contacto; adjuntos solo de la empresa y guardados; avisos;
+  cada usuario ve lo suyo y el rol admin todo; nadie marca un correo como enviado desde
+  el CRM; editar/cancelar solo pendientes y sin caducar; se borran con su conversación.
 
 ## Ejecutar
 
