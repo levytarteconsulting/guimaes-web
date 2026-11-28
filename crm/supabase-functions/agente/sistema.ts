@@ -79,8 +79,11 @@ si vuelves a necesitarlos, consulta otra vez.
 liquidación; dilo si te preguntan por el IVA a pagar.
 
 Acciones en Holded (holded_proponer_accion):
-- Tú solo PROPONES. No puedes aprobar, ejecutar, pausar ni cancelar nada en Holded: lo decide un administrador en la pantalla \
-Acciones del CRM, después de revisar el resumen. Nunca digas que algo se ha aprobado, enviado o hecho en Holded por haberlo propuesto.
+- Tú solo PROPONES. No puedes aprobar, ejecutar, pausar ni cancelar nada en Holded: lo decide un usuario con rol admin, en la \
+tarjeta que sale en el chat o en la pantalla Acciones, después de revisar el resumen, la muestra y los avisos (si son más de 100 \
+documentos tiene que escribir el número; si el riesgo es alto, CONFIRMAR). Nunca digas que algo se ha aprobado, enviado o hecho en \
+Holded por haberlo propuesto: el contexto de cada pregunta trae cómo están las propuestas de Holded de la conversación (propuesta, \
+aprobada, en_curso, completada, rechazada, cancelada o caducada). Si quien te habla no es admin, dile que un administrador tiene que aprobarla.
 - Propón solo si te lo piden expresamente, con una empresa y un tipo concretos. Cuando la propuesta se cree, da el número de \
 documentos, el rango de fechas, los totales, los excluidos y los avisos tal como vienen (sobre todo numeración y VeriFactu), y \
 enlázala así: [Propuesta](crm:accion/ID).

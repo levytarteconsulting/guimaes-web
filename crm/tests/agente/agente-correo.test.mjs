@@ -9,6 +9,7 @@ const dir = new URL(".", import.meta.url).pathname;
 const agente = fs.readFileSync(new URL("../../supabase-agente.sql", import.meta.url), "utf8");
 const escritura = fs.readFileSync(new URL("../../supabase-agente-escritura.sql", import.meta.url), "utf8");
 const mig = fs.readFileSync(new URL("../../supabase-agente-correo.sql", import.meta.url), "utf8");
+const tarjetas = fs.readFileSync(new URL("../../supabase-agente-tarjetas.sql", import.meta.url), "utf8");
 const base = fs.readFileSync(dir + "esquema-base.sql", "utf8");
 const parte = (txt, id, sig) => {
   const m = txt.match(new RegExp(`-- ${id} [\\s\\S]*?(?=\\n-- =+\\n-- ${sig} |$)`));
@@ -236,6 +237,27 @@ await db.exec(`set role service_role; insert into public.agente_escrituras (auth
 ok((await q(`select count(*)::int n from public.agente_escrituras where tabla = 'agente_correos'`))[0].n === 1, "la auditoría admite el envío de correos");
 await db.exec(`delete from public.agente_conversaciones where id = '${CM}'`);
 ok((await q(`select count(*)::int n from public.agente_correos where conversacion_id = '${CM}'`))[0].n === 0, "los correos se borran con su conversación");
+
+// ---------------------------------------------------------------- 12A/12B/12C (tarjeta_id)
+console.log("12A/12B/12C:");
+const A12 = await tabla(parte(tarjetas, "12A", "12B"));
+ok(A12["migración 20261128140000"] === "sí" && A12["migración 20261128180000"] === "no" && A12["columna tarjeta_id"] === "0", "12A: lo esperado " + JSON.stringify(A12));
+await db.exec(parte(tarjetas, "12B", "12C"));
+let rep12 = null; try { await db.exec(parte(tarjetas, "12B", "12C")); } catch (e) { rep12 = e.message; }
+ok(/ya está aplicada/.test(rep12 || ""), "12B se niega a repetirse");
+const C12 = await tabla(parte(tarjetas, "12C", "ZZZ"));
+ok(C12["columna tarjeta_id"] === "uuid" && C12["authenticated insert/update(tarjeta_id)"] === "true/false"
+   && /^20261128180000 /.test(C12["migración registrada"] || ""), "12C: lo esperado " + JSON.stringify(C12));
+const CT = "cc000000-0000-0000-0000-000000000001";
+await db.exec(`insert into public.agente_conversaciones (id, auth_user_id, titulo, modelo) values ('${CT}', '${U.admin}', 't', 'm')`);
+const MM = (await como("admin", `insert into public.agente_mensajes (conversacion_id, orden, rol, tipo, contenido) values ('${CT}', 0, 'assistant', 'modelo', '[]') returning id`)).rows[0].id;
+let w = await como("admin", `insert into public.agente_tool_calls (conversacion_id, mensaje_id, tool_use_id, herramienta, parametros, tarjeta_id)
+  values ('${CT}', '${MM}', 'tu1', 'holded_proponer_operacion', '{}', '${K1}') returning tarjeta_id`);
+ok(!w.error && w.rows[0].tarjeta_id === K1, "el asistente guarda el id de la tarjeta con la llamada " + (w.error || ""));
+w = await como("admin", `update public.agente_tool_calls set tarjeta_id = null where conversacion_id = '${CT}'`);
+ok(!!w.error, "y no se cambia después");
+w = await como("miembro", `select tarjeta_id from public.agente_tool_calls where conversacion_id = '${CT}'`);
+ok(!w.error && w.rows.length === 0, "un miembro no ve las llamadas de otro");
 
 console.log(`\n${total - fallos}/${total} ok`);
 process.exit(fallos ? 1 : 0);

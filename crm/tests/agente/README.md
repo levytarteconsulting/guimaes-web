@@ -25,6 +25,8 @@ Comprueban la migración del agente (bloques 1A, 1B y 1C) en un Postgres en memo
   empresa principal del contacto; adjuntos solo de la empresa y guardados; avisos;
   cada usuario ve lo suyo y el rol admin todo; nadie marca un correo como enviado desde
   el CRM; editar/cancelar solo pendientes y sin caducar; se borran con su conversación.
+  Al final, `crm/supabase-agente-tarjetas.sql` (12A/12B/12C): `agente_tool_calls.tarjeta_id`
+  se inserta con la llamada y no se cambia después.
 
 ## Ejecutar
 

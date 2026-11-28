@@ -75,6 +75,8 @@ export type NuevoMensaje = MensajeGuardado & {
 export type NuevaLlamada = {
   conversacion_id: string; mensaje_id: string; tool_use_id: string; herramienta: string; parametros: Record<string, unknown>;
   filas: number | null; bytes: number | null; es_error: boolean; error: string | null; duracion_ms: number | null;
+  /** Lo que creó la herramienta y se pinta como tarjeta (propuesta, correo o acción de Holded). */
+  tarjeta_id?: string | null;
 };
 export type ErrorDb = { code?: string; message?: string };
 export type RespuestaHolded =
@@ -92,6 +94,8 @@ export interface Db {
   propuestas(conversacionId: string): Promise<{ id: string; tipo: string; resumen: string; estado: string; resultado_id: string | null; expira_at: string }[]>;
   /** Correos redactados en la conversación (agente_correos), los más recientes primero. */
   correos(conversacionId: string): Promise<{ id: string; resumen: string; estado: string; expira_at: string }[]>;
+  /** Acciones de Holded propuestas en la conversación (solo las ve el rol admin). */
+  accionesHolded(conversacionId: string): Promise<{ id: string; estado: string; titulo: string; expira_at: string }[]>;
   conversacionPropia(id: string, authUserId: string): Promise<boolean>;
   mensajes(conversacionId: string): Promise<MensajeGuardado[]>;
   crearConversacion(titulo: string, modelo: string): Promise<string>;
@@ -273,6 +277,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
     let yo: { id: string; nombre: string; rol: string } | null = null;
     let propuestas: Awaited<ReturnType<Db["propuestas"]>> = [];
     let correos: Awaited<ReturnType<Db["correos"]>> = [];
+    let acciones: Awaited<ReturnType<Db["accionesHolded"]>> = [];
     try {
       const hechas = await db.preguntasDesde(uid, inicioDiaMadrid(inicio));
       if (hechas >= tope) {
@@ -292,7 +297,10 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
       }
       admins = await db.admins();
       yo = await db.yo(uid);
-      if (typeof convPedida === "string") [propuestas, correos] = await Promise.all([db.propuestas(conversacionId), db.correos(conversacionId)]);
+      if (typeof convPedida === "string") {
+        [propuestas, correos, acciones] = await Promise.all([db.propuestas(conversacionId), db.correos(conversacionId),
+                                                             db.accionesHolded(conversacionId).catch(() => [])]);
+      }
     } catch (e) {
       log("agente: preparación", e);
       return json(req, 500, { error: "No se ha podido preparar la conversación." });
@@ -349,7 +357,9 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
             `${x.id} «${x.resumen}»: ${x.estado === "pendiente" && Date.parse(x.expira_at) < inicio ? "caducada" : x.estado}` +
             (x.resultado_id ? ` (registro ${x.resultado_id})` : "")).join("; ")}.` : "") +
           (correos.length ? ` Correos redactados en esta conversación: ${correos.map((x) =>
-            `${x.id} «${x.resumen}»: ${x.estado === "pendiente" && Date.parse(x.expira_at) < inicio ? "caducado" : x.estado}`).join("; ")}.` : "");
+            `${x.id} «${x.resumen}»: ${x.estado === "pendiente" && Date.parse(x.expira_at) < inicio ? "caducado" : x.estado}`).join("; ")}.` : "") +
+          (acciones.length ? ` Propuestas de Holded de esta conversación: ${acciones.map((x) =>
+            `${x.id} «${x.titulo}»: ${x.estado === "propuesta" && Date.parse(x.expira_at) < inicio ? "caducada" : x.estado}`).join("; ")}.` : "");
         const contenidoPregunta = [{ type: "text" as const, text: contexto }, { type: "text" as const, text: pregunta }];
         await guardar({ rol: "user", tipo: "pregunta", contenido: contenidoPregunta, texto: pregunta });
         historial.push({ role: "user", content: contenidoPregunta });
@@ -476,6 +486,7 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
       }
       try {
         let espera: ReturnType<typeof setTimeout> | undefined;
+        let accion: string | undefined;
         const limiteMs = "holded" in v ? holdedMs : herramientaMs;
         let datos = await Promise.race([
           "holded" in v ? db.holded(v.holded)
@@ -496,6 +507,8 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
             return { resultado: resultadoError(u.id, mensaje),
                      llamada: { ...base, filas: null, bytes: null, es_error: true, error: mensaje.slice(0, 2000), duracion_ms: ahora() - t0 } };
           }
+          const prop = (h.datos as { propuesta?: { id?: unknown } } | null)?.propuesta;
+          if (v.holded.consulta.startsWith("proponer_") && prop && typeof prop.id === "string") accion = prop.id;
           datos = { ...(h.datos as Record<string, unknown>), truncado: h.truncado === true,
                     ...(h.motivo_truncado ? { motivo_truncado: h.motivo_truncado } : {}), fuente: "Holded" };
         }
@@ -520,9 +533,12 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         }
         const texto = serializarResultado(datos);
         const filas = filasDe(datos);
-        enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas, ...(propuesta ? { propuesta } : {}), ...(correo ? { correo } : {}) });
+        enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas, ...(propuesta ? { propuesta } : {}), ...(correo ? { correo } : {}),
+                                ...(accion ? { accion } : {}) });
+        const tarjeta = propuesta ?? correo ?? accion;
         return { resultado: { type: "tool_result", tool_use_id: u.id, content: texto },
-                 llamada: { ...base, filas, bytes: texto.length, es_error: false, error: null, duracion_ms: ahora() - t0 } };
+                 llamada: { ...base, filas, bytes: texto.length, es_error: false, error: null, duracion_ms: ahora() - t0,
+                            ...(tarjeta ? { tarjeta_id: tarjeta } : {}) } };
       } catch (e) {
         const err = (e ?? {}) as ErrorDb;
         const mensaje = (err.code === "22023" || err.code === "GU010" || err.code === "pruebas") && err.message ? err.message

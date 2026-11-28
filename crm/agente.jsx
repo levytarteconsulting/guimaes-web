@@ -7,6 +7,7 @@ import {
 } from "./agente-logica.js";
 import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { CORREO } from "./correo.jsx";
+import { TarjetaAccion } from "./acciones.jsx";
 /* GUIMAES CRM — Asistente.
    Botón en la topbar + cajón lateral (420 px en escritorio, pantalla completa
    en móvil). Habla con la Edge Function "agente" por SSE (fetch + getReader).
@@ -17,7 +18,9 @@ import { CORREO } from "./correo.jsx";
    Confirmar se llama a agente_confirmar, con la sesión de quien pulsa.
    proponer_correo tampoco envía: deja un correo en agente_correos que aquí
    se pinta como tarjeta; solo el rol admin ve el botón Enviar, que llama a la
-   función correo (accion agente_enviar), y la función vuelve a comprobarlo. */
+   función correo (accion agente_enviar), y la función vuelve a comprobarlo.
+   Las propuestas de Holded salen como TarjetaAccion (acciones.jsx): se
+   aprueban o rechazan con las mismas reglas que en la pantalla Acciones. */
 const { useState, useRef, useEffect, useCallback, useMemo, useContext } = React;
 
 const MAX_PREGUNTA = 4000;
@@ -377,7 +380,9 @@ function Burbuja({ b, onNav }) {
   const vacia = !b.partes.some((p) => p.tipo === "texto" && p.texto.trim());
   return (
     <div className="ag-msg ag-msg--bot">
-      {b.partes.map((p, i) => p.tipo === "herramienta" && p.correo
+      {b.partes.map((p, i) => p.tipo === "herramienta" && p.accion
+        ? <TarjetaAccion key={p.accion} id={p.accion} onNav={onNav} />
+        : p.tipo === "herramienta" && p.correo
         ? <TarjetaCorreo key={p.correo} id={p.correo} onNav={onNav} />
         : p.tipo === "herramienta" && p.propuesta
         ? <Tarjeta key={p.propuesta} id={p.propuesta} onNav={onNav} />
@@ -449,15 +454,18 @@ export function useChatAgente({ view } = {}) {
     const n = ++cargaRef.current;
     setConvId(id); setConvArchivada(archivadas); setBurbujas([]); setAviso(null); setCargando(true);
     try {
-      const [{ data, error }, props, correos] = await Promise.all([
+      const [{ data, error }, props, correos, acciones] = await Promise.all([
         Auth.client.from("agente_mensajes")
           .select("orden,rol,tipo,texto,stop_reason,created_at").eq("conversacion_id", id)
           .in("tipo", ["pregunta", "modelo"]).order("orden", { ascending: true }),
         Auth.client.from("agente_propuestas").select("id, created_at").eq("conversacion_id", id).order("created_at"),
         Auth.client.from("agente_correos").select("id, created_at").eq("conversacion_id", id).order("created_at"),
+        Auth.client.from("agente_tool_calls").select("tarjeta_id, created_at").eq("conversacion_id", id)
+          .in("herramienta", ["holded_proponer_accion", "holded_proponer_operacion"]).not("tarjeta_id", "is", null).order("created_at"),
       ]);
       if (error) throw error;
-      const tarjetas = [...(props.error ? [] : props.data), ...(correos.error ? [] : correos.data.map((x) => ({ ...x, clase: "correo" })))];
+      const tarjetas = [...(props.error ? [] : props.data), ...(correos.error ? [] : correos.data.map((x) => ({ ...x, clase: "correo" }))),
+                        ...(acciones.error ? [] : acciones.data.map((x) => ({ id: x.tarjeta_id, created_at: x.created_at, clase: "accion" })))];
       if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data, tarjetas));
     } catch (e) {
       if (n === cargaRef.current) setAviso("No se ha podido abrir la conversación.");
