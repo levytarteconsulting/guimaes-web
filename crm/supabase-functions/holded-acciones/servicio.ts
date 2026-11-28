@@ -125,7 +125,9 @@ export async function atender(deps: Deps, cabeceras: { authorization: string; ho
 }
 
 // ---------------------------------------------------------------- proponer
-async function proponer(deps: Deps, quien: "cron" | { uid: string }, b: Record<string, unknown>) {
+// Las pasadas programadas listan sin fecha de inicio: Holded tarda más en responder.
+export const TIEMPO_LISTADO_PROGRAMADAS_MS = 40_000;
+async function proponer(deps: Deps, quien: "cron" | { uid: string }, b: Record<string, unknown>, timeoutMs?: number) {
   const empresa = typeof b.empresa_id === "string" && RE_UUID.test(b.empresa_id) ? b.empresa_id.toLowerCase() : null;
   if (!empresa) return r(400, { error: "empresa_id no válido." });
   if (typeof b.tipo !== "string" || !(OPERACIONES as readonly string[]).includes(b.tipo)) {
@@ -142,7 +144,7 @@ async function proponer(deps: Deps, quien: "cron" | { uid: string }, b: Record<s
   }
   let p;
   try {
-    p = await construir(clave, v.params, deps.fetchHolded);
+    p = await construir(clave, v.params, deps.fetchHolded, null, timeoutMs);
   } catch (e) {
     if (e instanceof ErrorPropuesta) return r(200, { ok: false, codigo: e.codigo, mensaje: e.message });
     throw e;
@@ -180,7 +182,8 @@ export async function programadas(deps: Deps) {
     let accion: string | null = null, cerrar = false, mensaje: string;
     try {
       const res = await proponer(deps, "cron", { empresa_id: x.empresa_id, tipo: x.tipo,
-                                                 parametros: { max_documentos: MAX_DOCUMENTOS, hasta: x.hasta } });
+                                                 parametros: { max_documentos: MAX_DOCUMENTOS, hasta: x.hasta } },
+                             TIEMPO_LISTADO_PROGRAMADAS_MS);
       const body = res.body as Record<string, X>;
       if (res.status === 200 && body.ok) {
         const pr = body.propuesta;
@@ -194,6 +197,8 @@ export async function programadas(deps: Deps) {
           (typeof body.mensaje === "string" && /problemas/.test(body.mensaje) ? ` (${limpiar(body.mensaje)})` : "") + ".";
       } else if (res.status === 200 && body.codigo === "429") {
         mensaje = `Tanda ${x.tanda}: Holded pide esperar (límite de peticiones); se reintenta en unos minutos.`;   // sin cerrar
+      } else if (res.status === 200 && body.codigo === "sin_respuesta") {
+        mensaje = `Tanda ${x.tanda}: Holded no ha respondido a tiempo; se reintenta en unos minutos.`;   // sin cerrar (máx. 20 tandas)
       } else {
         cerrar = true;
         mensaje = `Parada en la tanda ${x.tanda}: ${limpiar(String(body.mensaje ?? body.error ?? "error"))}`;
