@@ -857,3 +857,106 @@ textarea.ag-card__texto{width:100%;background:var(--paper,#fff);max-height:none;
 .inf-guardado{display:flex;align-items:center;gap:6px;padding:4px 0;}
 .inf-guardado__t{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .inf-guardado__acc{display:flex;gap:4px;}
+
+/* ============================================================
+   Guillermito (robot.jsx) y su chat. Solo transform y opacity.
+   ============================================================ */
+.gm{display:block;overflow:visible;flex:none;}
+.gm .gm-flota,.gm .gm-ojos,.gm .gm-cabeza{transform-box:view-box;transform-origin:0 0;}
+.gm .gm-parpado,.gm .gm-sombra,.gm .gm-antena-luz,.gm .gm-antena-onda,.gm .gm-mano,.gm .gm-holo,.gm .gm-chispa,.gm .gm-duda{transform-box:fill-box;transform-origin:center;}
+.gm .gm-ojos{transition:transform .25s ease-out;}
+.gm .gm-parpado{animation:gm-parpadeo 5s var(--gm-desfase,0s) infinite;}
+.gm .gm-antena-onda{opacity:0;}
+.gm--grande .gm-flota{animation:gm-flota 4s ease-in-out infinite;}
+.gm--grande .gm-sombra{animation:gm-sombra 4s ease-in-out infinite;}
+@keyframes gm-flota{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes gm-sombra{0%,100%{transform:scaleX(1);opacity:.28}50%{transform:scaleX(.86);opacity:.18}}
+@keyframes gm-parpadeo{0%,93%,100%{transform:scaleY(1)}95.5%{transform:scaleY(.08)}}
+/* saludo: la mano derecha sube y saluda */
+.gm--saludo .gm-mano--saluda{transform-origin:30% 100%;animation:gm-saluda 1.6s ease-in-out 2;}
+@keyframes gm-saluda{0%,100%{transform:translate(0,0) rotate(0)}20%{transform:translate(4px,-40px) rotate(-10deg)}35%,65%{transform:translate(4px,-42px) rotate(14deg)}50%,80%{transform:translate(4px,-42px) rotate(-14deg)}}
+/* trabajando: antena que late, teclado, ojos que leen */
+.gm--trabajando .gm-antena-luz{animation:gm-late 1s ease-in-out infinite;}
+.gm--trabajando .gm-antena-onda{animation:gm-onda 1.2s ease-out infinite;}
+.gm--trabajando .gm-ojos--leer{animation:gm-leer 2.4s ease-in-out infinite;}
+.gm--trabajando .gm-mano--i{animation:gm-tecleo .32s ease-in-out infinite;}
+.gm--trabajando .gm-mano--d{animation:gm-tecleo .32s ease-in-out .16s infinite;}
+.gm--trabajando .gm-tecla-a{animation:gm-tecla .5s steps(1) infinite;}
+.gm--trabajando .gm-tecla-b{animation:gm-tecla .5s steps(1) .25s infinite;}
+.gm--trabajando .gm-holo{animation:gm-holo 2s ease-in-out infinite;}
+@keyframes gm-late{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.28);opacity:.75}}
+@keyframes gm-onda{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+@keyframes gm-leer{0%,100%{transform:translate(-3px,4px)}50%{transform:translate(3px,4px)}}
+@keyframes gm-tecleo{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}
+@keyframes gm-tecla{0%{opacity:1}50%{opacity:.25}}
+@keyframes gm-holo{0%,100%{opacity:.85}50%{opacity:.6}}
+/* hecho: saltito y chispas */
+.gm--hecho .gm-cabeza{animation:gm-salto .6s ease-out 1;}
+.gm--hecho .gm-chispa{animation:gm-chispa .9s ease-out 1 both;}
+@keyframes gm-salto{0%{transform:translateY(0)}35%{transform:translateY(-8px)}70%{transform:translateY(1px)}100%{transform:translateY(0)}}
+@keyframes gm-chispa{0%{transform:scale(.2);opacity:0}40%{transform:scale(1.15);opacity:1}100%{transform:scale(1);opacity:.9}}
+/* error: duda (cabeza ladeada) */
+.gm--error .gm-cabeza{transform-origin:100px 90px;animation:gm-duda .7s ease-out 1 both;}
+.gm--error .gm-duda{animation:gm-chispa .6s ease-out .2s 1 both;}
+@keyframes gm-duda{0%{transform:rotate(0)}60%{transform:rotate(-9deg)}100%{transform:rotate(-7deg)}}
+
+/* Avatar de la cabecera: 40 px, fondo azul marino para que la cabeza blanca destaque */
+.gm-avatar{width:40px;height:40px;flex:none;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 35% 30%,#1d4672 0%,#0b2238 60%,#07142a 100%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 1px 3px rgba(7,20,42,.25);}
+.gm-avatar .gm{margin-top:2px;}
+.ag-ident{display:flex;align-items:center;gap:10px;min-width:0;margin-right:auto;}
+.ag-ident__t{display:flex;flex-direction:column;min-width:0;line-height:1.15;}
+.ag-ident__n{font-family:var(--display);font-weight:700;font-size:16px;color:var(--ink,#0f1b2d);}
+.ag-ident__s{font-size:12px;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ag-head{height:auto;min-height:var(--topbar);padding-top:8px;padding-bottom:8px;}
+
+/* Fondo mientras trabaja: capas de degradado que se desplazan (transform) y laten (opacity).
+   En reposo, quieto y discreto. Los colores son claros: el texto oscuro mantiene AA. */
+.ag-lienzo{position:relative;isolation:isolate;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+.ag-lienzo::before,.ag-lienzo::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:0;transition:opacity .8s ease;}
+.ag-lienzo::before{inset:-50%;background:
+  radial-gradient(closest-side at 30% 35%,rgba(120,160,255,.55),transparent),
+  radial-gradient(closest-side at 70% 30%,rgba(170,140,250,.45),transparent),
+  radial-gradient(closest-side at 55% 75%,rgba(255,196,150,.40),transparent);}
+.ag-lienzo::after{background:linear-gradient(160deg,rgba(225,234,255,.7),rgba(238,228,253,.55) 55%,rgba(255,238,224,.6));}
+.ag-lienzo.ag-lienzo--trabajo::before{opacity:1;animation:ag-deriva 18s ease-in-out infinite alternate;}
+.ag-lienzo.ag-lienzo--trabajo::after{opacity:1;animation:ag-respira 6s ease-in-out infinite alternate;}
+@keyframes ag-deriva{0%{transform:translate(-8%,-6%) rotate(0deg)}50%{transform:translate(6%,4%) rotate(8deg)}100%{transform:translate(-4%,8%) rotate(-6deg)}}
+@keyframes ag-respira{0%{opacity:.75}100%{opacity:1}}
+/* Caja de la respuesta en curso: brillo que recorre el borde (capa cónica que gira) */
+.ag-msg--viva{position:relative;isolation:isolate;overflow:hidden;border-radius:14px;padding:10px 12px;}
+.ag-msg--viva::before{content:"";position:absolute;left:50%;top:50%;width:1400px;height:1400px;margin:-700px 0 0 -700px;z-index:-2;
+  background:conic-gradient(#2f6bff,#8b5cf6,#f6b26b,#2f6bff 40%,rgba(47,107,255,.15) 55%,rgba(47,107,255,.15) 85%,#2f6bff);animation:ag-gira 3.2s linear infinite;}
+.ag-msg--viva::after{content:"";position:absolute;inset:2px;border-radius:12px;background:rgba(255,255,255,.94);z-index:-1;}
+@keyframes ag-gira{to{transform:rotate(360deg)}}
+/* Línea de estado con los pasos reales */
+.ag-estado{align-self:flex-start;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.9);border:1px solid rgba(15,27,45,.08);border-radius:999px;padding:3px 12px 3px 4px;font-size:13px;color:#1f2a3c;box-shadow:0 1px 6px rgba(15,27,45,.06);}
+.ag-estado__t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px;}
+
+/* Bienvenida */
+.ag-bienv{display:flex;flex-direction:column;align-items:center;gap:6px;padding:4px 0 8px;}
+.ag-bienv__txt{font-size:14.5px;line-height:1.5;color:#1f2a3c;text-align:center;max-width:430px;min-height:4.5em;}
+.ag-bienv__cursor{display:inline-block;width:2px;height:1.05em;background:#2f6bff;vertical-align:-2px;margin-left:1px;animation:ag-cursor 1s steps(1) infinite;}
+@keyframes ag-cursor{50%{opacity:0}}
+.ag-ejemplos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%;max-width:560px;margin-top:6px;}
+.ag-ejemplo{display:flex;align-items:flex-start;gap:9px;text-align:left;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 11px;font:inherit;font-size:13px;line-height:1.35;color:#1f2a3c;cursor:pointer;
+  opacity:0;transform:translateY(8px);animation:ag-entra .45s ease-out forwards;transition:border-color .15s,box-shadow .15s,transform .15s;}
+.ag-ejemplo:hover{border-color:#9db8ff;box-shadow:0 2px 10px rgba(47,107,255,.12);}
+.ag-ejemplo:focus-visible{outline:2px solid #2f6bff;outline-offset:2px;}
+.ag-ejemplo__i{flex:none;width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:#eaf0ff;color:#1d4fd6;}
+@keyframes ag-entra{to{opacity:1;transform:translateY(0)}}
+.ag-bienv__nota{font-size:12px;color:var(--slate);text-align:center;max-width:430px;margin-top:6px;}
+.ag-panel .ag-ejemplos{grid-template-columns:1fr;}
+
+/* Móvil: fondo más ligero (una capa, más lenta) */
+@media (max-width:640px){
+  .ag-lienzo.ag-lienzo--trabajo::before{animation-duration:30s;}
+  .ag-lienzo.ag-lienzo--trabajo::after{animation:none;}
+  .ag-ejemplos{grid-template-columns:1fr;}
+}
+/* Movimiento reducido: sin fondo en movimiento, sin seguimiento del cursor, transiciones mínimas */
+@media (prefers-reduced-motion: reduce){
+  .gm *,.ag-lienzo::before,.ag-lienzo::after,.ag-msg--viva::before,.ag-ejemplo,.ag-bienv__cursor{animation:none!important;transition:none!important;}
+  .ag-ejemplo{opacity:1;transform:none;}
+  .ag-msg--viva::before{background:#2f6bff;}
+}

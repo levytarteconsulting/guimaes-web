@@ -476,7 +476,11 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
     async function ejecutar(u: ToolUse): Promise<{ resultado: ToolResult; llamada: Omit<NuevaLlamada, "mensaje_id" | "conversacion_id"> }> {
       const parametros = (u.input && typeof u.input === "object" ? u.input : {}) as Record<string, unknown>;
       const base = { tool_use_id: u.id, herramienta: u.name.slice(0, 64), parametros };
-      enviar("herramienta", { id: u.id, nombre: u.name, estado: "inicio" });
+      // empresa_id (solo si es un uuid) para que el chat diga «Consultando Holded de MDF…».
+      const empInicio = typeof (u.input as Record<string, unknown> | undefined)?.empresa_id === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((u.input as Record<string, string>).empresa_id)
+        ? (u.input as Record<string, string>).empresa_id.toLowerCase() : undefined;
+      enviar("herramienta", { id: u.id, nombre: u.name, estado: "inicio", ...(empInicio ? { empresa_id: empInicio } : {}) });
       const t0 = ahora();
       const v = validarEntrada(u.name, u.input);
       if (!v.ok) {

@@ -4,7 +4,9 @@ import {
   contextoDeVista, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta,
   idsDocumentos, estadoDocumento, filasPropuesta, filasBorrado, datosEditados, destinoDeCambio, estadoPropuesta,
   esBorrado, LISTAS_CAMPO, CAMPOS_SI_NO, tablaDeTipo, estadoCorreo, datosCorreo,
+  NOMBRE_AGENTE, MENSAJE_BIENVENIDA, textoEstado, estadoRobot, ejemplosBienvenida,
 } from "./agente-logica.js";
+import { Guillermito, AvatarGuillermito } from "./robot.jsx";
 import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { CORREO } from "./correo.jsx";
 import { TarjetaAccion } from "./acciones.jsx";
@@ -366,12 +368,14 @@ function CampoEditable({ k, valor, onCambio }) {
 }
 
 /* ---------------- Burbujas ---------------- */
+const nombreEmpresa = (id) => (id && CRM.empresaById && CRM.empresaById[id] && CRM.empresaById[id].razon_social) || "";
 function Herramienta({ p }) {
   const enCurso = p.estado === "inicio";
+  if (enCurso) return null;   // el paso en curso lo cuenta la línea de estado (EstadoTrabajo)
   return (
     <div className={"ag-tool" + (enCurso ? " ag-tool--run" : "") + (p.error ? " ag-tool--err" : "")}>
       {enCurso ? <span className="ag-spin" aria-hidden="true"></span> : <Icon name={p.error ? "x" : "check"} size={13} />}
-      <span>{etiquetaHerramienta(p.nombre)}{enCurso ? "…" : ""}</span>
+      <span>{etiquetaHerramienta(p.nombre, nombreEmpresa(p.empresa_id))}{enCurso ? "…" : ""}</span>
       {!enCurso && !p.error && typeof p.filas === "number" ? <span className="ag-tool__n">{p.filas}</span> : null}
       {!enCurso && p.error ? <span className="ag-tool__n">sin resultado</span> : null}
     </div>
@@ -381,7 +385,7 @@ function Burbuja({ b, onNav, peticion }) {
   if (b.rol === "user") return <div className="ag-msg ag-msg--user">{b.texto}</div>;
   const vacia = !b.partes.some((p) => p.tipo === "texto" && p.texto.trim());
   return (
-    <div className="ag-msg ag-msg--bot">
+    <div className={"ag-msg ag-msg--bot" + (b.pendiente ? " ag-msg--viva" : "")} aria-busy={b.pendiente || undefined}>
       {b.partes.map((p, i) => p.tipo === "herramienta" && p.informe
         ? <TarjetaInforme key={p.id || i} informe={p.informe} peticion={peticion} onNav={onNav} />
         : p.tipo === "herramienta" && p.accion
@@ -393,7 +397,7 @@ function Burbuja({ b, onNav, peticion }) {
         : p.tipo === "herramienta"
         ? <Herramienta key={p.id || i} p={p} />
         : <div key={i} className="ag-md"><Markdown texto={p.texto} onNav={onNav} /></div>)}
-      {b.pendiente && vacia && !b.partes.some((p) => p.estado === "inicio") && <div className="ag-pensando"><span></span><span></span><span></span></div>}
+      {b.pendiente && vacia && !b.partes.length && <div className="ag-pensando" aria-hidden="true"><span></span><span></span><span></span></div>}
       {b.error && <div className="ag-aviso ag-aviso--err" role="alert">{b.error}</div>}
       {b.aviso && <div className="ag-aviso">{b.aviso}</div>}
     </div>
@@ -610,17 +614,101 @@ function ListaConversaciones({ chat, onAbrir }) {
     {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
   </>;
 }
+/* ---------------- Guillermito: bienvenida, estado y cabecera ---------------- */
+let conexionesHolded = null;   // empresas con Holded conectado (para los ejemplos); se carga una vez
+async function empresasConHolded() {
+  if (!conexionesHolded) {
+    conexionesHolded = Auth.client.from("holded_conexiones").select("empresa_id").eq("estado", "ok")
+      .then((r) => (r.error ? [] : (r.data || []).map((x) => x.empresa_id)))
+      .catch(() => []);
+  }
+  const ids = await conexionesHolded;
+  return ids.map((id) => CRM.empresaById[id]).filter((e) => e && !e.archived_at);
+}
+const reducirMovimiento = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function Bienvenida({ chat }) {
+  const [escrito, setEscrito] = useState(reducirMovimiento() ? MENSAJE_BIENVENIDA.length : 0);
+  const [saluda, setSaluda] = useState(true);
+  const [ejemplos, setEjemplos] = useState(null);
+  useEffect(() => {
+    const t = setTimeout(() => setSaluda(false), 3400);
+    let vivo = true;
+    empresasConHolded().then((empresasHolded) => {
+      if (vivo) setEjemplos(ejemplosBienvenida({ empresasHolded, contactos: CRM.CONTACTS || [], personas: CRM.USERS || [] }));
+    });
+    return () => { clearTimeout(t); vivo = false; };
+  }, []);
+  useEffect(() => {   // el texto se escribe solo
+    if (escrito >= MENSAJE_BIENVENIDA.length) return;
+    const t = setTimeout(() => setEscrito((n) => n + 1), escrito === 0 ? 450 : 18);
+    return () => clearTimeout(t);
+  }, [escrito]);
+  const usar = (texto) => {   // rellena el campo, no lo envía
+    chat.setEntrada(texto);
+    setTimeout(() => { const el = chat.textoRef.current; if (el) { el.focus(); el.setSelectionRange(texto.length, texto.length); } }, 0);
+  };
+  const terminado = escrito >= MENSAJE_BIENVENIDA.length;
+  return <div className="ag-bienv">
+    <Guillermito px={124} estado={saluda ? "saludo" : "reposo"} />
+    <p className="ag-bienv__txt" aria-label={MENSAJE_BIENVENIDA}>
+      <span aria-hidden="true">{MENSAJE_BIENVENIDA.slice(0, escrito)}{!terminado && <span className="ag-bienv__cursor" />}</span>
+    </p>
+    {ejemplos && <div className="ag-ejemplos" role="list" aria-label="Ejemplos">
+      {ejemplos.map((e, i) => <button key={i} role="listitem" className="ag-ejemplo" style={{ animationDelay: `${0.15 + i * 0.08}s` }}
+        onClick={() => usar(e.texto)} title="Rellena la pregunta (no la envía)">
+        <span className="ag-ejemplo__i"><Icon name={e.icono} size={15} /></span><span>{e.texto.trim()}{/ $|: $/.test(e.texto) ? "…" : ""}</span>
+      </button>)}
+    </div>}
+    <p className="ag-bienv__nota">Consulto, propongo cambios, redacto correos y preparo informes. No cambio ni envío nada sin que lo confirmes en su tarjeta. Puedo equivocarme: comprueba los datos importantes.</p>
+  </div>;
+}
+
+function EstadoTrabajo({ chat }) {
+  const b = chat.burbujas[chat.burbujas.length - 1];
+  const t = textoEstado(b, nombreEmpresa);
+  if (!chat.enCurso || !t) return null;
+  return <div className="ag-estado" role="status" aria-live="polite">
+    <Guillermito px={28} estado="trabajando" /><span className="ag-estado__t">{t}</span>
+  </div>;
+}
+
+/** Estado del robot de la cabecera: trabajando mientras responde; «hecho» o «error» un momento al terminar. */
+function useEstadoRobot(chat) {
+  const [breve, setBreve] = useState(null);
+  const antes = useRef(false);
+  useEffect(() => {
+    if (antes.current && !chat.enCurso) {
+      setBreve(estadoRobot(chat.burbujas, false));
+      const t = setTimeout(() => setBreve(null), 2600);
+      antes.current = false;
+      return () => clearTimeout(t);
+    }
+    antes.current = chat.enCurso;
+  }, [chat.enCurso]);
+  if (chat.enCurso) return "trabajando";
+  return breve === "hecho" || breve === "error" ? breve : "reposo";
+}
+function Identidad({ chat, subtitulo }) {
+  const estado = useEstadoRobot(chat);
+  return <div className="ag-ident">
+    <AvatarGuillermito estado={estado} />
+    <div className="ag-ident__t"><span className="ag-ident__n">{NOMBRE_AGENTE}</span>
+      <span className="ag-ident__s">{chat.enCurso ? "Trabajando…" : subtitulo || "Asistente de Guimaes"}</span></div>
+  </div>;
+}
+/** Fondo del chat: quieto en reposo; degradado en movimiento solo mientras trabaja. */
+function Lienzo({ chat, children }) {
+  return <div className={"ag-lienzo" + (chat.enCurso ? " ag-lienzo--trabajo" : "")}>{children}</div>;
+}
+
 function Hilo({ chat, onNav }) {
   const { cargando, burbujas, aviso, finRef } = chat;
   return <>
     {cargando && <div className="ag-vacio">Cargando la conversación…</div>}
-    {!cargando && burbujas.length === 0 && (
-      <div className="ag-intro">
-        <p>Pregunta lo que necesites sobre clientes, empresas, el pipeline, tareas, documentos, WhatsApp o el correo.</p>
-        <p className="ag-intro__nota">Consulta, propone cambios, redacta correos y prepara informes. No cambia ni envía nada sin que lo confirmes en su tarjeta. Puede equivocarse; comprueba los datos importantes en la ficha.</p>
-      </div>
-    )}
+    {!cargando && burbujas.length === 0 && <Bienvenida chat={chat} />}
     {burbujas.map((b, i) => <Burbuja key={i} b={b} onNav={onNav} peticion={b.rol === "assistant" ? peticionDe(burbujas, i) : ""} />)}
+    <EstadoTrabajo chat={chat} />
     {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
     <div ref={finRef}></div>
   </>;
@@ -685,21 +773,21 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
     <DocsCtx.Provider value={docs.ctx}>
     <aside className="ag-panel" role="dialog" aria-label="Asistente">
       <header className="ag-head">
-        <div className="ag-head__t"><Icon name="sparkles" size={16} /> Asistente</div>
+        <Identidad chat={chat} />
         <button className="ag-hbtn" title="Mis conversaciones" aria-label="Mis conversaciones" disabled={chat.enCurso}
           onClick={() => setLista((v) => !v)}><Icon name="clock" size={17} /></button>
         <button className="ag-hbtn" title="Nueva conversación" aria-label="Nueva conversación" disabled={chat.enCurso}
           onClick={() => { if (chat.nueva()) setLista(false); }}><Icon name="plus" size={17} /></button>
         <button className="ag-hbtn" title="Cerrar" aria-label="Cerrar" onClick={onCerrar}><Icon name="x" size={17} /></button>
       </header>
-      <div className="ag-body">
+      <Lienzo chat={chat}><div className="ag-body">
         {lista
           ? <><div className="ag-lista__t">Mis conversaciones</div>
               <SelectorArchivadas chat={chat} />
               <InformesGuardados deshabilitado={chat.enCurso} onRegenerar={(texto) => { setLista(false); chat.enviar({ texto, nueva: true }); }} />
               <ListaConversaciones chat={chat} onAbrir={(id) => { setLista(false); chat.abrirConv(id); }} /></>
           : <Hilo chat={chat} onNav={irA} />}
-      </div>
+      </div></Lienzo>
       {docs.mensaje && <div className="ag-aviso ag-aviso--err ag-aviso--flota" role="alert">{docs.mensaje}</div>}
       <Entrada chat={chat} nota={ctx && titulo ? `Desde: ${titulo}` : null} />
       {/* Dentro del cajón: así el visor queda por encima de él (z-index). */}
@@ -755,10 +843,10 @@ export function AgenteVista({ nav }) {
       <header className="agv__chat-head">
         {movil && <button className="ag-hbtn" onClick={volver} disabled={chat.enCurso} title="Volver" aria-label="Volver a mis conversaciones">
           <Icon name="chevronR" size={18} style={{ transform: "rotate(180deg)" }} /></button>}
-        <div className="agv__chat-t">{tituloChat}</div>
+        <Identidad chat={chat} subtitulo={tituloChat} />
         {chat.convId && chat.convArchivada && <span className="ag-etiqueta">Archivada</span>}
       </header>
-      <div className="ag-body"><Hilo chat={chat} onNav={(d) => nav(d.name, d.id)} /></div>
+      <Lienzo chat={chat}><div className="ag-body"><Hilo chat={chat} onNav={(d) => nav(d.name, d.id)} /></div></Lienzo>
       {docs.mensaje && <div className="ag-aviso ag-aviso--err ag-aviso--flota" role="alert">{docs.mensaje}</div>}
       <Entrada chat={chat} />
     </section>
