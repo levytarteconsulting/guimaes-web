@@ -24,6 +24,9 @@
 //   (los dos registran la fila con enviado_por; ver enviarBorrador)
 //   marcar_leido  — {mensaje_id, leido}: PATCH isRead en Outlook y en la tabla
 //   adjunto       — {adjunto_id} o {mensaje_id, cid}: descarga bajo demanda (no se guarda)
+//   agente_enviar — {correo}: envía un correo redactado por el asistente
+//                   (agente_correos, crm/supabase-agente-correo.sql). Solo rol
+//                   admin. Ver "correos del asistente" más abajo.
 //   borrador_*    — redactor con adjuntos, por pasos (ver "borradores" más abajo):
 //                   crear {tipo, mensaje_id?, empresa_id?} · adjuntar (binario ≤ 3 MB) ·
 //                   sesion {borrador, nombre, tipo, tamano} + trozo (binario) ·
@@ -111,7 +114,18 @@ export interface Db {
   borradoresViejos(antesIso: string, limite: number): Promise<string[]>;
   documento(id: string): Promise<DocumentoDb | null>;
   descargarDocumento(storagePath: string): Promise<Uint8Array>;
+  // Correos del asistente (agente_correos).
+  esRolAdmin(adminId: string): Promise<boolean>;
+  /** pendiente y sin caducar → enviando (atómico); null si no se pudo. */
+  reservarCorreoAgente(id: string, adminId: string, ahoraIso: string): Promise<CorreoAgente | null>;
+  correoAgente(id: string): Promise<{ estado: string; expira_at: string } | null>;
+  correoAgenteResuelto(id: string, cambios: Record<string, unknown>): Promise<void>;
+  auditar(fila: { auth_user_id: string; accion: string; tabla: string; registro_id: string }): Promise<void>;
 }
+export type CorreoAgente = {
+  id: string; para: string[]; cc: string[]; cco: string[]; asunto: string; texto: string; documentos: string[];
+  contact_id: string | null; empresa_id: string | null;
+};
 export type Deps = {
   env: (k: string) => string | undefined;
   fetch: typeof fetch;
@@ -415,7 +429,8 @@ const FROM = { emailAddress: { address: ALIAS } };
 // PATCH from = info@ → send. Con ids inmutables, el id del borrador es el
 // que tendrá en Enviados: se inserta la fila con ese graph_id y enviado_por,
 // y la sincronización la completa sin duplicarla.
-async function enviarBorrador(deps: Deps, db: Db, borrador: any, cambios: Record<string, unknown>, enviadoPor: string | null) {
+async function enviarBorrador(deps: Deps, db: Db, borrador: any, cambios: Record<string, unknown>, enviadoPor: string | null,
+                              vinculo: { contact_id?: string | null; empresa_id?: string | null } = {}) {
   const b = buzon(deps);
   const id = String(borrador?.id ?? "");
   if (!id) throw new Peticion(502, "Graph no devolvió el borrador");
@@ -437,6 +452,9 @@ async function enviarBorrador(deps: Deps, db: Db, borrador: any, cambios: Record
       fecha: (deps.now?.() ?? new Date()).toISOString(),
       leido: true,
       enviado_por: enviadoPor,
+      // El correo del asistente va a la ficha de su contacto o empresa (si no, lo vincula el trigger por email).
+      ...(vinculo.contact_id ? { contact_id: vinculo.contact_id } : {}),
+      ...(vinculo.empresa_id ? { empresa_id: vinculo.empresa_id } : {}),
     });
   } catch (e) {
     (deps.log ?? console.error)("correo: enviado sin registrar", errorSeguro(e));
@@ -741,6 +759,87 @@ export async function limpiarBorradores(deps: Deps, db: Db): Promise<number> {
   return n;
 }
 
+// ---------------------------------------------------------------- correos del asistente
+// El asistente redacta en agente_correos; aquí solo se envía, cuando un rol
+// admin pulsa Enviar en la tarjeta. Pasos: reservar (pendiente → enviando,
+// atómico: dos clics no envían dos veces) → validar otra vez → borrador en
+// Graph registrado en correo_borradores (lo limpia la limpieza si algo se
+// queda a medias) → adjuntar los documentos de la empresa → enviar desde
+// info@ y registrar en correo_mensajes con el contacto y la empresa → enviada
+// + auditoría. Si falla antes de enviar, vuelve a pendiente con el error.
+//
+// AGENTE_CORREO_SOLO (opcional): direcciones separadas por comas. Si está
+// puesto, los correos del asistente solo pueden ir a esas direcciones (modo
+// de pruebas). No afecta al resto del correo del CRM.
+export function permitidosPrueba(v: string | undefined): Set<string> | null {
+  const xs = String(v ?? "").split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return xs.length ? new Set(xs) : null;
+}
+export const AVISO_PRUEBAS = "Modo de pruebas: los correos del asistente solo pueden ir a las direcciones de prueba.";
+
+export async function agenteEnviar(deps: Deps, db: Db, body: any, adminId: string | null, authUid: string | null) {
+  if (!adminId || !authUid || !(await db.esRolAdmin(adminId))) throw new Peticion(403, "Solo un administrador puede enviar los correos del asistente.");
+  const id = String(body?.correo ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Peticion(400, "Falta el correo");
+  const ahora = (deps.now?.() ?? new Date()).toISOString();
+  const c = await db.reservarCorreoAgente(id, adminId, ahora);
+  if (!c) {
+    const x = await db.correoAgente(id);
+    if (!x) throw new Peticion(404, "Correo no encontrado");
+    if (x.estado === "pendiente" && x.expira_at < ahora) throw new Peticion(409, "El correo ha caducado: pídeselo otra vez al asistente.");
+    throw new Peticion(409, x.estado === "enviando" ? "Este correo ya se está enviando." : `Este correo ya está ${x.estado}.`);
+  }
+  let enviado = false;
+  let graphId = "";
+  try {
+    const solo = permitidosPrueba(deps.env("AGENTE_CORREO_SOLO"));
+    const todos = [...(c.para ?? []), ...(c.cc ?? []), ...(c.cco ?? [])].map((e) => String(e).trim().toLowerCase());
+    if (solo && todos.some((e) => !solo.has(e))) throw new Peticion(403, AVISO_PRUEBAS);
+    const asunto = String(c.asunto ?? "").trim();
+    if (!asunto || asunto.length > 255) throw new Peticion(400, "Falta el asunto o es demasiado largo");
+    const message = {
+      subject: asunto,
+      body: { contentType: "HTML", content: textoAHtml(texto(c.texto)) },
+      toRecipients: destinatarios(c.para, "para", true),
+      ccRecipients: destinatarios(c.cc, "cc"),
+      bccRecipients: destinatarios(c.cco, "cco"),
+    };
+    const docs = c.documentos ?? [];
+    if (docs.length > 10) throw new Peticion(400, "Demasiados documentos");
+    if (docs.length && !c.empresa_id) throw new Peticion(400, "Este correo no está vinculado a una empresa");
+    const borrador = await graph(deps, `${buzon(deps)}/messages`, { method: "POST", body: message });
+    graphId = String(borrador?.id ?? "");
+    if (!graphId) throw new Peticion(502, "Graph no devolvió el borrador");
+    try {
+      await db.crearBorrador({ graph_id: graphId, creado_por: adminId, tipo: "nuevo", origen_id: null, empresa_id: c.empresa_id });
+      for (const d of docs) await borradorDocumento(deps, db, { borrador: graphId, documento_id: d }, adminId);
+      await comprobarTotal(deps, graphId, 0);
+    } catch (e) {
+      try { await graph(deps, rutaMsg(deps, graphId), { method: "DELETE" }); } catch { /* ya no está */ }
+      await db.borrarBorrador(graphId).catch(() => {});
+      throw e;
+    }
+    await enviarBorrador(deps, db, { ...borrador, id: graphId }, {}, adminId, { contact_id: c.contact_id, empresa_id: c.empresa_id });
+    enviado = true;
+    await db.borrarBorrador(graphId).catch(() => { /* lo quita la limpieza */ });
+  } catch (e) {
+    if (!enviado) {
+      const motivo = e instanceof Peticion || e instanceof GraphError ? e.message : "Error al enviar";
+      await db.correoAgenteResuelto(id, { estado: "pendiente", enviado_por: null, ultimo_error: motivo.slice(0, 500) })
+        .catch((x) => (deps.log ?? console.error)("correo: agente_enviar sin liberar", errorSeguro(x)));
+      throw e;
+    }
+  }
+  // Ya está enviado: lo que falle a partir de aquí no lo deshace.
+  try {
+    await db.correoAgenteResuelto(id, { estado: "enviada", enviado_at: ahora, graph_id: graphId, ultimo_error: null, resuelta_at: ahora });
+    await db.auditar({ auth_user_id: authUid, accion: "enviar_correo", tabla: "agente_correos", registro_id: id });
+  } catch (e) {
+    (deps.log ?? console.error)("correo: agente_enviar enviado sin marcar", errorSeguro(e));
+  }
+  return { ok: true, graph_id: graphId, estado: "enviada" };
+}
+
 // ---------------------------------------------------------------- diagnóstico (solo lectura)
 // Carpetas del buzón (nombre, carpeta madre, totalItemCount) y recuento por
 // carpeta y año-mes de los mensajes con info@ en Para o CC ($search). No
@@ -926,6 +1025,7 @@ const PERMITIDO: Record<string, Quien[]> = {
   borrador_documento: ["usuario"],
   borrador_enviar: ["usuario"],
   borrador_descartar: ["usuario"],
+  agente_enviar: ["usuario"],
 };
 
 export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
@@ -939,6 +1039,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
     try {
       let quien: Quien;
       let adminId: string | null = null;
+      let authUid: string | null = null;
       const hook = req.headers.get("x-hook-secret");
       if (hook !== null) {
         const secreto = deps.env("CORREO_CRON_SECRET") ?? "";
@@ -949,6 +1050,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
         if (!bearer) return json({ error: "No autorizado." }, 401);
         const uid = await deps.usuario(bearer);
         if (!uid) return json({ error: "No autorizado." }, 401);
+        authUid = uid;
         adminId = await deps.db().adminActivo(uid);
         if (!adminId) return json({ error: "No autorizado." }, 403);
         quien = "usuario";
@@ -988,6 +1090,7 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
       if (accion === "borrador_documento") return json(await borradorDocumento(deps, db, body, adminId));
       if (accion === "borrador_enviar") return json(await borradorEnviar(deps, db, body, adminId));
       if (accion === "borrador_descartar") return json(await borradorDescartar(deps, db, body, adminId));
+      if (accion === "agente_enviar") return json(await agenteEnviar(deps, db, body, adminId, authUid));
       return await adjunto(deps, db, body, h);
     } catch (e) {
       if (e instanceof Peticion) return json({ error: e.message }, e.estado);

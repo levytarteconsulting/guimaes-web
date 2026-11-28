@@ -90,6 +90,7 @@ const NOMBRES_HERRAMIENTAS = {
   proponer_tarea: "Preparando el cambio",
   proponer_nota: "Preparando el cambio",
   proponer_borrado: "Preparando el borrado",
+  proponer_correo: "Redactando el correo",
 };
 export function etiquetaHerramienta(nombre) {
   return NOMBRES_HERRAMIENTAS[nombre] || "Consultando";
@@ -263,8 +264,9 @@ export function markdown(texto) {
 // respuestas a medias no se guardan) y se repitió igual justo después se
 // muestra una sola vez; si la siguiente es distinta, se marca sin respuesta.
 export const AVISO_SIN_RESPUESTA = "Esta pregunta se quedó sin respuesta.";
-// propuestas: [{ id, created_at }] de agente_propuestas. Cada tarjeta va en la
-// respuesta a la última pregunta hecha antes de crearla (filas con created_at).
+// propuestas: [{ id, created_at, clase? }] de agente_propuestas (y de
+// agente_correos, con clase "correo"). Cada tarjeta va en la respuesta a la
+// última pregunta hecha antes de crearla (filas con created_at).
 export function burbujasDeHistorial(filas, propuestas = []) {
   const out = [];
   for (const f of [...(filas || [])].sort((a, b) => a.orden - b.orden)) {
@@ -292,7 +294,9 @@ export function burbujasDeHistorial(filas, propuestas = []) {
     const destino = i >= 0 && out[i + 1] && out[i + 1].rol === "assistant" ? out[i + 1] : null;
     if (!destino) continue;
     if (!porBurbuja.has(destino)) porBurbuja.set(destino, []);
-    porBurbuja.get(destino).push({ tipo: "herramienta", id: "propuesta-" + p.id, nombre: "", estado: "fin", propuesta: p.id });
+    porBurbuja.get(destino).push(p.clase === "correo"
+      ? { tipo: "herramienta", id: "correo-" + p.id, nombre: "", estado: "fin", correo: p.id }
+      : { tipo: "herramienta", id: "propuesta-" + p.id, nombre: "", estado: "fin", propuesta: p.id });
   }
   for (const [b, partes] of porBurbuja) b.partes = [...partes, ...b.partes];
   return out;
@@ -309,10 +313,11 @@ export function anotarHerramienta(partes, ev) {
   const i = partes.findIndex((p) => p.tipo === "herramienta" && p.id === ev.id);
   if (i === -1) {
     return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error,
-                         ...(ev.propuesta ? { propuesta: ev.propuesta } : {}) }];
+                         ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}) }];
   }
   const copia = [...partes];
-  copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error, ...(ev.propuesta ? { propuesta: ev.propuesta } : {}) };
+  copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error,
+               ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}) };
   return copia;
 }
 
@@ -388,4 +393,28 @@ export function estadoPropuesta(p, ahora = Date.now()) {
   if (!p) return "cargando";
   if (p.estado === "pendiente" && Date.parse(p.expira_at) < ahora) return "caducada";
   return p.estado;
+}
+
+/* ---------------- Tarjetas de correo (crm/supabase-agente-correo.sql) ---------------- */
+/** «a@x.es, b@x.es; c@x.es» → ["a@x.es", "b@x.es", "c@x.es"] (el servidor valida y normaliza). */
+export function listaEmails(texto) {
+  return String(texto || "").split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+}
+export function estadoCorreo(c, ahora = Date.now()) {
+  if (!c) return "cargando";
+  if (c.estado === "pendiente" && Date.parse(c.expira_at) < ahora) return "caducado";
+  return c.estado;
+}
+/** Datos para agente_correo_editar a partir de la fila y lo editado en la tarjeta. */
+export function datosCorreo(c, ed = {}) {
+  return {
+    para: ed.para !== undefined ? listaEmails(ed.para) : c.para || [],
+    cc: ed.cc !== undefined ? listaEmails(ed.cc) : c.cc || [],
+    cco: ed.cco !== undefined ? listaEmails(ed.cco) : c.cco || [],
+    asunto: ed.asunto !== undefined ? ed.asunto : c.asunto,
+    texto: ed.texto !== undefined ? ed.texto : c.texto,
+    documentos: ed.documentos !== undefined ? ed.documentos : c.documentos || [],
+    contact_id: c.contact_id || null,
+    empresa_id: c.empresa_id || null,
+  };
 }

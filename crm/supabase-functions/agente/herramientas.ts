@@ -23,7 +23,7 @@ type Propiedad =
   | { type: "integer"; description: string; minimum: number; maximum: number }
   | { type: "number"; description: string; minimum: number; maximum: number }
   | { type: "boolean"; description: string }
-  | { type: "array"; description: string; items: { type: "string"; enum: string[] }; maxItems: number }
+  | { type: "array"; description: string; items: { type: "string"; enum?: string[]; format?: "uuid"; maxLength?: number }; maxItems: number }
   | { type: "object"; description: string; maxBytes: number };
 
 export type Herramienta = {
@@ -250,6 +250,21 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
       tipo: { type: "string", enum: ["contacto", "negocio", "tarea", "nota"], description: "Qué se borra." },
       id: uuid("Id del registro."),
     }, ["tipo", "id"]),
+  herramienta("proponer_correo",
+    "Redacta un correo desde info@guimaes.es. NO lo envía: crea una tarjeta en el chat con destinatarios, asunto, texto y adjuntos; " +
+    "solo un usuario con rol admin puede enviarlo pulsando Enviar. Cualquier usuario puede pedir que lo redactes. " +
+    "Usa los emails que da el CRM (ficha_contacto, buscar); no te inventes direcciones. Vincúlalo al contacto o la empresa (contact_id, " +
+    "empresa_id) para que el enviado quede en su ficha. Adjuntos: solo documentos de la empresa del correo (ids de listar_documentos).",
+    {
+      para: { type: "array", maxItems: 50, items: { type: "string", maxLength: 254 }, description: "Destinatarios (emails)." },
+      cc: { type: "array", maxItems: 50, items: { type: "string", maxLength: 254 }, description: "En copia." },
+      cco: { type: "array", maxItems: 50, items: { type: "string", maxLength: 254 }, description: "En copia oculta." },
+      asunto: { type: "string", maxLength: 255, description: "Asunto." },
+      texto: { type: "string", maxLength: 20000, description: "Cuerpo en texto plano; los saltos de línea se respetan. Sin firma inventada." },
+      contact_id: uuid("Contacto al que va (para guardarlo en su ficha)."),
+      empresa_id: uuid("Empresa del correo. Obligatoria si hay adjuntos; si no se da, la principal del contacto."),
+      documentos: { type: "array", maxItems: 10, items: { type: "string", format: "uuid" }, description: "Ids de documentos de la empresa para adjuntar (como mucho 10, 25 MB en total)." },
+    }, ["para", "asunto", "texto"]),
   // ---------------------------------------------------------------- Holded (holded-proxy)
   herramienta("holded_facturas",
     "Holded de una empresa cliente: facturas emitidas (ventas) o recibidas (compras y gastos) de un periodo, con totales " +
@@ -358,6 +373,7 @@ export type Validacion =
   | { ok: true; holded: LlamadaHolded }
   | { ok: true; local: "documentacion"; args: { tema?: string; operacion?: string } }
   | { ok: true; propuesta: { tipo: string; registro: string | null; datos: Record<string, unknown> } }
+  | { ok: true; correo: Record<string, unknown> }
   | { ok: false; error: string };
 
 /** Valida la entrada del modelo y la traduce a la llamada RPC (o a holded-proxy). */
@@ -410,12 +426,21 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
         break;
       case "array":
         if (!Array.isArray(v) || v.length > p.maxItems) return mal(`tiene que ser una lista de como mucho ${p.maxItems}`);
-        if (v.some((x) => typeof x !== "string" || !p.items.enum.includes(x))) return mal(`valores válidos: ${p.items.enum.join(", ")}`);
+        if (v.some((x) => typeof x !== "string")) return mal("tiene que ser una lista de textos");
+        if (p.items.enum && v.some((x) => !p.items.enum!.includes(x))) return mal(`valores válidos: ${p.items.enum.join(", ")}`);
+        if (p.items.format === "uuid" && v.some((x) => !RE_UUID.test(x))) return mal("tiene que ser una lista de id (uuid)");
+        if (p.items.maxLength && v.some((x) => x.length > p.items.maxLength!)) return mal(`cada uno, como mucho ${p.items.maxLength} caracteres`);
         break;
     }
     args[k] = v;
   }
   if (h.name === "holded_documentacion") return { ok: true, local: "documentacion", args: args as { tema?: string; operacion?: string } };
+  if (h.name === "proponer_correo") {
+    const datos = { ...args } as Record<string, unknown>;
+    for (const k of ["contact_id", "empresa_id"]) if (typeof datos[k] === "string") datos[k] = (datos[k] as string).toLowerCase();
+    if (Array.isArray(datos.documentos)) datos.documentos = (datos.documentos as string[]).map((x) => x.toLowerCase());
+    return { ok: true, correo: datos };
+  }
   if (h.name.startsWith("proponer_")) return propuestaDe(h.name, args);
   if (esHolded(h.name)) {
     const { empresa_id, ...params } = args;

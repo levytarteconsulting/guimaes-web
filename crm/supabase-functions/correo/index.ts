@@ -11,6 +11,8 @@
 //   MS_GRAPH_TENANT_ID, MS_GRAPH_CLIENT_ID, MS_GRAPH_CLIENT_SECRET — app de Entra
 //   MS_GRAPH_MAILBOX   — id del buzón administracion@ (/users/{id})
 //   CORREO_CRON_SECRET — el mismo valor que 'correo_cron_secret' en Vault
+//   AGENTE_CORREO_SOLO — opcional: en pruebas, únicas direcciones a las que
+//                        pueden ir los correos del asistente (separadas por comas)
 //   SUPABASE_URL y la clave de servicio — inyectadas por Supabase (las usa el cliente
 //   de base de datos de la función; nunca se comparan con lo que llega)
 //
@@ -119,6 +121,24 @@ const db: Db = {
       .select("id, empresa_id, storage_path, original_filename, mime_type, size_bytes, status").eq("id", id).maybeSingle());
     return d ? { id: d.id, empresa_id: d.empresa_id, storage_path: d.storage_path, nombre: d.original_filename ?? "",
                  tipo: d.mime_type ?? null, tamano: d.size_bytes ?? null, status: d.status } : null;
+  },
+  async esRolAdmin(adminId) {
+    const d = ok(await service.from("admins").select("rol, activo").eq("id", adminId).maybeSingle());
+    return !!d?.activo && d.rol === "admin";
+  },
+  async reservarCorreoAgente(id, adminId, ahoraIso) {
+    return ok(await service.from("agente_correos").update({ estado: "enviando", enviado_por: adminId, ultimo_error: null })
+      .eq("id", id).eq("estado", "pendiente").gt("expira_at", ahoraIso)
+      .select("id, para, cc, cco, asunto, texto, documentos, contact_id, empresa_id").maybeSingle());
+  },
+  async correoAgente(id) {
+    return ok(await service.from("agente_correos").select("estado, expira_at").eq("id", id).maybeSingle());
+  },
+  async correoAgenteResuelto(id, cambios) {
+    ok(await service.from("agente_correos").update(cambios).eq("id", id).eq("estado", "enviando"));
+  },
+  async auditar(fila) {
+    ok(await service.from("agente_escrituras").insert(fila));
   },
   async descargarDocumento(storagePath) {
     const blob = ok(await service.storage.from("documentos").download(storagePath));

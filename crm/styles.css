@@ -835,3 +835,6 @@ body.no-scroll{overflow:hidden;}
 .ag-card__acc{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;}
 .ag-card__acc .inp{width:140px;font-size:12.5px;padding:4px 6px;}
 .ag-card__nota{margin-top:6px;color:var(--muted);font-size:12.5px;}
+.ag-card__texto{margin-top:8px;padding:8px;border-radius:8px;background:var(--mist);white-space:pre-wrap;word-break:break-word;font-size:13px;max-height:320px;overflow:auto;}
+textarea.ag-card__texto{width:100%;background:var(--paper,#fff);max-height:none;}
+.ag-card--correo .ag-card__tabla .inp{width:100%;}

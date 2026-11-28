@@ -39,6 +39,8 @@ class FakeDb implements Db {
   async yo(_uid: string) { return { id: "a1", nombre: "Ana", rol: "admin" }; }
   propuestasConv: { id: string; tipo: string; resumen: string; estado: string; resultado_id: string | null; expira_at: string }[] = [];
   async propuestas(_conv: string) { return this.propuestasConv; }
+  correosConv: { id: string; resumen: string; estado: string; expira_at: string }[] = [];
+  async correos(_conv: string) { return this.correosConv; }
   async conversacionPropia(id: string, uid: string) { return this.convs.some((c) => c.id === id && c.auth_user_id === uid); }
   async mensajes(id: string): Promise<MensajeGuardado[]> {
     return this.msgs.filter((m) => m.conversacion_id === id).sort((a, b) => a.orden - b.orden)
@@ -300,7 +302,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 27);   // 12 + buscar_duplicados + 7 proponer_* del CRM; 4 consultas, 2 propuestas y documentación de Holded
+  assert.equal(params.tools!.length, 28);   // 12 + buscar_duplicados + 7 proponer_* del CRM + proponer_correo; 4 consultas, 2 propuestas y documentación de Holded
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -840,4 +842,65 @@ test("instrucciones: ya no dicen que solo consulta; proponer, preguntar, duplica
   assert.match(s, /NUNCA inventes datos/);
   assert.match(s, /NUNCA digas que algo .*está creado/s);
   assert.match(s, /No puedes borrar empresas/);
+});
+
+// ================================================================= correos (proponer_correo)
+test("proponer_correo: valida listas de emails e ids; va a agente_proponer_correo; el evento lleva el correo", async () => {
+  assert.equal(validarEntrada("proponer_correo", { para: ["a@x.invalid"], asunto: "A" }).ok, false, "texto obligatorio");
+  assert.equal(validarEntrada("proponer_correo", { para: "a@x.invalid", asunto: "A", texto: "B" }).ok, false, "para es una lista");
+  assert.equal(validarEntrada("proponer_correo", { para: [1], asunto: "A", texto: "B" }).ok, false);
+  assert.equal(validarEntrada("proponer_correo", { para: ["a@x.invalid"], asunto: "A", texto: "B", documentos: ["no-uuid"] }).ok, false);
+  assert.deepEqual(validarEntrada("proponer_correo", { para: ["a@x.invalid"], asunto: "A", texto: "B", empresa_id: E1.toUpperCase(), documentos: [E1.toUpperCase()] }),
+    { ok: true, correo: { para: ["a@x.invalid"], asunto: "A", texto: "B", empresa_id: E1, documentos: [E1] } });
+  const db = new FakeDb();
+  db.rpcRespuesta = async (n) => n === "agente_proponer_correo"
+    ? { id: "k1000000-0000-0000-0000-000000000001", resumen: "Correo a a@x.invalid: «A»", datos: {}, adjuntos: [], avisos: ["a@x.invalid no es el email de ningún contacto del CRM"], puede_enviar: false }
+    : {};
+  const u = usar("proponer_correo", { para: ["a@x.invalid"], asunto: "A", texto: "B" });
+  const modelo = new FakeModelo([respuesta([u], "tool_use"), fin("Revisa la tarjeta.")]);
+  const { h } = montar({ db, modelo });
+  const ev = await eventos(await h(peticion({ pregunta: "Escribe a a@x.invalid" })));
+  const r = db.rpcs.find((x) => x.nombre === "agente_proponer_correo")!;
+  assert.equal(r.args.p_conversacion, db.convs[0].id);
+  assert.equal(r.args.p_tool_use_id, u.id);
+  assert.deepEqual(r.args.p_datos, { para: ["a@x.invalid"], asunto: "A", texto: "B" });
+  const f = ev.find((e) => e.evento === "herramienta" && e.datos.estado === "fin")!;
+  assert.equal(f.datos.correo, "k1000000-0000-0000-0000-000000000001");
+  const res = JSON.stringify(modelo.llamadas[1].messages.at(-1));
+  assert.match(res, /NO está enviado/);
+  assert.match(res, /no es admin/);
+  assert.match(res, /avisos/);
+});
+
+test("proponer_correo: con AGENTE_CORREO_SOLO, cualquier otro destinatario se bloquea sin llegar a la base de datos", async () => {
+  for (const [entrada, pasa] of [
+    [{ para: ["otro@x.invalid"], asunto: "A", texto: "B" }, false],
+    [{ para: ["Prueba1@x.invalid"], cco: ["otro@x.invalid"], asunto: "A", texto: "B" }, false],
+    [{ para: ["Yo <prueba1@x.invalid>"], cc: ["prueba2@x.invalid"], asunto: "A", texto: "B" }, true],
+  ] as const) {
+    const db = new FakeDb();
+    db.rpcRespuesta = async () => ({ id: "k1", resumen: "r", datos: {}, adjuntos: [], avisos: [], puede_enviar: true });
+    const modelo = new FakeModelo([respuesta([usar("proponer_correo", entrada)], "tool_use"), fin("Vale.")]);
+    const { h } = montar({ db, modelo, env: { AGENTE_CORREO_SOLO: "prueba1@x.invalid, prueba2@x.invalid" } });
+    await eventos(await h(peticion({ pregunta: "Escribe" })));
+    assert.equal(db.rpcs.some((x) => x.nombre === "agente_proponer_correo"), pasa, JSON.stringify(entrada));
+    if (!pasa) assert.match(JSON.stringify(modelo.llamadas[1].messages.at(-1)), /Modo de pruebas/);
+  }
+});
+
+test("proponer_correo: el contexto dice cómo han quedado los correos; las instrucciones explican redactar y enviar", async () => {
+  const db = new FakeDb();
+  const conv = await db.crearConversacion("t", "m");
+  db.correosConv = [{ id: "k1", resumen: "Correo a a@x.invalid: «A»", estado: "enviada", expira_at: new Date(Date.now() + 1e7).toISOString() },
+                    { id: "k2", resumen: "Correo a b@x.invalid: «B»", estado: "pendiente", expira_at: new Date(0).toISOString() }];
+  const { h, modelo } = montar({ db });
+  await eventos(await h(peticion({ pregunta: "¿Se envió?", conversacion_id: conv })));
+  const ctx = JSON.stringify(modelo.llamadas[0].messages.at(-1));
+  assert.match(ctx, /k1 «Correo a a@x.invalid: «A»»: enviada/);
+  assert.match(ctx, /k2 «Correo a b@x.invalid: «B»»: caducado/);
+  const s = construirSistema([]);
+  assert.match(s, /REDACTAR correos/);
+  assert.match(s, /solo un usuario con rol admin lo envía/);
+  assert.match(s, /NUNCA inventes ni completes una dirección/);
+  assert.match(s, /NUNCA digas que se ha enviado/);
 });
