@@ -1,5 +1,5 @@
-// Lógica de la Edge Function "agente": chat del CRM con Claude y herramientas
-// de solo lectura (fase 1). index.ts solo conecta las dependencias reales;
+// Lógica de la Edge Function "agente": chat del CRM con Claude, herramientas
+// de consulta y herramientas que PROPONEN escrituras. index.ts solo conecta las dependencias reales;
 // agente_test.ts prueba todo esto con Claude y la base de datos simulados.
 //
 // Reglas:
@@ -25,6 +25,12 @@
 //     con el mismo JWT (db.holded). Sus resultados se usan en la respuesta
 //     en curso pero NO se guardan: en agente_mensajes queda
 //     SIN_GUARDAR_HOLDED en su lugar (la auditoría de la llamada sí).
+//   * Escrituras en el CRM (proponer_*): solo crean una propuesta con
+//     agente_proponer (conversación y tool_use_id los pone esta función, no
+//     el modelo). El evento "herramienta" de fin lleva su id y el CRM la
+//     pinta como tarjeta; escribe agente_confirmar cuando el usuario pulsa
+//     Confirmar. En cada pregunta, el modelo recibe en el contexto cómo han
+//     quedado las propuestas de la conversación.
 
 import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { esHolded, HERRAMIENTAS_API, type LlamadaHolded, validarEntrada } from "./herramientas.ts";
@@ -80,6 +86,10 @@ export interface Db {
   esUsuarioCrm(): Promise<boolean>;
   preguntasDesde(authUserId: string, desdeIso: string): Promise<number>;
   admins(): Promise<AdminResumen[]>;
+  /** Quién pregunta (admins.id, nombre y rol), o null. */
+  yo(authUserId: string): Promise<{ id: string; nombre: string; rol: string } | null>;
+  /** Propuestas de la conversación (las 20 últimas): id, tipo, resumen, estado y resultado. */
+  propuestas(conversacionId: string): Promise<{ id: string; tipo: string; resumen: string; estado: string; resultado_id: string | null; expira_at: string }[]>;
   conversacionPropia(id: string, authUserId: string): Promise<boolean>;
   mensajes(conversacionId: string): Promise<MensajeGuardado[]>;
   crearConversacion(titulo: string, modelo: string): Promise<string>;
@@ -245,6 +255,8 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
     let conversacionId: string;
     let orden = 0;
     let admins: AdminResumen[];
+    let yo: { id: string; nombre: string; rol: string } | null = null;
+    let propuestas: Awaited<ReturnType<Db["propuestas"]>> = [];
     try {
       const hechas = await db.preguntasDesde(uid, inicioDiaMadrid(inicio));
       if (hechas >= tope) {
@@ -263,6 +275,8 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         conversacionId = await db.crearConversacion(pregunta.slice(0, 80), modeloId);
       }
       admins = await db.admins();
+      yo = await db.yo(uid);
+      if (typeof convPedida === "string") propuestas = await db.propuestas(conversacionId);
     } catch (e) {
       log("agente: preparación", e);
       return json(req, 500, { error: "No se ha podido preparar la conversación." });
@@ -313,7 +327,11 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         // Pregunta: el contexto (fecha, vista) va en un bloque aparte, en el
         // mensaje y no en el sistema, para no romper la caché.
         const contexto = `Contexto (no es parte de la pregunta): ahora es ${fechaMadrid(inicio)} en Madrid.` +
-          (vista ? ` El usuario está en la vista "${vista}"${vistaId ? ` del registro ${vistaId}` : ""} del CRM.` : "");
+          (vista ? ` El usuario está en la vista "${vista}"${vistaId ? ` del registro ${vistaId}` : ""} del CRM.` : "") +
+          (yo ? ` Te habla ${yo.nombre} (id ${yo.id}, rol ${yo.rol}).` : "") +
+          (propuestas.length ? ` Propuestas de esta conversación: ${propuestas.map((x) =>
+            `${x.id} «${x.resumen}»: ${x.estado === "pendiente" && Date.parse(x.expira_at) < inicio ? "caducada" : x.estado}` +
+            (x.resultado_id ? ` (registro ${x.resultado_id})` : "")).join("; ")}.` : "");
         const contenidoPregunta = [{ type: "text" as const, text: contexto }, { type: "text" as const, text: pregunta }];
         await guardar({ rol: "user", tipo: "pregunta", contenido: contenidoPregunta, texto: pregunta });
         historial.push({ role: "user", content: contenidoPregunta });
@@ -442,7 +460,11 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
         let espera: ReturnType<typeof setTimeout> | undefined;
         const limiteMs = "holded" in v ? holdedMs : herramientaMs;
         let datos = await Promise.race([
-          "holded" in v ? db.holded(v.holded) : "local" in v ? Promise.resolve(consultarDocumentacion(v.args)) : db.rpc(v.rpc, v.args),
+          "holded" in v ? db.holded(v.holded)
+            : "local" in v ? Promise.resolve(consultarDocumentacion(v.args))
+            : "propuesta" in v ? db.rpc("agente_proponer", { p_conversacion: conversacionId, p_tool_use_id: u.id, p_tipo: v.propuesta.tipo,
+                                                             p_registro: v.propuesta.registro, p_datos: v.propuesta.datos })
+            : db.rpc(v.rpc, v.args),
           new Promise((_, no) => { espera = setTimeout(() => no({ code: "timeout", message: "tiempo agotado" }), limiteMs); }),
         ]).finally(() => clearTimeout(espera));
         if ("holded" in v) {
@@ -457,18 +479,27 @@ export function createHandler(deps: Deps, opciones: Opciones = {}) {
           datos = { ...(h.datos as Record<string, unknown>), truncado: h.truncado === true,
                     ...(h.motivo_truncado ? { motivo_truncado: h.motivo_truncado } : {}), fuente: "Holded" };
         }
+        let propuesta: string | undefined;
+        if ("propuesta" in v) {
+          const p = datos as { id: string; resumen: string; datos: unknown; antes: unknown; coincidencias: unknown[]; confirmacion: string | null };
+          propuesta = p.id;
+          datos = { propuesta_id: p.id, estado: "pendiente", resumen: p.resumen, datos: p.datos, antes: p.antes, coincidencias: p.coincidencias,
+                    nota: "NO está hecho: el usuario tiene que pulsar Confirmar en la tarjeta" +
+                          (p.confirmacion ? ` y escribir ${p.confirmacion}` : "") + ". No digas que se ha hecho." +
+                          (p.coincidencias?.length ? " Hay posibles duplicados: díselos y pregunta si usar el existente." : "") };
+        }
         const texto = serializarResultado(datos);
         const filas = filasDe(datos);
-        enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas });
+        enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", filas, ...(propuesta ? { propuesta } : {}) });
         return { resultado: { type: "tool_result", tool_use_id: u.id, content: texto },
                  llamada: { ...base, filas, bytes: texto.length, es_error: false, error: null, duracion_ms: ahora() - t0 } };
       } catch (e) {
         const err = (e ?? {}) as ErrorDb;
-        const mensaje = err.code === "22023" && err.message ? err.message
-          : err.code === "42501" ? "Sin permiso para esta consulta."
+        const mensaje = (err.code === "22023" || err.code === "GU010") && err.message ? err.message
+          : err.code === "42501" ? ("propuesta" in v ? "No tienes permiso para hacer este cambio en el CRM." : "Sin permiso para esta consulta.")
           : err.code === "timeout" ? "La consulta ha tardado demasiado; prueba a filtrar más."
           : "No se ha podido hacer la consulta.";
-        if (err.code !== "22023") log("agente: herramienta", u.name, e);
+        if (err.code !== "22023" && err.code !== "GU010") log("agente: herramienta", u.name, e);
         enviar("herramienta", { id: u.id, nombre: u.name, estado: "fin", error: true });
         return { resultado: resultadoError(u.id, mensaje),
                  llamada: { ...base, filas: null, bytes: null, es_error: true, error: mensaje.slice(0, 2000), duracion_ms: ahora() - t0 } };

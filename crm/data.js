@@ -2279,7 +2279,53 @@
     return {mrr:mrr, arr:arr, openDeals:open.length, pipeline:pipeline, activeClients:active.length};
   }
 
+  // ---- Cambios confirmados desde el asistente (crm/supabase-agente-escritura.sql) ----
+  // agente_confirmar escribe en la base de datos; esto pone al día los datos
+  // en memoria del CRM con la fila de verdad (o la quita si se borró) y avisa
+  // a la app ("crm:datos") para que repinte. r = respuesta de agente_confirmar.
+  async function refrescarTrasAgente(client, r){
+    if(!client || !r || !r.registro_id) return;
+    var id = r.registro_id, borrado = /^borrar_/.test(r.tipo||"");
+    async function fila(tabla, rid){
+      var x = await client.from(tabla).select("*").eq("id", rid).maybeSingle();
+      if(x.error) throw x.error;
+      return x.data;
+    }
+    function poner(lista, porId, obj){
+      var i = lista.findIndex(function(o){ return o.id===obj.id; });
+      if(i>-1) Object.assign(lista[i], obj); else lista.unshift(obj);
+      if(porId) porId[obj.id] = i>-1 ? lista[i] : obj;
+    }
+    try{
+      if(r.tabla==="empresas"){
+        await loadEmpresas(client);
+        await refreshContactsCompany(client, contactsForEmpresa(id).map(function(c){ return c.id; }));
+      }else if(r.tabla==="contactos"){
+        if(borrado){ await removeContact(null, id); }
+        else{
+          var c = await fila("contactos", id);
+          if(c) poner(CONTACTS, contactById, rowToContact(c));
+          if(r.tipo==="crear_contacto"){ await loadEmpresas(client); await loadContactoEmpresa(client); await refreshContactsCompany(client, [id]); }
+        }
+      }else if(r.tabla==="contacto_empresa"){
+        await loadContactoEmpresa(client);
+        if(r.contact_id) await refreshContactsCompany(client, [r.contact_id]);
+      }else if(r.tabla==="deals"){
+        if(borrado) await removeDeal(null, id);
+        else { var d = await fila("deals", id); if(d) poner(DEALS, null, rowToDeal(d)); }
+      }else if(r.tabla==="tareas"){
+        if(borrado) await removeTask(null, id);
+        else { var t = await fila("tareas", id); if(t) poner(TASKS, null, rowToTask(t)); }
+      }else if(r.tabla==="notas"){
+        if(borrado) await removeNote(null, id);
+        else { var n = await fila("notas", id); if(n) poner(NOTES, null, rowToNote(n)); }
+      }
+    }catch(e){ if(window.console) console.error("refrescarTrasAgente:", e); }
+    try{ window.dispatchEvent(new Event("crm:datos")); }catch(e){}
+  }
+
   window.CRM = {
+    refrescarTrasAgente:refrescarTrasAgente,
     USERS:USERS, userById:function(id){return USERS.filter(function(u){return u.id===id;})[0];},
     ROLES:ROLES, roleById:roleById,
     rowToAdmin:rowToAdmin, cacheAdmin:cacheAdmin, removeAdminLocal:removeAdminLocal,

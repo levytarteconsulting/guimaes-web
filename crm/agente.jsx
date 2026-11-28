@@ -2,14 +2,18 @@ import React from "react";
 import {
   crearLectorSSE, mensajeDeError, MENSAJE_RED, MENSAJE_CORTE, avisoDeFin, etiquetaHerramienta,
   contextoDeVista, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta,
-  idsDocumentos, estadoDocumento,
+  idsDocumentos, estadoDocumento, filasPropuesta, filasBorrado, datosEditados, destinoDeCambio, estadoPropuesta,
+  esBorrado, LISTAS_CAMPO, CAMPOS_SI_NO, tablaDeTipo,
 } from "./agente-logica.js";
 import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
-/* GUIMAES CRM — Asistente (fase 1, solo lectura).
+/* GUIMAES CRM — Asistente.
    Botón en la topbar + cajón lateral (420 px en escritorio, pantalla completa
    en móvil). Habla con la Edge Function "agente" por SSE (fetch + getReader).
    El texto del modelo se pinta con elementos de React a partir del árbol de
-   agente-logica.js: nunca con innerHTML. */
+   agente-logica.js: nunca con innerHTML.
+   Las herramientas proponer_* del asistente no escriben: crean una propuesta
+   (agente_propuestas) que aquí se pinta como tarjeta. Solo al pulsar
+   Confirmar se llama a agente_confirmar, con la sesión de quien pulsa. */
 const { useState, useRef, useEffect, useCallback, useMemo, useContext } = React;
 
 const MAX_PREGUNTA = 4000;
@@ -127,6 +131,135 @@ function Markdown({ texto, onNav }) {
   });
 }
 
+/* ---------------- Tarjetas de propuesta ---------------- */
+const ESTADOS_TARJETA = { pendiente: "Pendiente de confirmar", confirmada: "Hecho", cancelada: "Cancelada", caducada: "Caducada" };
+function opcionesDe(k) {
+  const l = LISTAS_CAMPO[k];
+  if (!l) return null;
+  if (Array.isArray(l)) return l;
+  if (l === "USERS") return (CRM.USERS || []).map((u) => [u.id, u.name]);
+  return (CRM[l] || []).map((o) => [o.id, o.name || o.label || o.id]);
+}
+function valorLegible(k, v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const base = k.split(".").pop();
+  if (CAMPOS_SI_NO.has(base)) return v ? "Sí" : "No";
+  const ops = opcionesDe(base);
+  if (ops) { const o = ops.find(([id]) => String(id) === String(v)); if (o) return o[1]; }
+  if (base === "empresa_id") return (CRM.empresaById[v] || {}).razon_social || v;
+  if (base === "contact_id") return (CRM.contactById[v] || {}).full_name || v;
+  if (base === "deal_id") { const d = (CRM.DEALS || []).find((x) => x.id === v); return d ? d.title : v; }
+  if (base === "due_at") { try { return new Date(v).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Madrid" }); } catch (e) { return v; } }
+  if (base === "amount" || base === "coste_nomina") { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString("es-ES", { style: "currency", currency: "EUR" }) : v; }
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+function aEditable(k, v) {
+  if (v === null || v === undefined) return "";
+  if (k.split(".").pop() === "due_at") {
+    try { return new Date(v).toLocaleString("sv-SE", { timeZone: "Europe/Madrid" }).slice(0, 16).replace(" ", "T"); } catch (e) { return String(v); }
+  }
+  return typeof v === "boolean" ? v : String(v);
+}
+
+function Tarjeta({ id, onNav }) {
+  const [p, setP] = useState(null);
+  const [err, setErr] = useState("");
+  const [editando, setEditando] = useState(null);   // { clave: valor } mientras se edita
+  const [texto, setTexto] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [hecho, setHecho] = useState(null);          // respuesta de agente_confirmar
+  const cargar = useCallback(async () => {
+    const { data, error } = await Auth.client.from("agente_propuestas")
+      .select("id, tipo, registro_id, datos, antes, coincidencias, resumen, estado, resultado_id, expira_at").eq("id", id).maybeSingle();
+    if (error || !data) { setErr("No se ha podido cargar la propuesta."); return; }
+    setP(data);
+  }, [id]);
+  useEffect(() => { cargar(); }, [cargar]);
+  const estado = estadoPropuesta(p);
+  const filas = filasPropuesta(p);
+  const borrar = p && esBorrado(p.tipo);
+  const editar = () => setEditando(Object.fromEntries(filas.map((f) => [f.k, aEditable(f.k, f.nuevo)])));
+  const confirmar = async () => {
+    setBusy(true); setErr("");
+    try {
+      let datos = null;
+      if (editando) {
+        datos = datosEditados(p.datos, editando);
+      }
+      const { data, error } = await Auth.client.rpc("agente_confirmar", { p_propuesta: id, p_datos: datos, p_texto: borrar ? texto : null });
+      if (error) throw error;
+      setHecho(data); setEditando(null);
+      await CRM.refrescarTrasAgente(Auth.client, data);
+      await cargar();
+    } catch (e) {
+      setErr((e && e.message) || "No se ha podido hacer el cambio.");
+    }
+    setBusy(false);
+  };
+  const cancelar = async () => {
+    setBusy(true); setErr("");
+    const { error } = await Auth.client.rpc("agente_cancelar", { p_propuesta: id });
+    if (error) setErr(error.message || "No se ha podido cancelar.");
+    await cargar(); setBusy(false);
+  };
+  if (!p) return <div className="ag-card ag-card--carga">{err || "Cargando la propuesta…"}</div>;
+  const destino = destinoDeCambio(hecho || (p.estado === "confirmada"
+    ? { tipo: p.tipo, registro_id: p.resultado_id, tabla: tablaDeTipo(p.tipo), contact_id: p.registro_id } : null));
+  return (
+    <div className={"ag-card ag-card--" + estado + (borrar ? " ag-card--borrar" : "")}>
+      <div className="ag-card__cab">
+        <b>{p.resumen}</b>
+        <span className="ag-card__estado">{ESTADOS_TARJETA[estado] || estado}</span>
+      </div>
+      {borrar ? (
+        <table className="ag-card__tabla"><tbody>
+          {filasBorrado(p).map(([k, v]) => <tr key={k}><th>{k}</th><td>{typeof v === "boolean" ? (v ? "Sí" : "No") : String(v)}</td></tr>)}
+        </tbody></table>
+      ) : (
+        <table className="ag-card__tabla">
+          {filas.some((f) => f.hay_antes) && <thead><tr><th></th><th>Ahora</th><th>Quedará</th></tr></thead>}
+          <tbody>{filas.map((f) => <tr key={f.k}>
+            <th>{f.etiqueta}</th>
+            {f.hay_antes && <td className="ag-card__antes">{valorLegible(f.k, f.antes)}</td>}
+            <td>{editando ? <CampoEditable k={f.k} valor={editando[f.k]} onCambio={(v) => setEditando({ ...editando, [f.k]: v })} />
+                          : valorLegible(f.k, f.nuevo)}</td>
+          </tr>)}</tbody>
+        </table>
+      )}
+      {estado === "pendiente" && (p.coincidencias || []).length > 0 && <div className="ag-card__dup">
+        <b>Ya existe algo parecido:</b>
+        <ul>{p.coincidencias.map((c) => <li key={c.id}>
+          <a className="ag-link" href="#" onClick={(e) => { e.preventDefault(); onNav({ name: c.tipo === "empresa" ? "empresa" : "contact", id: c.id }); }}>{c.nombre || "(sin nombre)"}</a>
+          {" "}({c.tipo}, {c.motivo}{c.archivada ? ", archivada" : ""})</li>)}</ul>
+        <span>Si es la misma, cancela y dile al asistente que use la existente.</span>
+      </div>}
+      {err && <div className="ag-aviso ag-aviso--err" role="alert">{err}</div>}
+      {estado === "pendiente" && <div className="ag-card__acc">
+        {borrar && <input className="inp" placeholder="Escribe BORRAR" value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Escribe BORRAR para confirmar" />}
+        <button className={"btn btn--sm " + (borrar ? "btn--danger" : "btn--primary")} disabled={busy || (borrar && texto.trim().toUpperCase() !== "BORRAR")}
+          onClick={confirmar}>{busy ? "…" : borrar ? "Borrar" : "Confirmar"}</button>
+        {!borrar && !editando && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={editar}>Editar</button>}
+        {editando && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setEditando(null)}>Descartar cambios</button>}
+        <button className="btn btn--sm btn--ghost" disabled={busy} onClick={cancelar}>Cancelar</button>
+      </div>}
+      {estado === "confirmada" && destino && <div className="ag-card__acc">
+        <button className="btn btn--sm btn--ghost" onClick={() => onNav(destino)}>Abrir</button></div>}
+      {estado === "caducada" && <div className="ag-card__nota">Ha pasado más de un día: pídesela otra vez al asistente.</div>}
+    </div>
+  );
+}
+function CampoEditable({ k, valor, onCambio }) {
+  const base = k.split(".").pop();
+  if (CAMPOS_SI_NO.has(base)) return <input type="checkbox" checked={!!valor} onChange={(e) => onCambio(e.target.checked)} />;
+  const ops = opcionesDe(base);
+  if (ops) return <select className="inp" value={valor ?? ""} onChange={(e) => onCambio(e.target.value)}>
+    <option value="">—</option>{ops.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>;
+  if (base === "body") return <textarea className="inp" rows={4} value={valor ?? ""} onChange={(e) => onCambio(e.target.value)} />;
+  const tipo = base === "due_at" ? "datetime-local" : /_at$/.test(base) ? "date" : "text";
+  return <input className="inp" type={tipo} value={valor ?? ""} onChange={(e) => onCambio(e.target.value)} />;
+}
+
 /* ---------------- Burbujas ---------------- */
 function Herramienta({ p }) {
   const enCurso = p.estado === "inicio";
@@ -144,7 +277,9 @@ function Burbuja({ b, onNav }) {
   const vacia = !b.partes.some((p) => p.tipo === "texto" && p.texto.trim());
   return (
     <div className="ag-msg ag-msg--bot">
-      {b.partes.map((p, i) => p.tipo === "herramienta"
+      {b.partes.map((p, i) => p.tipo === "herramienta" && p.propuesta
+        ? <Tarjeta key={p.propuesta} id={p.propuesta} onNav={onNav} />
+        : p.tipo === "herramienta"
         ? <Herramienta key={p.id || i} p={p} />
         : <div key={i} className="ag-md"><Markdown texto={p.texto} onNav={onNav} /></div>)}
       {b.pendiente && vacia && !b.partes.some((p) => p.estado === "inicio") && <div className="ag-pensando"><span></span><span></span><span></span></div>}
@@ -212,11 +347,14 @@ export function useChatAgente({ view } = {}) {
     const n = ++cargaRef.current;
     setConvId(id); setConvArchivada(archivadas); setBurbujas([]); setAviso(null); setCargando(true);
     try {
-      const { data, error } = await Auth.client.from("agente_mensajes")
-        .select("orden,rol,tipo,texto,stop_reason").eq("conversacion_id", id)
-        .in("tipo", ["pregunta", "modelo"]).order("orden", { ascending: true });
+      const [{ data, error }, props] = await Promise.all([
+        Auth.client.from("agente_mensajes")
+          .select("orden,rol,tipo,texto,stop_reason,created_at").eq("conversacion_id", id)
+          .in("tipo", ["pregunta", "modelo"]).order("orden", { ascending: true }),
+        Auth.client.from("agente_propuestas").select("id, created_at").eq("conversacion_id", id).order("created_at"),
+      ]);
       if (error) throw error;
-      if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data));
+      if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data, props.error ? [] : props.data));
     } catch (e) {
       if (n === cargaRef.current) setAviso("No se ha podido abrir la conversación.");
     } finally {

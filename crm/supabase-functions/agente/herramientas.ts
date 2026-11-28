@@ -1,4 +1,4 @@
-// Herramientas del agente (solo lectura). Las del CRM son RPC de
+// Herramientas del agente. Las de consulta del CRM son RPC de
 // crm/supabase-agente.sql: herramienta "x" → public.agente_x, parámetro "y" →
 // argumento "p_y". agente_test.ts comprueba que nombres y parámetros
 // coinciden con las firmas del SQL.
@@ -6,16 +6,22 @@
 // holded_x, con empresa_id y el resto como params); holded-proxy vuelve a
 // validar todo y solo hace GET a una lista cerrada de rutas de Holded.
 //
+// Las proponer_* (escrituras en el CRM) NO escriben: van todas a
+// agente_proponer (crm/supabase-agente-escritura.sql), que valida y guarda una
+// propuesta; el CRM la enseña como tarjeta y solo escribe agente_confirmar,
+// cuando el usuario pulsa Confirmar.
+//
 // La base de datos ya valida y recorta (límites de filas, textos); aquí se
 // valida otra vez la entrada del modelo contra el esquema antes de llamar a
 // nada: lo que no pase no llega a la base de datos.
 
 import type Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
-import { ETAPAS, SERVICIOS } from "../_shared/catalogos.ts";
+import { CICLO_VIDA, ETAPAS, MOTIVOS_PERDIDA, PRIORIDADES, SERVICIOS } from "../_shared/catalogos.ts";
 
 type Propiedad =
   | { type: "string"; description: string; format?: "uuid" | "fecha" | "dia"; enum?: string[]; maxLength?: number; minLength?: number }
   | { type: "integer"; description: string; minimum: number; maximum: number }
+  | { type: "number"; description: string; minimum: number; maximum: number }
   | { type: "boolean"; description: string }
   | { type: "array"; description: string; items: { type: "string"; enum: string[] }; maxItems: number }
   | { type: "object"; description: string; maxBytes: number };
@@ -142,6 +148,108 @@ export const HERRAMIENTAS: readonly Herramienta[] = [
       desde: fecha("Inicio del periodo."),
       hasta: fecha("Fin del periodo (por defecto, ahora)."),
     }, ["desde"]),
+  // ---------------------------------------------------------------- escrituras en el CRM (solo proponen)
+  herramienta("buscar_duplicados",
+    "Antes de proponer una empresa o un contacto nuevos: busca si ya existen por CIF/NIF, email, teléfono, DNI o nombre " +
+    "normalizado (sin acentos ni forma jurídica). Si hay coincidencias, enséñalas y propón usar la existente.",
+    {
+      razon_social: { type: "string", maxLength: 200, description: "Razón social de la empresa." },
+      cif: { type: "string", maxLength: 20, description: "CIF/NIF de la empresa." },
+      full_name: { type: "string", maxLength: 200, description: "Nombre y apellidos del contacto." },
+      email: { type: "string", maxLength: 254, description: "Email del contacto." },
+      phone: { type: "string", maxLength: 40, description: "Teléfono del contacto." },
+      dni: { type: "string", maxLength: 20, description: "DNI/NIE del contacto." },
+    }),
+  herramienta("proponer_empresa",
+    "PROPONE crear una empresa (sin empresa_id) o modificar una existente (con empresa_id: pasa solo los campos que cambian; " +
+    "\"\" vacía un campo). NO escribe: el usuario ve una tarjeta con los datos y la confirma. Antes de crear, usa buscar_duplicados.",
+    {
+      empresa_id: uuid("Solo para modificar: id de la empresa."),
+      razon_social: { type: "string", maxLength: 200, description: "Razón social (obligatoria al crear)." },
+      cif: { type: "string", maxLength: 20, description: "CIF/NIF." },
+      address: { type: "string", maxLength: 300, description: "Dirección." },
+      city: { type: "string", maxLength: 100, description: "Población." },
+      province: { type: "string", maxLength: 100, description: "Provincia." },
+      empleados: { type: "integer", minimum: 0, maximum: 1000000, description: "Número de empleados." },
+    }),
+  herramienta("proponer_contacto",
+    "PROPONE crear un contacto (sin contact_id: con empresa_id de una empresa existente o nueva_empresa) o modificar uno " +
+    "(con contact_id: solo los campos que cambian; \"\" vacía un campo). Para cambiar sus empresas usa " +
+    "proponer_empresa_de_contacto. NO escribe: el usuario confirma en una tarjeta. Antes de crear, usa buscar_duplicados.",
+    {
+      contact_id: uuid("Solo para modificar: id del contacto."),
+      full_name: { type: "string", maxLength: 200, description: "Nombre y apellidos (obligatorio al crear)." },
+      email: { type: "string", maxLength: 254, description: "Email." },
+      phone: { type: "string", maxLength: 40, description: "Teléfono." },
+      dni: { type: "string", maxLength: 20, description: "DNI/NIE." },
+      city: { type: "string", maxLength: 100, description: "Población." },
+      province: { type: "string", maxLength: 100, description: "Provincia." },
+      employees: { type: "integer", minimum: 0, maximum: 1000000, description: "Empleados (dato del contacto)." },
+      lifecycle: { type: "string", enum: CICLO_VIDA.map((o) => o.id), description: "Ciclo de vida (por defecto new)." },
+      priority: { type: "string", enum: PRIORIDADES.map((o) => o.id), description: "Prioridad." },
+      owner: { type: "string", maxLength: 100, description: "Responsable: id de la lista de usuarios del CRM." },
+      source: { type: "string", maxLength: 100, description: "Origen (por defecto «Alta manual»)." },
+      kyc: { type: "boolean", description: "KYC hecho." },
+      empresa_id: uuid("Solo al crear: id de la empresa existente a la que pertenece."),
+      nueva_empresa: { type: "object", maxBytes: 4000,
+                       description: "Solo al crear y si la empresa no existe: { razon_social, cif, address, city, province, empleados }." },
+    }),
+  herramienta("proponer_empresa_de_contacto",
+    "PROPONE cambiar las empresas de un contacto: añadir una empresa, ponerla como principal o quitarla (un contacto siempre " +
+    "tiene al menos una). NO escribe: el usuario confirma en una tarjeta.",
+    {
+      contact_id: uuid("Id del contacto."),
+      empresa_id: uuid("Id de la empresa."),
+      accion: { type: "string", enum: ["anadir", "principal", "quitar"],
+                description: "anadir = añadirla; principal = añadirla si hace falta y ponerla como principal; quitar = quitarla." },
+    }, ["contact_id", "empresa_id", "accion"]),
+  herramienta("proponer_negocio",
+    "PROPONE crear un negocio del pipeline (sin deal_id: title y contact_id obligatorios) o modificar uno (con deal_id: solo " +
+    "lo que cambia; \"\" vacía un campo). NO escribe: el usuario confirma en una tarjeta.",
+    {
+      deal_id: uuid("Solo para modificar: id del negocio."),
+      title: { type: "string", maxLength: 200, description: "Título." },
+      contact_id: uuid("Contacto del negocio."),
+      empresa_id: uuid("Empresa del negocio (si falta, el CRM pone la principal del contacto)."),
+      service: { type: "string", enum: SERVICIOS.map((x) => x.id), description: "Servicio (s1…s7)." },
+      stage: { type: "string", enum: ETAPAS.map((e) => e.id), description: "Etapa (por defecto reunion)." },
+      owner: { type: "string", maxLength: 100, description: "Responsable: id de la lista de usuarios del CRM." },
+      amount: { type: "number", minimum: 0, maximum: 100000000, description: "Importe en euros, sin IVA." },
+      frequency: { type: "string", enum: ["mensual", "anual", "puntual"], description: "Frecuencia del importe." },
+      priority: { type: "string", enum: PRIORIDADES.map((o) => o.id), description: "Prioridad." },
+      loss_reason: { type: "string", enum: MOTIVOS_PERDIDA.map((o) => o.id), description: "Motivo de pérdida (etapa perdido)." },
+      signed_at: dia("Fecha de firma."),
+      renewal_at: dia("Fecha de renovación."),
+      num_nominas: { type: "integer", minimum: 0, maximum: 100000, description: "Número de nóminas (servicio laboral)." },
+      coste_nomina: { type: "number", minimum: 0, maximum: 1000000, description: "Coste por nómina en euros." },
+    }),
+  herramienta("proponer_tarea",
+    "PROPONE crear una tarea (sin tarea_id: title obligatorio) o modificarla (con tarea_id: solo lo que cambia), incluida la " +
+    "asignación a un usuario. NO escribe: el usuario confirma en una tarjeta. Asignarla avisa a esa persona.",
+    {
+      tarea_id: uuid("Solo para modificar: id de la tarea."),
+      title: { type: "string", maxLength: 300, description: "Título." },
+      assigned_to: { type: "string", maxLength: 100, description: "Responsable: id de la lista de usuarios del CRM." },
+      due_at: fecha("Vencimiento (solo la fecha = 09:00 en Madrid)."),
+      contact_id: uuid("Contacto de la tarea."),
+      deal_id: uuid("Negocio de la tarea."),
+      status: { type: "string", enum: ["pending", "done"], description: "pending = pendiente; done = hecha (también la archiva)." },
+      archived: { type: "boolean", description: "Archivada." },
+    }),
+  herramienta("proponer_nota",
+    "PROPONE añadir una nota a un contacto o a un negocio. NO escribe: el usuario confirma en una tarjeta.",
+    {
+      body: { type: "string", minLength: 1, maxLength: 5000, description: "Texto de la nota." },
+      contact_id: uuid("Contacto de la nota."),
+      deal_id: uuid("Negocio de la nota."),
+    }, ["body"]),
+  herramienta("proponer_borrado",
+    "PROPONE borrar un contacto, un negocio, una tarea o una nota. NO borra: el usuario tiene que escribir BORRAR en la " +
+    "tarjeta. Las empresas no se borran desde aquí: enlaza la empresa y di que se borra desde su ficha.",
+    {
+      tipo: { type: "string", enum: ["contacto", "negocio", "tarea", "nota"], description: "Qué se borra." },
+      id: uuid("Id del registro."),
+    }, ["tipo", "id"]),
   // ---------------------------------------------------------------- Holded (holded-proxy)
   herramienta("holded_facturas",
     "Holded de una empresa cliente: facturas emitidas (ventas) o recibidas (compras y gastos) de un periodo, con totales " +
@@ -249,6 +357,7 @@ export type Validacion =
   | { ok: true; rpc: string; args: Record<string, unknown> }
   | { ok: true; holded: LlamadaHolded }
   | { ok: true; local: "documentacion"; args: { tema?: string; operacion?: string } }
+  | { ok: true; propuesta: { tipo: string; registro: string | null; datos: Record<string, unknown> } }
   | { ok: false; error: string };
 
 /** Valida la entrada del modelo y la traduce a la llamada RPC (o a holded-proxy). */
@@ -288,6 +397,10 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
         if (typeof v !== "number" || !Number.isInteger(v)) return mal("tiene que ser un número entero");
         if (v < p.minimum || v > p.maximum) return mal(`entre ${p.minimum} y ${p.maximum}`);
         break;
+      case "number":
+        if (typeof v !== "number" || !Number.isFinite(v)) return mal("tiene que ser un número");
+        if (v < p.minimum || v > p.maximum) return mal(`entre ${p.minimum} y ${p.maximum}`);
+        break;
       case "boolean":
         if (typeof v !== "boolean") return mal("tiene que ser true o false");
         break;
@@ -303,9 +416,37 @@ export function validarEntrada(nombre: string, entrada: unknown): Validacion {
     args[k] = v;
   }
   if (h.name === "holded_documentacion") return { ok: true, local: "documentacion", args: args as { tema?: string; operacion?: string } };
+  if (h.name.startsWith("proponer_")) return propuestaDe(h.name, args);
   if (esHolded(h.name)) {
     const { empresa_id, ...params } = args;
     return { ok: true, holded: { consulta: h.name.slice("holded_".length), empresa_id: String(empresa_id).toLowerCase(), params } };
   }
   return { ok: true, rpc: `agente_${h.name}`, args: Object.fromEntries(Object.entries(args).map(([k, v]) => [`p_${k}`, v])) };
+}
+
+// ---------------------------------------------------------------- proponer_* → agente_proponer(tipo, registro, datos)
+const ID_DE: Record<string, [string, string, string]> = {   // herramienta → [campo id, tipo al crear, tipo al modificar]
+  proponer_empresa: ["empresa_id", "crear_empresa", "modificar_empresa"],
+  proponer_contacto: ["contact_id", "crear_contacto", "modificar_contacto"],
+  proponer_negocio: ["deal_id", "crear_deal", "modificar_deal"],
+  proponer_tarea: ["tarea_id", "crear_tarea", "modificar_tarea"],
+};
+const BORRAR: Record<string, string> = { contacto: "borrar_contacto", negocio: "borrar_deal", tarea: "borrar_tarea", nota: "borrar_nota" };
+
+function propuestaDe(nombre: string, args: Record<string, unknown>): Validacion {
+  const ok = (tipo: string, registro: unknown, datos: Record<string, unknown>): Validacion =>
+    ({ ok: true, propuesta: { tipo, registro: typeof registro === "string" ? registro.toLowerCase() : null, datos } });
+  if (nombre === "proponer_nota") return ok("crear_nota", null, args);
+  if (nombre === "proponer_borrado") return ok(BORRAR[String(args.tipo)], args.id, {});
+  if (nombre === "proponer_empresa_de_contacto") {
+    const datos = { empresa_id: args.empresa_id, ...(args.accion === "quitar" ? {} : { principal: args.accion === "principal" }) };
+    return ok(args.accion === "quitar" ? "desvincular_empresa" : "vincular_empresa", args.contact_id, datos);
+  }
+  const [campo, crear, modificar] = ID_DE[nombre];
+  const { [campo]: id, ...datos } = args;
+  if (id && nombre === "proponer_contacto" && ("empresa_id" in datos || "nueva_empresa" in datos)) {
+    return { ok: false, error: "Para cambiar las empresas de un contacto existente usa proponer_empresa_de_contacto." };
+  }
+  if (id && !Object.keys(datos).length) return { ok: false, error: "No hay ningún campo que cambiar." };
+  return ok(id ? modificar : crear, id, datos);
 }

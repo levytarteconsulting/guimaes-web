@@ -82,6 +82,14 @@ const NOMBRES_HERRAMIENTAS = {
   leer_correo: "Leyendo el correo",
   listar_leads: "Consultando las solicitudes",
   resumen_actividad: "Preparando el resumen de actividad",
+  buscar_duplicados: "Buscando duplicados",
+  proponer_empresa: "Preparando el cambio",
+  proponer_contacto: "Preparando el cambio",
+  proponer_empresa_de_contacto: "Preparando el cambio",
+  proponer_negocio: "Preparando el cambio",
+  proponer_tarea: "Preparando el cambio",
+  proponer_nota: "Preparando el cambio",
+  proponer_borrado: "Preparando el borrado",
 };
 export function etiquetaHerramienta(nombre) {
   return NOMBRES_HERRAMIENTAS[nombre] || "Consultando";
@@ -255,7 +263,9 @@ export function markdown(texto) {
 // respuestas a medias no se guardan) y se repitió igual justo después se
 // muestra una sola vez; si la siguiente es distinta, se marca sin respuesta.
 export const AVISO_SIN_RESPUESTA = "Esta pregunta se quedó sin respuesta.";
-export function burbujasDeHistorial(filas) {
+// propuestas: [{ id, created_at }] de agente_propuestas. Cada tarjeta va en la
+// respuesta a la última pregunta hecha antes de crearla (filas con created_at).
+export function burbujasDeHistorial(filas, propuestas = []) {
   const out = [];
   for (const f of [...(filas || [])].sort((a, b) => a.orden - b.orden)) {
     if (f.rol === "user" && f.tipo === "pregunta") {
@@ -265,7 +275,7 @@ export function burbujasDeHistorial(filas) {
         if (previa.texto.trim() === texto.trim()) out.pop();
         else out.push({ rol: "assistant", partes: [], aviso: AVISO_SIN_RESPUESTA });
       }
-      out.push({ rol: "user", texto });
+      out.push({ rol: "user", texto, creado: f.created_at || null });
     } else if (f.rol === "assistant" && f.tipo === "modelo") {
       let ultima = out[out.length - 1];
       if (!ultima || ultima.rol !== "assistant") { ultima = { rol: "assistant", partes: [] }; out.push(ultima); }
@@ -274,6 +284,17 @@ export function burbujasDeHistorial(filas) {
     }
   }
   if (out.length && out[out.length - 1].rol === "user") out.push({ rol: "assistant", partes: [], aviso: AVISO_SIN_RESPUESTA });
+  const enOrden = [...(propuestas || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const porBurbuja = new Map();
+  for (const p of enOrden) {
+    let i = -1;
+    out.forEach((b, k) => { if (b.rol === "user" && b.creado && String(b.creado) <= String(p.created_at)) i = k; });
+    const destino = i >= 0 && out[i + 1] && out[i + 1].rol === "assistant" ? out[i + 1] : null;
+    if (!destino) continue;
+    if (!porBurbuja.has(destino)) porBurbuja.set(destino, []);
+    porBurbuja.get(destino).push({ tipo: "herramienta", id: "propuesta-" + p.id, nombre: "", estado: "fin", propuesta: p.id });
+  }
+  for (const [b, partes] of porBurbuja) b.partes = [...partes, ...b.partes];
   return out;
 }
 
@@ -287,9 +308,84 @@ export function anadirTexto(partes, delta) {
 export function anotarHerramienta(partes, ev) {
   const i = partes.findIndex((p) => p.tipo === "herramienta" && p.id === ev.id);
   if (i === -1) {
-    return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error }];
+    return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error,
+                         ...(ev.propuesta ? { propuesta: ev.propuesta } : {}) }];
   }
   const copia = [...partes];
-  copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error };
+  copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error, ...(ev.propuesta ? { propuesta: ev.propuesta } : {}) };
   return copia;
+}
+
+/* ---------------- Tarjetas de propuesta (crm/supabase-agente-escritura.sql) ---------------- */
+const ETIQUETAS_CAMPO = {
+  razon_social: "Razón social", cif: "CIF/NIF", address: "Dirección", city: "Población", province: "Provincia",
+  empleados: "Empleados", full_name: "Nombre", email: "Email", phone: "Teléfono", dni: "DNI/NIE", employees: "Empleados",
+  lifecycle: "Ciclo de vida", priority: "Prioridad", owner: "Responsable", source: "Origen", kyc: "KYC",
+  empresa_id: "Empresa", nueva_empresa: "Empresa nueva", principal: "Como principal", title: "Título", contact_id: "Contacto",
+  service: "Servicio", stage: "Etapa", amount: "Importe (€)", frequency: "Frecuencia", loss_reason: "Motivo de pérdida",
+  signed_at: "Firma", renewal_at: "Renovación", num_nominas: "Nóminas", coste_nomina: "Coste por nómina (€)",
+  assigned_to: "Responsable", due_at: "Vence", deal_id: "Negocio", status: "Estado", archived: "Archivada", body: "Nota",
+};
+export const etiquetaCampo = (k) => ETIQUETAS_CAMPO[k] || k;
+// Campos que se eligen de una lista (en «Editar», un desplegable).
+export const LISTAS_CAMPO = {
+  lifecycle: "LIFECYCLE", priority: "PRIORITIES", service: "SERVICES", stage: "STAGES", loss_reason: "LOSS_REASONS",
+  frequency: [["mensual", "Mensual"], ["anual", "Anual"], ["puntual", "Puntual"]],
+  status: [["pending", "Pendiente"], ["done", "Hecha"]], owner: "USERS", assigned_to: "USERS",
+};
+export const CAMPOS_SI_NO = new Set(["kyc", "principal", "archived"]);
+export const esBorrado = (tipo) => /^borrar_/.test(tipo || "");
+
+/** Filas de la tarjeta: [{ k, etiqueta, antes, nuevo, hay_antes }]. La empresa nueva va desplegada. */
+export function filasPropuesta(p) {
+  if (!p) return [];
+  const datos = p.datos || {};
+  const antes = p.antes && typeof p.antes === "object" ? p.antes : {};
+  const modificar = /^modificar_/.test(p.tipo);
+  const filas = [];
+  for (const [k, v] of Object.entries(datos)) {
+    if (k === "nueva_empresa" && v && typeof v === "object") {
+      for (const [k2, v2] of Object.entries(v)) filas.push({ k: "nueva_empresa." + k2, etiqueta: "Empresa nueva · " + etiquetaCampo(k2), nuevo: v2, hay_antes: false });
+      continue;
+    }
+    filas.push({ k, etiqueta: etiquetaCampo(k), nuevo: v, antes: modificar ? antes[k] : undefined, hay_antes: modificar });
+  }
+  return filas;
+}
+/** Resumen de lo que se borra (antes de un borrar_*): [[etiqueta, valor]]. */
+export function filasBorrado(p) {
+  const a = (p && p.antes) || {};
+  const nombres = { nombre: "Nombre", email: "Email", empresa: "Empresa", titulo: "Título", etapa: "Etapa", importe: "Importe",
+    frecuencia: "Frecuencia", vence: "Vence", estado: "Estado", fecha: "Fecha", extracto: "Texto",
+    negocios_que_se_borran: "Negocios que se borran (sin empresa)", negocios_que_se_quedan: "Negocios que se quedan, sin contacto",
+    tareas: "Tareas", notas: "Notas", cuenta_area_cliente: "Tiene cuenta del área de cliente" };
+  return Object.entries(a).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => [nombres[k] || k, v]);
+}
+/** Datos editados (claves «a.b» para la empresa nueva) → objeto para agente_confirmar. */
+export function datosEditados(original, valores) {
+  const out = JSON.parse(JSON.stringify(original || {}));
+  for (const [k, v] of Object.entries(valores || {})) {
+    const [a, b] = k.split(".");
+    if (b) { out[a] = { ...(out[a] || {}), [b]: v }; } else out[a] = v;
+  }
+  return out;
+}
+/** Destino del CRM tras confirmar (para «Abrir»): { name, id } o null. */
+export function destinoDeCambio(r) {
+  if (!r || !r.registro_id || esBorrado(r.tipo)) return null;
+  if (r.tabla === "empresas") return { name: "empresa", id: r.registro_id };
+  if (r.tabla === "contactos") return { name: "contact", id: r.registro_id };
+  if (r.tabla === "contacto_empresa" && r.contact_id) return { name: "contact", id: r.contact_id };
+  if (r.tabla === "deals") return { name: "deal", id: r.registro_id };
+  if (r.tabla === "tareas") return { name: "tareas", id: null };
+  return null;
+}
+export function tablaDeTipo(tipo) {
+  if (/_empresa$/.test(tipo) && /^(vincular|desvincular)/.test(tipo)) return "contacto_empresa";
+  return { empresa: "empresas", contacto: "contactos", deal: "deals", tarea: "tareas", nota: "notas" }[String(tipo).split("_").pop()] || null;
+}
+export function estadoPropuesta(p, ahora = Date.now()) {
+  if (!p) return "cargando";
+  if (p.estado === "pendiente" && Date.parse(p.expira_at) < ahora) return "caducada";
+  return p.estado;
 }
