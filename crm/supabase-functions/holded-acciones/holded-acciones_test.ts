@@ -6,6 +6,7 @@ import { aprobarTicket, fetchAcciones } from "./operaciones.ts";
 import { construir, motivoExclusion, validarParams } from "./propuesta.ts";
 import { atender, type Deps, ejecutar, LOTE } from "./servicio.ts";
 import { HOLDED_BASE } from "../_shared/holded.ts";
+import { finDiaMadrid } from "../holded-proxy/consultas.ts";
 
 const CLAVE = "pat_" + "d4".repeat(44) + "WXYZ";   // inventada
 const CRON = "secreto-cron-de-prueba";
@@ -53,7 +54,7 @@ function listado(tickets: X[], uso = { usage: 42400, limit: 100000, period: "202
 }
 
 // ---------------------------------------------------------------- base de datos simulada
-function base(opciones: { clave?: string | null; lotes?: X[] } = {}) {
+function base(opciones: { clave?: string | null; lotes?: X[]; turnos?: X[] } = {}) {
   const rpcs: { fn: string; args: X }[] = [];
   const lotes = [...(opciones.lotes ?? [])];
   const resultados: X[] = [];
@@ -64,6 +65,8 @@ function base(opciones: { clave?: string | null; lotes?: X[] } = {}) {
     if (fn === "holded_acciones_crear") return ok({ id: "a0000000-0000-0000-0000-000000000001", estado: "propuesta", documentos: (args.p_ids as string[]).length });
     if (fn === "holded_acciones_reclamar") return ok(lotes.shift() ?? null);
     if (fn === "holded_acciones_resultado") { resultados.push(args); return ok({ estado: "en_curso" }); }
+    if (fn === "holded_programadas_turno") return ok(opciones.turnos ?? []);
+    if (fn === "holded_programada_registrar") return ok(null);
     return Promise.resolve({ data: null, error: { message: "sin simular" } });
   };
   return { rpc, rpcs, resultados, lotes };
@@ -378,4 +381,47 @@ Deno.test("inspeccionar: solo el operador, solo GET, recuentos y numeración sin
   assert(!b.rpcs.some((x) => x.fn === "holded_acciones_crear"), "no crea nada");
   sinClave(r);
   assertEquals((await pedir({ ...q, parametros: { desde: "2026-01-01", hasta: "2026-03-01" } }, { hook: CRON })).status, 400, "como mucho 31 días");
+});
+
+// ================================================================= ACCIONES PROGRAMADAS
+Deno.test("programadas: solo el cron; crea la tanda con tickets hasta el día de la pasada y registra el resultado", async () => {
+  const tickets = [ticket(1, { date: "2026-11-27" }), ticket(2, { date: "2026-11-28" }), ticket(4, { total: "0", subtotal: "0", tax: "0", date: "2026-11-28" })];
+  const h = holded(listado(tickets));
+  const b = base({ turnos: [{ empresa_id: EMP, tipo: "aprobar_tickets_venta", hasta: "2026-11-28", tanda: 1 }] });
+  const m = montar(h, b);
+  assertEquals((await m.pedir({ accion: "programadas" })).status, 403, "un usuario no la lanza");
+  const res = await m.pedir({ accion: "programadas" }, { hook: CRON });
+  assertEquals(res.status, 200);
+  const crear = b.rpcs.find((x) => x.fn === "holded_acciones_crear")!;
+  assertEquals(crear.args.p_origen, "operador");
+  assertEquals(crear.args.p_ids, [hex(1), hex(2)], "el de importe 0 se aparta");
+  const lectura = h.pedidas.find((p) => p.ruta === "/sales-receipts")!;
+  assertEquals(lectura.params.end_date, String(finDiaMadrid("2026-11-28")), "Holded filtra hasta el fin del día de la pasada (Madrid)");
+  assertEquals(lectura.params.start_date, undefined, "sin límite hacia atrás");
+  const reg = b.rpcs.find((x) => x.fn === "holded_programada_registrar")!;
+  assertEquals(reg.args.p_accion, "a0000000-0000-0000-0000-000000000001");
+  assertEquals(reg.args.p_cerrar, false);
+  assertMatch(reg.args.p_mensaje, /^Tanda 1: 2 ticket\(s\) con fecha hasta 2026-11-28, pendiente de aprobar en Acciones; 1 apartado/);
+  assert(h.pedidas.every((p) => p.metodo === "GET"), "no escribe nada en Holded");
+  sinClave(b.rpcs); sinClave(res.body);
+});
+
+Deno.test("programadas: sin tickets cierra la noche; con 429 no la cierra; con error de Holded la cierra", async () => {
+  const turno = (tanda: number) => [{ empresa_id: EMP, tipo: "aprobar_tickets_venta", hasta: "2026-11-28", tanda }];
+  let b = base({ turnos: turno(3) });
+  await montar(holded(listado([])), b).pedir({ accion: "programadas" }, { hook: CRON });
+  let reg = b.rpcs.find((x) => x.fn === "holded_programada_registrar")!;
+  assertEquals([reg.args.p_accion, reg.args.p_cerrar], [null, true]);
+  assertMatch(reg.args.p_mensaje, /^Terminado en 2 tanda\(s\)\. No quedan tickets por aprobar con fecha hasta 2026-11-28\.$/);
+  b = base({ turnos: turno(1) });
+  await montar(holded((p) => p.ruta === "/usage" ? { body: { usage: 1, limit: 10, period: "2026-11" } } : { status: 429, headers: { "retry-after": "60" } }), b)
+    .pedir({ accion: "programadas" }, { hook: CRON });
+  reg = b.rpcs.find((x) => x.fn === "holded_programada_registrar")!;
+  assertEquals(reg.args.p_cerrar, false, "429: se reintenta más tarde");
+  b = base({ turnos: turno(1) });
+  await montar(holded(() => ({ status: 401 })), b).pedir({ accion: "programadas" }, { hook: CRON });
+  reg = b.rpcs.find((x) => x.fn === "holded_programada_registrar")!;
+  assertEquals(reg.args.p_cerrar, true);
+  assertMatch(reg.args.p_mensaje, /^Parada en la tanda 1: Holded rechaza la clave/);
+  sinClave(b.rpcs);
 });

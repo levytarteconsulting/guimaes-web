@@ -15,6 +15,12 @@
 //       solo con x-hook-secret (pg_cron, cada minuto). Reclama lotes de
 //       acciones YA APROBADAS en el CRM y los ejecuta respetando el ritmo por
 //       minuto y Retry-After. Un usuario no puede pedir «ejecutar».
+//   { accion: "programadas" }
+//       solo con x-hook-secret (pg_cron, cada 10 minutos; ver
+//       crm/supabase-holded-programadas.sql). Pide a la base qué tandas tocan
+//       (holded_programadas_turno), crea cada una como una propuesta normal
+//       (tickets pendientes hasta ese día, hasta 1000; la política automática
+//       decide si se aprueba sola) y registra el resultado. Nunca ejecuta.
 //   { accion: "inspeccionar", empresa_id, parametros: { desde, hasta, solo_pendientes?, ids? } }
 //       solo con x-hook-secret (el operador). SOLO LECTURA (GET /sales-receipts):
 //       recuentos, totales, estado de aprobación y numeración, sin clientes ni
@@ -27,7 +33,7 @@ import type { Fetch } from "../_shared/holded.ts";
 import { aprobarTicket, detalleError, OPERACIONES, peticion } from "./operaciones.ts";
 import { encontrarOperacion } from "./catalogo.ts";
 import { construirOperacion } from "./operacion.ts";
-import { construir, ErrorPropuesta, validarParams } from "./propuesta.ts";
+import { construir, ErrorPropuesta, MAX_DOCUMENTOS, validarParams } from "./propuesta.ts";
 import { inspeccionar, validarInspeccion } from "./inspeccion.ts";
 
 export const PLAZO_EJECUCION_MS = 45_000;       // pg_cron llama cada minuto: sin solaparse
@@ -78,6 +84,10 @@ export async function atender(deps: Deps, cabeceras: { authorization: string; ho
   if (b.accion === "ejecutar") {
     if (quien !== "cron") return r(403, { error: "La ejecución solo la lanza el sistema, tras la aprobación en el CRM." });
     return r(200, await ejecutar(deps));
+  }
+  if (b.accion === "programadas") {
+    if (quien !== "cron") return r(403, { error: "Las acciones programadas solo las lanza el sistema." });
+    return r(200, await programadas(deps));
   }
   if (b.accion === "proponer_operacion") {
     try {
@@ -152,10 +162,56 @@ async function proponer(deps: Deps, quien: "cron" | { uid: string }, b: Record<s
   const d = cr.data as { id: string; estado: string; documentos: number };
   return r(200, {
     ok: true,
-    propuesta: { id: d.id, estado: d.estado, resumen: p.resumen, avisos: p.avisos, excluidos: p.excluidos.length,
+    propuesta: { id: d.id, estado: d.estado, documentos: d.documentos, resumen: p.resumen, avisos: p.avisos, excluidos: p.excluidos.length,
                  muestra: p.muestra.slice(0, 5) },
   });
 }
+
+// ---------------------------------------------------------------- acciones programadas
+type Turno = { empresa_id: string; tipo: string; hasta: string; tanda: number };
+/** Crea las tandas que tocan y deja el resultado en holded_acciones_programadas. */
+export async function programadas(deps: Deps) {
+  const log = deps.log ?? (() => {});
+  const t = await deps.rpc("holded_programadas_turno", {});
+  if (t.error) { log("holded-acciones: programadas", limpiar(t.error.message).slice(0, 200)); return { ok: false, error: "No se han podido leer las programaciones." }; }
+  const lista = (Array.isArray(t.data) ? t.data : []) as Turno[];
+  const tandas: { empresa_id: string; tanda: number; accion: string | null; cerrada: boolean }[] = [];
+  for (const x of lista) {
+    let accion: string | null = null, cerrar = false, mensaje: string;
+    try {
+      const res = await proponer(deps, "cron", { empresa_id: x.empresa_id, tipo: x.tipo,
+                                                 parametros: { max_documentos: MAX_DOCUMENTOS, hasta: x.hasta } });
+      const body = res.body as Record<string, X>;
+      if (res.status === 200 && body.ok) {
+        const pr = body.propuesta;
+        accion = pr.id;
+        mensaje = `Tanda ${x.tanda}: ${pr.documentos} ticket(s) con fecha hasta ${x.hasta}, ` +
+          (pr.estado === "aprobada" ? "aprobada sola" : "pendiente de aprobar en Acciones") +
+          (pr.excluidos ? `; ${pr.excluidos} apartado(s) para revisar` : "") + ".";
+      } else if (res.status === 200 && body.codigo === "vacio") {
+        cerrar = true;
+        mensaje = (x.tanda > 1 ? `Terminado en ${x.tanda - 1} tanda(s). ` : "") + `No quedan tickets por aprobar con fecha hasta ${x.hasta}` +
+          (typeof body.mensaje === "string" && /problemas/.test(body.mensaje) ? ` (${limpiar(body.mensaje)})` : "") + ".";
+      } else if (res.status === 200 && body.codigo === "429") {
+        mensaje = `Tanda ${x.tanda}: Holded pide esperar (límite de peticiones); se reintenta en unos minutos.`;   // sin cerrar
+      } else {
+        cerrar = true;
+        mensaje = `Parada en la tanda ${x.tanda}: ${limpiar(String(body.mensaje ?? body.error ?? "error"))}`;
+      }
+    } catch (e) {
+      cerrar = true;
+      mensaje = `Parada en la tanda ${x.tanda}: no se ha podido preparar la propuesta.`;
+      log("holded-acciones: programadas", e instanceof Error ? limpiar(e.message).slice(0, 200) : "error");
+    }
+    const g = await deps.rpc("holded_programada_registrar", { p_empresa: x.empresa_id, p_tipo: x.tipo, p_accion: accion,
+                                                             p_mensaje: mensaje.slice(0, 300), p_cerrar: cerrar });
+    if (g.error) log("holded-acciones: programadas registrar", limpiar(g.error.message).slice(0, 200));
+    tandas.push({ empresa_id: x.empresa_id, tanda: x.tanda, accion, cerrada: cerrar });
+  }
+  return { ok: true, tandas };
+}
+// deno-lint-ignore no-explicit-any
+type X = any;
 
 // ---------------------------------------------------------------- proponer una operación
 async function proponerOperacion(deps: Deps, quien: "cron" | { uid: string }, b: Record<string, unknown>) {
