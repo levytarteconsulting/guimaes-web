@@ -72,6 +72,17 @@ function db(jwt: string): Db {
       return ok(await c.from("agente_correos").select("id, resumen, estado, expira_at")
         .eq("conversacion_id", conversacionId).order("created_at", { ascending: false }).limit(20)) ?? [];
     },
+    async accionesHolded(conversacionId) {
+      const ids = (ok(await c.from("agente_tool_calls").select("tarjeta_id").eq("conversacion_id", conversacionId)
+        .in("herramienta", ["holded_proponer_accion", "holded_proponer_operacion"]).not("tarjeta_id", "is", null)
+        .order("created_at", { ascending: false }).limit(20)) ?? []).map((x: { tarjeta_id: string }) => x.tarjeta_id);
+      if (!ids.length) return [];
+      // RLS: solo el rol admin ve holded_acciones; a los demás les sale vacío.
+      const filas = ok(await c.from("holded_acciones").select("id, estado, tipo, descripcion, expira_at").in("id", ids)) ?? [];
+      return filas.map((a: { id: string; estado: string; tipo: string; descripcion: string | null; expira_at: string }) =>
+        ({ id: a.id, estado: a.estado, expira_at: a.expira_at,
+           titulo: a.descripcion || (a.tipo === "aprobar_tickets_venta" ? "Aprobar tickets de venta" : "Operación en Holded") }));
+    },
     async conversacionPropia(id, authUserId) {
       const d = ok(await c.from("agente_conversaciones").select("id").eq("id", id).eq("auth_user_id", authUserId).maybeSingle());
       return !!d;
@@ -109,7 +120,7 @@ function db(jwt: string): Db {
       try { cuerpo = await res.json(); } catch { /* sin JSON */ }
       if (res.status === 200 && accion) {
         return cuerpo.ok === true
-          ? { ok: true, datos: { propuesta: cuerpo.propuesta, nota: "Propuesta creada, NO ejecutada: la aprueba o rechaza un administrador en Acciones." } }
+          ? { ok: true, datos: { propuesta: cuerpo.propuesta, nota: "Propuesta creada, NO ejecutada: sale como tarjeta en el chat. Solo un usuario con rol admin la aprueba o la rechaza, en la tarjeta o en Acciones. No digas que está hecha." } }
           : { ok: false, codigo: String(cuerpo.codigo ?? ""), mensaje: String(cuerpo.mensaje ?? "No se ha podido preparar la propuesta.") };
       }
       if (res.status === 200) return cuerpo as RespuestaHolded;

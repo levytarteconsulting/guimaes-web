@@ -265,7 +265,8 @@ export function markdown(texto) {
 // muestra una sola vez; si la siguiente es distinta, se marca sin respuesta.
 export const AVISO_SIN_RESPUESTA = "Esta pregunta se quedó sin respuesta.";
 // propuestas: [{ id, created_at, clase? }] de agente_propuestas (y de
-// agente_correos, con clase "correo"). Cada tarjeta va en la respuesta a la
+// agente_correos, con clase "correo", y acciones de Holded, con clase
+// "accion"). Cada tarjeta va en la respuesta a la
 // última pregunta hecha antes de crearla (filas con created_at).
 export function burbujasDeHistorial(filas, propuestas = []) {
   const out = [];
@@ -294,9 +295,8 @@ export function burbujasDeHistorial(filas, propuestas = []) {
     const destino = i >= 0 && out[i + 1] && out[i + 1].rol === "assistant" ? out[i + 1] : null;
     if (!destino) continue;
     if (!porBurbuja.has(destino)) porBurbuja.set(destino, []);
-    porBurbuja.get(destino).push(p.clase === "correo"
-      ? { tipo: "herramienta", id: "correo-" + p.id, nombre: "", estado: "fin", correo: p.id }
-      : { tipo: "herramienta", id: "propuesta-" + p.id, nombre: "", estado: "fin", propuesta: p.id });
+    const clave = p.clase === "correo" ? "correo" : p.clase === "accion" ? "accion" : "propuesta";
+    porBurbuja.get(destino).push({ tipo: "herramienta", id: clave + "-" + p.id, nombre: "", estado: "fin", [clave]: p.id });
   }
   for (const [b, partes] of porBurbuja) b.partes = [...partes, ...b.partes];
   return out;
@@ -313,11 +313,13 @@ export function anotarHerramienta(partes, ev) {
   const i = partes.findIndex((p) => p.tipo === "herramienta" && p.id === ev.id);
   if (i === -1) {
     return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error,
-                         ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}) }];
+                         ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}),
+                         ...(ev.accion ? { accion: ev.accion } : {}) }];
   }
   const copia = [...partes];
   copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error,
-               ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}) };
+               ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}),
+               ...(ev.accion ? { accion: ev.accion } : {}) };
   return copia;
 }
 

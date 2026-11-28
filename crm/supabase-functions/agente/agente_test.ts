@@ -41,6 +41,8 @@ class FakeDb implements Db {
   async propuestas(_conv: string) { return this.propuestasConv; }
   correosConv: { id: string; resumen: string; estado: string; expira_at: string }[] = [];
   async correos(_conv: string) { return this.correosConv; }
+  accionesConv: { id: string; estado: string; titulo: string; expira_at: string }[] = [];
+  async accionesHolded(_conv: string) { return this.accionesConv; }
   async conversacionPropia(id: string, uid: string) { return this.convs.some((c) => c.id === id && c.auth_user_id === uid); }
   async mensajes(id: string): Promise<MensajeGuardado[]> {
     return this.msgs.filter((m) => m.conversacion_id === id).sort((a, b) => a.orden - b.orden)
@@ -903,4 +905,39 @@ test("proponer_correo: el contexto dice cómo han quedado los correos; las instr
   assert.match(s, /solo un usuario con rol admin lo envía/);
   assert.match(s, /NUNCA inventes ni completes una dirección/);
   assert.match(s, /NUNCA digas que se ha enviado/);
+});
+
+// ================================================================= tarjetas de Holded en el chat
+test("holded_proponer_*: el evento lleva la acción y la llamada guarda tarjeta_id (también propuestas y correos)", async () => {
+  const A = "a1000000-0000-0000-0000-000000000001";
+  const db = new FakeDb();
+  db.holdedRespuesta = async () => ({ ok: true, datos: { propuesta: { id: A, estado: "propuesta" }, nota: "x" } });
+  db.rpcRespuesta = async (n) => n === "agente_proponer"
+    ? { id: "p1000000-0000-0000-0000-000000000001", resumen: "r", datos: {}, antes: null, coincidencias: [], confirmacion: null } : {};
+  const u1 = usar("holded_proponer_accion", { empresa_id: E1, tipo: "aprobar_tickets_venta", max_documentos: 5 });
+  const u2 = usar("proponer_nota", { body: "Hola", contact_id: E1 });
+  const u3 = usar("holded_facturas", { empresa_id: E1, tipo: "emitidas", desde: "2026-01-01", hasta: "2026-02-01" });
+  const modelo = new FakeModelo([respuesta([u1, u2, u3], "tool_use"), fin("Revisa las tarjetas.")]);
+  const { h } = montar({ db, modelo });
+  const ev = await eventos(await h(peticion({ pregunta: "Propón aprobar los tickets" })));
+  const finDeU = (id: string) => ev.find((e) => e.evento === "herramienta" && e.datos.id === id && e.datos.estado === "fin")!.datos;
+  assert.equal(finDeU(u1.id).accion, A);
+  assert.equal(finDeU(u3.id).accion, undefined, "una consulta no es una tarjeta");
+  const t = Object.fromEntries(db.llamadas.map((l) => [l.tool_use_id, l.tarjeta_id ?? null]));
+  assert.deepEqual(t, { [u1.id]: A, [u2.id]: "p1000000-0000-0000-0000-000000000001", [u3.id]: null });
+});
+
+test("holded_proponer_*: el contexto trae el estado de las propuestas de Holded; las instrucciones, la tarjeta", async () => {
+  const db = new FakeDb();
+  const conv = await db.crearConversacion("t", "m");
+  db.accionesConv = [{ id: "a1", estado: "completada", titulo: "Crear el contacto X", expira_at: new Date(0).toISOString() },
+                     { id: "a2", estado: "propuesta", titulo: "Borrar la factura Y", expira_at: new Date(0).toISOString() }];
+  const { h, modelo } = montar({ db });
+  await eventos(await h(peticion({ pregunta: "¿Se hizo?", conversacion_id: conv })));
+  const ctx = JSON.stringify(modelo.llamadas[0].messages.at(-1));
+  assert.match(ctx, /a1 «Crear el contacto X»: completada/);
+  assert.match(ctx, /a2 «Borrar la factura Y»: caducada/);
+  const s = construirSistema([]);
+  assert.match(s, /en la \\?s*tarjeta que sale en el chat|tarjeta que sale en el chat/);
+  assert.match(s, /CONFIRMAR/);
 });

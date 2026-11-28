@@ -309,3 +309,15 @@ test("correos: listas de emails, estado (caducado) y datos para editar", () => {
   assert.deepEqual(datosCorreo(c, { para: "a@x.invalid, b@x.invalid", asunto: "B", documentos: ["d2"] }),
     { para: ["a@x.invalid", "b@x.invalid"], cc: [], cco: [], asunto: "B", texto: "T", documentos: ["d2"], contact_id: "c1", empresa_id: "e1" });
 });
+
+test("acciones de Holded: el evento de fin lleva la acción; al reabrir, su tarjeta va en la respuesta", () => {
+  let partes = anotarHerramienta([], { id: "t1", nombre: "holded_proponer_operacion", estado: "inicio" });
+  partes = anotarHerramienta(partes, { id: "t1", nombre: "holded_proponer_operacion", estado: "fin", accion: ID });
+  assert.equal(partes[0].accion, ID);
+  const filas = [
+    { orden: 0, rol: "user", tipo: "pregunta", texto: "uno", created_at: "2026-11-28T10:00:00Z" },
+    { orden: 1, rol: "assistant", tipo: "modelo", texto: "r1", created_at: "2026-11-28T10:00:09Z" },
+  ];
+  const b = burbujasDeHistorial(filas, [{ id: "a1", created_at: "2026-11-28T10:00:04Z", clase: "accion" }]);
+  assert.deepEqual(b[1].partes.map((p) => p.accion || p.texto), ["a1", "r1"]);
+});

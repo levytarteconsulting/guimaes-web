@@ -13,7 +13,8 @@ import { TarjetaCorreo } from "./agente.jsx";
    (aprobación o automática con límites). Ver crm/supabase-holded-acciones.sql
    y crm/supabase-holded-operaciones.sql.
    Arriba, los correos que ha redactado el asistente (agente_correos) y
-   esperan a que un administrador los revise y los envíe. */
+   esperan a que un administrador los revise y los envíe. TarjetaAccion es
+   la misma propuesta en pequeño, para el chat del asistente. */
 const { useState: aState, useEffect: aEffect, useMemo: aMemo } = React;
 
 const TIPOS = { aprobar_tickets_venta: "Aprobar tickets de venta", operacion: "Operación en Holded" };
@@ -61,6 +62,63 @@ function Barra({ p }) {
     <div style={{ width: pct(p.ok), background: "var(--ok, #16a34a)" }} />
     <div style={{ width: pct(p.error), background: "var(--danger, #dc2626)" }} />
     <div style={{ width: pct(p.omitido), background: "var(--muted, #9ca3af)" }} />
+  </div>;
+}
+
+// ---------------------------------------------------------------- tarjeta en el chat del asistente
+// La misma propuesta que en Detalle, en pequeño: resumen, muestra, avisos y
+// Aprobar / Rechazar con los mismos diálogos (y reglas: las aplica
+// holded_acciones_aprobar en la base de datos). Sin rol admin, la RLS no deja
+// leer la propuesta y la tarjeta solo dice que la revisa un administrador.
+export function TarjetaAccion({ id, onNav }) {
+  const [a, setA] = aState(undefined);
+  const [muestra, setMuestra] = aState([]);
+  const [prog, setProg] = aState(null);
+  const [modal, setModal] = aState("");
+  const [busy, setBusy] = aState(false);
+  const [msg, setMsg] = aState("");
+  const cargar = async () => {
+    const r = await Auth.client.from("holded_acciones").select(COLUMNAS + ", muestra").eq("id", id).maybeSingle();
+    if (r.error || !r.data) { setA(null); return; }
+    const { muestra: m, ...resto } = r.data;
+    setA(resto); setMuestra(m || []);
+    if (!["propuesta", "rechazada"].includes(resto.estado)) { try { setProg(await rpc("holded_acciones_progreso", { p_accion: id })); } catch (e) { /* sin permiso */ } }
+  };
+  aEffect(() => { cargar(); }, [id]);
+  aEffect(() => { if (!a || !viva(a)) return; const t = setInterval(cargar, 5000); return () => clearInterval(t); }, [a && a.estado]);
+  const hacer = async (fn, args, ok) => {
+    setBusy(true); setMsg("");
+    try { await rpc(fn, { p_accion: id, ...args }); setMsg(ok); setModal(""); await cargar(); }
+    catch (e) { setMsg("No se pudo: " + errorTexto(e)); }
+    setBusy(false);
+  };
+  if (a === undefined) return <div className="ag-card ag-card--carga">Cargando la propuesta de Holded…</div>;
+  if (a === null) return <div className="ag-card"><div className="ag-card__cab"><b>Propuesta de Holded</b><span className="ag-card__estado">Pendiente</span></div>
+    <div className="ag-card__nota">La revisa y la aprueba un administrador, aquí en el chat o en Acciones.</div></div>;
+  const r = a.resumen || {};
+  const clase = caducada(a) || ["rechazada", "cancelada"].includes(a.estado) ? "cancelada" : a.estado === "completada" ? "confirmada" : "pendiente";
+  const datos = esOp(a)
+    ? [["Petición", `${r.metodo || ""} ${r.ruta || ""}`], ["Elementos", r.documentos ?? "—"]]
+    : [["Documentos", r.documentos ?? "—"], ["Fechas", `${fmtDia(r.desde)} – ${fmtDia(r.hasta)}`], ["Total", r.total != null ? eur(r.total, r.moneda) : "—"], ["Excluidos", r.excluidos ?? 0]];
+  return <div className={"ag-card ag-card--" + clase + (esOp(a) && a.riesgo === "alto" ? " ag-card--borrar" : "")}>
+    <div className="ag-card__cab"><b>{titulo(a)} · {nombreEmpresa(a.empresa_id)}</b><span><Estado a={a} /> {esOp(a) && <Riesgo r={a.riesgo} />}</span></div>
+    <table className="ag-card__tabla"><tbody>{datos.map(([k, v]) => <tr key={k}><th>{k}</th><td className="mono">{v}</td></tr>)}</tbody></table>
+    {(a.avisos || []).length > 0 && <div className="ag-card__dup"><b>Avisos:</b><ul>{a.avisos.map((x, i) => <li key={i} style={{ color: /^⚠/.test(x) ? "var(--danger)" : undefined }}>{x}</li>)}</ul></div>}
+    {!esOp(a) && muestra.length > 0 && <details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>Muestra ({muestra.length})</summary>
+      <table className="ag-card__tabla"><tbody>{muestra.slice(0, 8).map((d) => <tr key={d.id}><td className="mono">{fmtDia(d.fecha)}</td><td>{d.contacto || "—"}</td><td className="mono" style={{ textAlign: "right" }}>{eur(d.total, r.moneda)}</td></tr>)}</tbody></table></details>}
+    {esOp(a) && <div style={{ marginTop: 8 }}><Peticiones a={{ ...a, estado: "cerrada" }} /></div>}
+    {prog && prog.total > 0 && <div style={{ marginTop: 8 }}><Barra p={prog} /><div className="mono" style={{ fontSize: 12 }}>{prog.ok} hechos · {prog.error} con error{prog.desconocido ? ` · ${prog.desconocido} sin respuesta` : ""} · {prog.pendiente + prog.en_proceso} pendientes de {prog.total}</div></div>}
+    {a.motivo_estado && <div className="ag-card__nota">Motivo: {a.motivo_estado}</div>}
+    {msg && <div className={"ag-aviso" + (/^No se pudo/.test(msg) ? " ag-aviso--err" : "")} role="status">{msg}</div>}
+    <div className="ag-card__acc">
+      {a.estado === "propuesta" && !caducada(a) && <>
+        <button className={"btn btn--sm " + (esOp(a) && a.riesgo === "alto" ? "btn--danger" : "btn--primary")} disabled={busy} onClick={() => setModal("aprobar")}>Aprobar…</button>
+        <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => setModal("rechazar")}>Rechazar</button></>}
+      <button className="btn btn--sm btn--ghost" onClick={() => onNav({ name: "acciones", id })}>Ver en Acciones</button>
+    </div>
+    {caducada(a) && <div className="ag-card__nota">Ha caducado sin aprobarse: pídesela otra vez al asistente.</div>}
+    {modal === "aprobar" && <ModalAprobar a={a} busy={busy} onCancel={() => setModal("")} onOk={(n, t) => hacer("holded_acciones_aprobar", { p_confirmacion: n, p_texto: t }, "Aprobada: empieza en menos de un minuto.")} />}
+    {modal === "rechazar" && <ModalRechazar busy={busy} onCancel={() => setModal("")} onOk={(m) => hacer("holded_acciones_rechazar", { p_motivo: m }, "Propuesta rechazada.")} />}
   </div>;
 }
 
