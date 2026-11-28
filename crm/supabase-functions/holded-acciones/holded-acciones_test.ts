@@ -425,3 +425,11 @@ Deno.test("programadas: sin tickets cierra la noche; con 429 no la cierra; con e
   assertMatch(reg.args.p_mensaje, /^Parada en la tanda 1: Holded rechaza la clave/);
   sinClave(b.rpcs);
 });
+
+Deno.test("programadas: si Holded no responde (red o tiempo), no cierra la noche y se reintenta", async () => {
+  const b = base({ turnos: [{ empresa_id: EMP, tipo: "aprobar_tickets_venta", hasta: "2026-11-28", tanda: 1 }] });
+  await montar(holded(() => { throw new Error("timeout"); }), b).pedir({ accion: "programadas" }, { hook: CRON });
+  const reg = b.rpcs.find((x) => x.fn === "holded_programada_registrar")!;
+  assertEquals([reg.args.p_accion, reg.args.p_cerrar], [null, false]);
+  assertMatch(reg.args.p_mensaje, /no ha respondido a tiempo; se reintenta/);
+});

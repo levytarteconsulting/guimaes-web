@@ -87,7 +87,8 @@ function firma(d: Doc): string {
   return JSON.stringify([dia(d.date), d.contact_id ?? txt(d.contact_name), cent(d.total), txt(d.description, 500), d.lines ?? null]);
 }
 
-export async function construir(clave: string, p: Params, f: Fetch, cupoAccionesRestante: number | null = null): Promise<Propuesta> {
+export async function construir(clave: string, p: Params, f: Fetch, cupoAccionesRestante: number | null = null,
+                                timeoutMs = 15_000): Promise<Propuesta> {
   let llamadas = 0;
   const todos: Doc[] = [];
   let cursor: string | undefined;
@@ -97,12 +98,13 @@ export async function construir(clave: string, p: Params, f: Fetch, cupoAcciones
     const r = await leer(clave, "/sales-receipts", {
       approval_status: "draft", sort: "date", limit: POR_PAGINA, cursor,
       start_date: p.desde ? medianocheMadrid(p.desde) : undefined, end_date: p.hasta ? finDiaMadrid(p.hasta) : undefined,
-    }, f);
+    }, f, timeoutMs);
     if (r.status === 401) throw new ErrorPropuesta("401", "Holded rechaza la clave de esta empresa (401).");
     if (r.status === 403) throw new ErrorPropuesta("403", "La clave de Holded de esta empresa no tiene permiso para leer tickets de venta (403).");
     if (r.status === 429) throw new ErrorPropuesta("429", r.ventana === "month"
       ? "Holded dice que esta cuenta ha agotado su cupo mensual de la API."
       : "Holded limita las llamadas por minuto de esta cuenta; inténtalo en un minuto.");
+    if (r.status === 0) throw new ErrorPropuesta("sin_respuesta", "Holded no ha respondido a tiempo al listar los tickets.");
     if (r.status < 200 || r.status >= 300) throw new ErrorPropuesta(String(r.status), `Holded ha respondido con un error (${r.status}) al listar los tickets.`);
     const d = (r.datos ?? {}) as Record<string, unknown>;
     const items = (Array.isArray(d.items) ? d.items : []) as Doc[];

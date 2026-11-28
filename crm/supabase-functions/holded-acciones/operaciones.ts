@@ -95,8 +95,8 @@ export function leerDocumento(clave: string, ruta: string, f: Fetch) {
 }
 
 /** Lectura (solo las de LECTURAS). */
-export function leer(clave: string, ruta: "/sales-receipts" | "/usage", params: Record<string, string | number | undefined>, f: Fetch) {
-  return holdedGet(clave, ruta, params, { fetch: f, timeoutMs: 15_000 });
+export function leer(clave: string, ruta: "/sales-receipts" | "/usage", params: Record<string, string | number | undefined>, f: Fetch, timeoutMs = 15_000) {
+  return holdedGet(clave, ruta, params, { fetch: f, timeoutMs });
 }
 
 /** Mensaje corto de un error de Holded, sin nada con forma de clave. */
