@@ -11,6 +11,7 @@ import {
 } from "./agente.ts";
 import type { Db, RespuestaHolded, MensajeGuardado, Modelo, NuevaLlamada, NuevoMensaje, ParamsModelo, StreamModelo } from "./agente.ts";
 import { esHolded, HERRAMIENTAS, HERRAMIENTAS_API, type LlamadaHolded, validarEntrada } from "./herramientas.ts";
+import { construirSistema } from "./sistema.ts";
 import { ESTADOS, TIPOS, TIPOS_CONTACTO, validar as validarProxy } from "../holded-proxy/consultas.ts";
 import { ETAPAS, SERVICIOS } from "../_shared/catalogos.ts";
 
@@ -35,6 +36,9 @@ class FakeDb implements Db {
   async esUsuarioCrm() { return this.esCrm; }
   async preguntasDesde(_uid: string, desde: string) { this.desdePedido = desde; return this.preguntasHoy; }
   async admins() { return [{ id: "a1", nombre: "Ana", rol: "admin", activo: true }]; }
+  async yo(_uid: string) { return { id: "a1", nombre: "Ana", rol: "admin" }; }
+  propuestasConv: { id: string; tipo: string; resumen: string; estado: string; resultado_id: string | null; expira_at: string }[] = [];
+  async propuestas(_conv: string) { return this.propuestasConv; }
   async conversacionPropia(id: string, uid: string) { return this.convs.some((c) => c.id === id && c.auth_user_id === uid); }
   async mensajes(id: string): Promise<MensajeGuardado[]> {
     return this.msgs.filter((m) => m.conversacion_id === id).sort((a, b) => a.orden - b.orden)
@@ -296,7 +300,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 19);   // 12 del CRM + 4 consultas de Holded + proponer acción/operación + documentación
+  assert.equal(params.tools!.length, 27);   // 12 + buscar_duplicados + 7 proponer_* del CRM; 4 consultas, 2 propuestas y documentación de Holded
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -546,14 +550,17 @@ test("si no se puede escribir la auditoría, no se llama al modelo", async () =>
 });
 
 // ================================================================= contratos
-test("las herramientas coinciden con las firmas de las RPC de crm/supabase-agente.sql", () => {
+test("las herramientas coinciden con las firmas de las RPC de crm/supabase-agente.sql (y buscar_duplicados)", () => {
   const sql = fs.readFileSync(new URL("../../supabase-agente.sql", import.meta.url), "utf8");
+  const esc = fs.readFileSync(new URL("../../supabase-agente-escritura.sql", import.meta.url), "utf8");
   const firmas = new Map<string, string[]>();
   for (const m of sql.matchAll(/create function public\.(agente_[a-z_]+)\(([^)]*)\)\s*returns jsonb/g)) {
     firmas.set(m[1], m[2].split(",").map((a) => a.trim().split(/\s+/)[0]).filter(Boolean));
   }
   assert.equal(firmas.size, 12);
-  const delCrm = HERRAMIENTAS.filter((h) => !esHolded(h.name));
+  const dup = /create function public\.agente_buscar_duplicados\(([^)]*)\)/.exec(esc)!;
+  firmas.set("agente_buscar_duplicados", dup[1].split(",").map((a) => a.trim().split(/\s+/)[0]).filter(Boolean));
+  const delCrm = HERRAMIENTAS.filter((h) => !esHolded(h.name) && !h.name.startsWith("proponer_"));
   assert.deepEqual([...firmas.keys()].sort(), delCrm.map((h) => `agente_${h.name}`).sort());
   for (const h of delCrm) {
     assert.deepEqual(Object.keys(h.input_schema.properties).map((k) => `p_${k}`).sort(), [...firmas.get(`agente_${h.name}`)!].sort(), h.name);
@@ -745,4 +752,92 @@ test("Documentación: temas, un tema con campos obligatorios y ejemplos, una ope
   assert.ok((consultarDocumentacion({ tema: "presupuesto" }) as Msg).operaciones?.length || (consultarDocumentacion({ tema: "presupuesto" }) as Msg).tema);
   assert.match((consultarDocumentacion({ operacion: "borrar_todo" }) as Msg).error, /No hay ninguna operación/);
   assert.deepEqual(validarEntrada("holded_documentacion", { tema: "Facturas" }), { ok: true, local: "documentacion", args: { tema: "Facturas" } });
+});
+
+// ================================================================= escrituras en el CRM (proponer_*)
+test("proponer_*: cada herramienta se traduce a agente_proponer(tipo, registro, datos); sin id = crear", () => {
+  const C = "c1000000-0000-0000-0000-000000000001", E = "e1000000-0000-0000-0000-000000000001";
+  const casos: [string, Msg, Msg][] = [
+    ["proponer_empresa", { razon_social: "Inventada SL", cif: "B1" }, { tipo: "crear_empresa", registro: null, datos: { razon_social: "Inventada SL", cif: "B1" } }],
+    ["proponer_empresa", { empresa_id: E.toUpperCase(), city: "" }, { tipo: "modificar_empresa", registro: E, datos: { city: "" } }],
+    ["proponer_contacto", { full_name: "Ana", empresa_id: E }, { tipo: "crear_contacto", registro: null, datos: { full_name: "Ana", empresa_id: E } }],
+    ["proponer_contacto", { contact_id: C, phone: "600" }, { tipo: "modificar_contacto", registro: C, datos: { phone: "600" } }],
+    ["proponer_empresa_de_contacto", { contact_id: C, empresa_id: E, accion: "principal" }, { tipo: "vincular_empresa", registro: C, datos: { empresa_id: E, principal: true } }],
+    ["proponer_empresa_de_contacto", { contact_id: C, empresa_id: E, accion: "quitar" }, { tipo: "desvincular_empresa", registro: C, datos: { empresa_id: E } }],
+    ["proponer_negocio", { title: "X", contact_id: C, amount: 1500.5 }, { tipo: "crear_deal", registro: null, datos: { title: "X", contact_id: C, amount: 1500.5 } }],
+    ["proponer_tarea", { tarea_id: C, assigned_to: "a1" }, { tipo: "modificar_tarea", registro: C, datos: { assigned_to: "a1" } }],
+    ["proponer_nota", { body: "Hola", contact_id: C }, { tipo: "crear_nota", registro: null, datos: { body: "Hola", contact_id: C } }],
+    ["proponer_borrado", { tipo: "negocio", id: C }, { tipo: "borrar_deal", registro: C, datos: {} }],
+  ];
+  for (const [h, entrada, esperado] of casos) assert.deepEqual(validarEntrada(h, entrada), { ok: true, propuesta: esperado }, h);
+  assert.equal(validarEntrada("proponer_contacto", { contact_id: C, empresa_id: E }).ok, false, "cambiar empresas: otra herramienta");
+  assert.equal(validarEntrada("proponer_empresa", { empresa_id: E }).ok, false, "modificar sin cambios");
+  assert.equal(validarEntrada("proponer_negocio", { title: "X", amount: "mucho" }).ok, false);
+  assert.equal(validarEntrada("proponer_borrado", { tipo: "empresa", id: E }).ok, false, "no se borran empresas");
+  // Los tipos coinciden con los que acepta la base de datos.
+  const esc = fs.readFileSync(new URL("../../supabase-agente-escritura.sql", import.meta.url), "utf8");
+  const tipos = /tipo\s+text not null check \(tipo in \(([^)]*)\)\)/.exec(esc)![1].match(/'([a-z_]+)'/g)!.map((x) => x.slice(1, -1));
+  for (const [h, entrada] of casos) assert.ok(tipos.includes((validarEntrada(h, entrada) as Msg).propuesta.tipo), h);
+  assert.equal(tipos.length, 15);
+});
+
+test("proponer_*: va a agente_proponer con la conversación y el tool_use_id de la función; el evento lleva la propuesta", async () => {
+  const db = new FakeDb();
+  db.rpcRespuesta = async (nombre) => nombre === "agente_proponer"
+    ? { id: "p1000000-0000-0000-0000-000000000001", resumen: "Crear la empresa «Inventada SL»", datos: { razon_social: "Inventada SL" },
+        antes: null, coincidencias: [{ tipo: "empresa", id: "e1", nombre: "Inventada", motivo: "nombre parecido" }], confirmacion: null }
+    : {};
+  const malo = usar("proponer_empresa", { razon_social: "Inventada SL", conversacion: "x" });
+  const bueno = usar("proponer_empresa", { razon_social: "Inventada SL" });
+  const modelo = new FakeModelo([respuesta([malo], "tool_use"), respuesta([bueno], "tool_use"), fin("Revisa la tarjeta.")]);
+  const { h } = montar({ db, modelo });
+  const ev = await eventos(await h(peticion({ pregunta: "Crea la empresa Inventada SL" })));
+  const llamadas = db.rpcs.filter((r) => r.nombre === "agente_proponer");
+  assert.equal(llamadas.length, 1, "un parámetro inventado (conversacion) no llega a la base de datos");
+  assert.equal(llamadas[0].args.p_tool_use_id, bueno.id);
+  assert.equal(llamadas[0].args.p_conversacion, db.convs[0].id);
+  assert.equal(llamadas[0].args.p_tipo, "crear_empresa");
+  const f = ev.find((e) => e.evento === "herramienta" && e.datos.id === bueno.id && e.datos.estado === "fin")!;
+  assert.equal(f.datos.propuesta, "p1000000-0000-0000-0000-000000000001");
+  const resultado = JSON.stringify(modelo.llamadas[2].messages.at(-1));
+  assert.match(resultado, /NO está hecho/);
+  assert.match(resultado, /posibles duplicados/);
+});
+
+test("proponer_*: el contexto de la pregunta dice quién habla y cómo han quedado las propuestas", async () => {
+  const db = new FakeDb();
+  const conv = await db.crearConversacion("t", "m");
+  db.propuestasConv = [
+    { id: "p1", tipo: "crear_empresa", resumen: "Crear la empresa «A»", estado: "confirmada", resultado_id: "e9", expira_at: new Date(Date.now() + 1e7).toISOString() },
+    { id: "p2", tipo: "crear_tarea", resumen: "Crear la tarea «B»", estado: "pendiente", resultado_id: null, expira_at: new Date(0).toISOString() },
+  ];
+  const { h, modelo } = montar({ db });
+  await eventos(await h(peticion({ pregunta: "¿Se creó?", conversacion_id: conv })));
+  const ctx = JSON.stringify(modelo.llamadas[0].messages.at(-1));
+  assert.match(ctx, /Te habla Ana \(id a1, rol admin\)/);
+  assert.match(ctx, /p1 «Crear la empresa «A»»: confirmada \(registro e9\)/);
+  assert.match(ctx, /p2 «Crear la tarea «B»»: caducada/);
+});
+
+test("proponer_*: 42501 y GU010 de la base de datos se le explican al modelo", async () => {
+  for (const [err, re] of [[{ code: "42501", message: "x" }, /No tienes permiso para hacer este cambio/],
+                           [{ code: "GU010", message: "El contacto no existe o no tienes acceso" }, /no existe o no tienes acceso/]] as const) {
+    const db = new FakeDb();
+    db.rpcRespuesta = async () => { throw err; };
+    const modelo = new FakeModelo([respuesta([usar("proponer_borrado", { tipo: "nota", id: E1 })], "tool_use"), fin("Vale.")]);
+    const { h } = montar({ db, modelo });
+    await eventos(await h(peticion({ pregunta: "Borra la nota" })));
+    assert.match(JSON.stringify(modelo.llamadas[1].messages.at(-1)), re);
+  }
+});
+
+test("instrucciones: ya no dicen que solo consulta; proponer, preguntar, duplicados y no inventar", () => {
+  const s = construirSistema([]);
+  assert.doesNotMatch(s, /Solo puedes CONSULTAR/);
+  assert.match(s, /PROPONER cambios en el CRM/);
+  assert.match(s, /PREGUNTA antes de proponer/);
+  assert.match(s, /buscar_duplicados/);
+  assert.match(s, /NUNCA inventes datos/);
+  assert.match(s, /NUNCA digas que algo .*está creado/s);
+  assert.match(s, /No puedes borrar empresas/);
 });

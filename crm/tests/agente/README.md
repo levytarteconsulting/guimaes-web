@@ -12,13 +12,20 @@ Comprueban la migración del agente (bloques 1A, 1B y 1C) en un Postgres en memo
 - Retención: borra solo lo de más de 90 días.
 - `crm/supabase-agente-archivar.sql` (2A/2B/2C): archivar, desarchivar o renombrar no mueve
   `updated_at`; un mensaje nuevo sí; las archivadas se borran igual a los 90 días.
+- `agente-escritura.test.mjs`: `crm/supabase-agente-escritura.sql` (10A/10B/10C), con datos
+  inventados. Proponer no escribe; solo confirma quien propuso, una vez y antes de 24 h;
+  normaliza como la interfaz (espacios, CIF, importes «1.234,50», fecha sola = 09:00 Madrid);
+  duplicados por CIF, email, teléfono, DNI y nombre; validaciones (`22023`/`GU010`); contacto
+  con empresa nueva; lo editado se valida otra vez; empresas del contacto (principal única);
+  negocios, tareas (hecha = archivada), notas; borrar exige BORRAR y usa
+  `admin_borrar_contacto`; RLS y auditoría que solo crece.
 
 ## Ejecutar
 
 ```sh
 cd crm/tests/agente
 npm install
-npm test            # o: node agente-sql.test.mjs [ruta/a/otra-migracion.sql]
+npm test            # las dos; o: node agente-sql.test.mjs [ruta/a/otra-migracion.sql]
 ```
 
 Termina con `N/N ok` y código 0, o lista los `FALLO` y sale con 1.

@@ -60,6 +60,14 @@ function db(jwt: string): Db {
     async admins() {
       return ok(await c.from("admins").select("id, nombre, rol, activo").order("nombre")) ?? [];
     },
+    async yo(authUserId) {
+      return ok(await c.from("admins").select("id, nombre, rol").eq("auth_user_id", authUserId).maybeSingle()) as
+        { id: string; nombre: string; rol: string } | null;
+    },
+    async propuestas(conversacionId) {
+      return ok(await c.from("agente_propuestas").select("id, tipo, resumen, estado, resultado_id, expira_at")
+        .eq("conversacion_id", conversacionId).order("created_at", { ascending: false }).limit(20)) ?? [];
+    },
     async conversacionPropia(id, authUserId) {
       const d = ok(await c.from("agente_conversaciones").select("id").eq("id", id).eq("auth_user_id", authUserId).maybeSingle());
       return !!d;

@@ -225,3 +225,60 @@ test("historial normal: nunca dos burbujas de usuario seguidas", () => {
   assert.equal(b.length, 10);
   for (let i = 1; i < b.length; i++) assert.notEqual(b[i].rol, b[i - 1].rol);
 });
+
+/* ---------------- Tarjetas de propuesta ---------------- */
+import {
+  filasPropuesta, filasBorrado, datosEditados, destinoDeCambio, estadoPropuesta, tablaDeTipo, esBorrado,
+} from "../../agente-logica.js";
+
+test("propuestas: el evento de fin lleva la propuesta y la parte la conserva", () => {
+  let partes = anotarHerramienta([], { id: "t1", nombre: "proponer_empresa", estado: "inicio" });
+  partes = anotarHerramienta(partes, { id: "t1", nombre: "proponer_empresa", estado: "fin", propuesta: ID });
+  assert.equal(partes.length, 1);
+  assert.equal(partes[0].propuesta, ID);
+  assert.equal(etiquetaHerramienta("proponer_borrado"), "Preparando el borrado");
+});
+
+test("propuestas: al reabrir, cada tarjeta va en la respuesta a la última pregunta anterior", () => {
+  const filas = [
+    { orden: 0, rol: "user", tipo: "pregunta", texto: "uno", created_at: "2026-11-28T10:00:00Z" },
+    { orden: 1, rol: "assistant", tipo: "modelo", texto: "r1", created_at: "2026-11-28T10:00:05Z" },
+    { orden: 2, rol: "user", tipo: "pregunta", texto: "dos", created_at: "2026-11-28T11:00:00Z" },
+    { orden: 3, rol: "assistant", tipo: "modelo", texto: "r2", created_at: "2026-11-28T11:00:09Z" },
+  ];
+  const b = burbujasDeHistorial(filas, [{ id: "p2", created_at: "2026-11-28T11:00:03Z" }, { id: "p1", created_at: "2026-11-28T10:00:02Z" },
+                                        { id: "px", created_at: "2026-11-28T09:00:00Z" }]);
+  assert.deepEqual(b[1].partes.map((p) => p.propuesta || p.texto), ["p1", "r1"]);
+  assert.deepEqual(b[3].partes.map((p) => p.propuesta || p.texto), ["p2", "r2"]);
+  assert.equal(b.flatMap((x) => x.partes || []).some((p) => p.propuesta === "px"), false, "una anterior a todo no se pinta");
+  assert.deepEqual(burbujasDeHistorial(filas).map((x) => x.partes ? x.partes.length : null), [null, 1, null, 1], "sin propuestas, igual que antes");
+});
+
+test("propuestas: filas de la tarjeta (antes → quedará), empresa nueva desplegada, borrados", () => {
+  const f = filasPropuesta({ tipo: "modificar_contacto", datos: { phone: "611", city: null }, antes: { phone: "600", city: "Pozuelo" } });
+  assert.deepEqual(f.map((x) => [x.etiqueta, x.antes, x.nuevo, x.hay_antes]), [["Teléfono", "600", "611", true], ["Población", "Pozuelo", null, true]]);
+  const n = filasPropuesta({ tipo: "crear_contacto", datos: { full_name: "Ana", nueva_empresa: { razon_social: "X SL", cif: "B1" } } });
+  assert.deepEqual(n.map((x) => x.k), ["full_name", "nueva_empresa.razon_social", "nueva_empresa.cif"]);
+  assert.ok(n.every((x) => !x.hay_antes));
+  assert.deepEqual(filasBorrado({ antes: { nombre: "José", email: null, negocios_que_se_quedan: 1 } }),
+    [["Nombre", "José"], ["Negocios que se quedan, sin contacto", 1]]);
+  assert.ok(esBorrado("borrar_nota") && !esBorrado("crear_nota"));
+});
+
+test("propuestas: lo editado vuelve con la misma forma (empresa nueva anidada)", () => {
+  const o = { full_name: "Ana", nueva_empresa: { razon_social: "X SL", cif: "B1" } };
+  assert.deepEqual(datosEditados(o, { full_name: "Ana López", "nueva_empresa.cif": "B2" }),
+    { full_name: "Ana López", nueva_empresa: { razon_social: "X SL", cif: "B2" } });
+  assert.equal(o.full_name, "Ana", "no toca el original");
+});
+
+test("propuestas: destino tras confirmar y estado (caducada)", () => {
+  assert.deepEqual(destinoDeCambio({ tipo: "crear_empresa", tabla: "empresas", registro_id: ID }), { name: "empresa", id: ID });
+  assert.deepEqual(destinoDeCambio({ tipo: "vincular_empresa", tabla: "contacto_empresa", registro_id: "x", contact_id: ID }), { name: "contact", id: ID });
+  assert.equal(destinoDeCambio({ tipo: "borrar_deal", tabla: "deals", registro_id: ID }), null);
+  assert.equal(tablaDeTipo("vincular_empresa"), "contacto_empresa");
+  assert.equal(tablaDeTipo("crear_empresa"), "empresas");
+  assert.equal(tablaDeTipo("modificar_deal"), "deals");
+  assert.equal(estadoPropuesta({ estado: "pendiente", expira_at: "2000-01-01T00:00:00Z" }), "caducada");
+  assert.equal(estadoPropuesta({ estado: "confirmada", expira_at: "2000-01-01T00:00:00Z" }), "confirmada");
+});

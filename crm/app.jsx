@@ -3893,6 +3893,9 @@ function App(){
   const [,setUsuariosV]=uState(0);
   uEffect(()=>{ const f=()=>setUsuariosV(v=>v+1); window.addEventListener("crm:usuarios", f); return ()=>window.removeEventListener("crm:usuarios", f); }, []);
   const [view,setView]=uState(initialView); const [toast,fireToast]=useToast();
+  // Cambios confirmados desde el asistente (CRM.refrescarTrasAgente): repintar con los datos al día.
+  const [,setDatosTick]=uState(0);
+  uEffect(()=>{ const f=()=>setDatosTick(t=>t+1); window.addEventListener("crm:datos", f); return ()=>window.removeEventListener("crm:datos", f); },[]);
   const [booting,setBooting]=uState(true); const [recovery,setRecovery]=uState(false);
 
   uEffect(()=>{
