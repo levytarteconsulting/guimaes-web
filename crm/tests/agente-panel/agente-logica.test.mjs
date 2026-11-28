@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   crearLectorSSE, mensajeDeError, avisoDeFin, destinoCrm, urlExterna, contextoDeVista,
   enLinea, markdown, burbujasDeHistorial, anadirTexto, anotarHerramienta, etiquetaHerramienta,
+  textoEstado, estadoRobot, ejemplosBienvenida, MENSAJE_BIENVENIDA,
   idDocumento, idsDocumentos, estadoDocumento, AVISO_SIN_RESPUESTA,
 } from "../../agente-logica.js";
 
@@ -334,4 +335,49 @@ test("informes: el evento lleva el informe a la parte y el historial lo coloca e
   assert.equal(bs[1].partes[0].id, "informe-c1");
   assert.deepEqual(bs[1].partes[0].informe, inf);
   assert.equal(bs[1].partes[1].texto, "Listo.");
+});
+
+test("Guillermito: línea de estado con el paso real y la empresa de Holded", () => {
+  const nombre = (id) => (id === "e1" ? "MDF" : "");
+  let p = anotarHerramienta([], { id: "t1", nombre: "holded_facturas", estado: "inicio", empresa_id: "e1" });
+  assert.equal(textoEstado({ pendiente: true, partes: p }, nombre), "Consultando Holded de MDF…");
+  p = anotarHerramienta(p, { id: "t1", nombre: "holded_facturas", estado: "fin", filas: 3 });
+  assert.equal(textoEstado({ pendiente: true, partes: p }, nombre), "Pensando…");
+  p = anotarHerramienta(p, { id: "t2", nombre: "buscar", estado: "inicio" });
+  assert.equal(textoEstado({ pendiente: true, partes: p }, nombre), "Buscando en el CRM…");
+  p = anotarHerramienta(p, { id: "t3", nombre: "mostrar_informe", estado: "inicio" });
+  assert.equal(textoEstado({ pendiente: true, partes: p }, nombre), "Preparando el informe…");
+  assert.equal(textoEstado({ pendiente: true, partes: [{ tipo: "texto", texto: "Hola" }] }), "Escribiendo la respuesta…");
+  assert.equal(textoEstado({ pendiente: false, partes: p }), "");
+  assert.equal(etiquetaHerramienta("holded_proponer_accion", "MDF"), "Preparando la propuesta para Holded de MDF");
+  assert.equal(etiquetaHerramienta("buscar", "MDF"), "Buscando en el CRM");
+});
+
+test("Guillermito: estado del robot al terminar", () => {
+  assert.equal(estadoRobot([], true), "trabajando");
+  assert.equal(estadoRobot([{ rol: "user" }, { rol: "assistant", partes: [] }], false), "hecho");
+  assert.equal(estadoRobot([{ rol: "assistant", partes: [], error: "x" }], false), "error");
+  assert.equal(estadoRobot([], false), "reposo");
+});
+
+test("Guillermito: 6 ejemplos con nombres reales al azar; los de Holded solo con empresas conectadas", () => {
+  const datos = {
+    empresasHolded: [{ razon_social: "MDF SL" }],
+    contactos: [{ full_name: "Sin Correo", email: "" }, { full_name: "Ana Pérez", email: "a@x.es" }],
+    personas: [{ name: "Baja", activo: false }, { name: "Laura", activo: true }],
+  };
+  const e = ejemplosBienvenida(datos, () => 0.99);
+  assert.equal(e.length, 6);
+  assert.deepEqual(e.map((x) => x.texto), [
+    "Analiza la facturación de MDF SL este trimestre",
+    "Prepara un dashboard en PDF de facturación por cliente",
+    "Hazme un informe PDF de clientes activos y su cuota mensual",
+    "Aprueba los tickets pendientes de ayer de MDF SL",
+    "Redacta un correo a Ana Pérez sobre ",
+    "Crea una tarea para Laura: ",
+  ]);
+  const sinHolded = ejemplosBienvenida({ ...datos, empresasHolded: [] });
+  assert.equal(sinHolded.length, 4);
+  assert.ok(sinHolded.every((x) => !/MDF/.test(x.texto)));
+  assert.match(MENSAJE_BIENVENIDA, /^Hola, soy Guillermito\. Trabajo con el CRM, Holded y el correo de Guimaes, y preparo análisis, informes y dashboards en PDF\. ¿En qué te ayudo\?$/);
 });

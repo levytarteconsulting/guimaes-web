@@ -1002,3 +1002,23 @@ test("informe: las instrucciones piden datos de herramientas, fuente y no invent
   assert.match(s, /NUNCA inventes, estimes/);
   assert.match(s, /"fuente" dice de dónde salen/);
 });
+
+test("Guillermito: nombre, tuteo, humor solo en el saludo y sin inventar", () => {
+  const s = construirSistema([]);
+  assert.match(s, /^Eres Guillermito, el asistente de Guimaes/);
+  assert.match(s, /Tutea siempre/);
+  assert.match(s, /Humor, muy ligero y solo en un saludo/);
+  assert.match(s, /Nunca inventes datos/);
+});
+
+test("Guillermito: el evento de inicio lleva la empresa (solo si es un uuid) para la línea de estado", async () => {
+  const db = new FakeDb();
+  const emp = "11111111-2222-4333-8444-555555555555";
+  const u1 = usar("ficha_empresa", { empresa_id: emp.toUpperCase() });
+  const u2 = usar("buscar", { texto: "x", empresa_id: "no-es-uuid" });
+  const modelo = new FakeModelo([respuesta([u1, u2], "tool_use"), fin("Hecho.")]);
+  const ev = await eventos(await montar({ db, modelo }).h(peticion({ pregunta: "x" })));
+  const ini = (id: string) => ev.find((e) => e.evento === "herramienta" && e.datos.id === id && e.datos.estado === "inicio")!.datos;
+  assert.equal(ini(u1.id).empresa_id, emp);
+  assert.equal(ini(u2.id).empresa_id, undefined);
+});

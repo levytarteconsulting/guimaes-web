@@ -92,9 +92,71 @@ const NOMBRES_HERRAMIENTAS = {
   proponer_borrado: "Preparando el borrado",
   proponer_correo: "Redactando el correo",
   mostrar_informe: "Preparando el informe",
+  holded_facturas: "Consultando Holded",
+  holded_resumen: "Consultando Holded",
+  holded_contactos: "Consultando Holded",
+  holded_tesoreria: "Consultando Holded",
+  holded_documentacion: "Consultando la documentación de Holded",
+  holded_proponer_accion: "Preparando la propuesta para Holded",
+  holded_proponer_operacion: "Preparando la propuesta para Holded",
 };
-export function etiquetaHerramienta(nombre) {
-  return NOMBRES_HERRAMIENTAS[nombre] || "Consultando";
+export function etiquetaHerramienta(nombre, empresa) {
+  const base = NOMBRES_HERRAMIENTAS[nombre] || "Consultando";
+  // «Consultando Holded de MDF»: el nombre de la empresa sale del CRM (empresa_id del evento).
+  return empresa && /Holded$/.test(base) ? `${base} de ${empresa}` : base;
+}
+
+/* ---------------- Guillermito: estado y bienvenida ---------------- */
+export const NOMBRE_AGENTE = "Guillermito";
+export const MENSAJE_BIENVENIDA = "Hola, soy Guillermito. Trabajo con el CRM, Holded y el correo de Guimaes, y preparo análisis, " +
+  "informes y dashboards en PDF. ¿En qué te ayudo?";
+
+/** Línea de estado mientras trabaja: el paso en curso (la última herramienta sin terminar) o «Pensando». */
+export function textoEstado(burbuja, nombreEmpresa = () => "") {
+  if (!burbuja || !burbuja.pendiente) return "";
+  const partes = burbuja.partes || [];
+  for (let i = partes.length - 1; i >= 0; i--) {
+    const p = partes[i];
+    if (p.tipo === "herramienta" && p.estado === "inicio") return etiquetaHerramienta(p.nombre, p.empresa_id ? nombreEmpresa(p.empresa_id) : "") + "…";
+  }
+  return partes.some((p) => p.tipo === "texto" && p.texto.trim()) ? "Escribiendo la respuesta…" : "Pensando…";
+}
+
+/** Estado del robot de la cabecera según la última respuesta: trabajando, hecho o error (hecho/error duran poco). */
+export function estadoRobot(burbujas, enCurso) {
+  if (enCurso) return "trabajando";
+  const b = (burbujas || [])[burbujas.length - 1];
+  if (!b || b.rol !== "assistant") return "reposo";
+  return b.error ? "error" : "hecho";
+}
+
+const PLANTILLAS = [
+  { icono: "trend", clave: "holded", t: (x) => `Analiza la facturación de ${x} este trimestre` },
+  { icono: "download", t: () => "Prepara un dashboard en PDF de facturación por cliente" },
+  { icono: "users", t: () => "Hazme un informe PDF de clientes activos y su cuota mensual" },
+  { icono: "check", clave: "holded", t: (x) => `Aprueba los tickets pendientes de ayer de ${x}` },
+  { icono: "mail", clave: "contacto", t: (x) => `Redacta un correo a ${x} sobre ` },
+  { icono: "task", clave: "persona", t: (x) => `Crea una tarea para ${x}: ` },
+];
+const alAzar = (xs, azar) => (xs.length ? xs[Math.floor(azar() * xs.length) % xs.length] : null);
+/**
+ * Las 6 tarjetas de ejemplo de la bienvenida. Los nombres se eligen al azar entre datos reales del CRM:
+ * empresas con Holded conectado (análisis y tickets), contactos con email y personas del equipo activas.
+ * Si falta el dato que necesita una tarjeta, esa tarjeta no sale. El texto sin «…» final: se rellena, no se envía.
+ */
+export function ejemplosBienvenida({ empresasHolded = [], contactos = [], personas = [] } = {}, azar = Math.random) {
+  const fuentes = {
+    holded: empresasHolded.map((e) => (e && e.razon_social || "").trim()).filter(Boolean),
+    contacto: contactos.filter((c) => c && c.email && (c.full_name || "").trim()).map((c) => c.full_name.trim()),
+    persona: personas.filter((u) => u && u.activo !== false && (u.name || "").trim()).map((u) => u.name.trim()),
+  };
+  const out = [];
+  for (const p of PLANTILLAS) {
+    if (!p.clave) { out.push({ icono: p.icono, texto: p.t() }); continue; }
+    const x = alAzar(fuentes[p.clave], azar);
+    if (x) out.push({ icono: p.icono, texto: p.t(x) });
+  }
+  return out;
 }
 
 /* ---------------- Enlaces ---------------- */
@@ -318,6 +380,7 @@ export function anotarHerramienta(partes, ev) {
   const i = partes.findIndex((p) => p.tipo === "herramienta" && p.id === ev.id);
   if (i === -1) {
     return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error,
+                         ...(ev.empresa_id ? { empresa_id: ev.empresa_id } : {}),
                          ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}),
                          ...(ev.accion ? { accion: ev.accion } : {}), ...(ev.informe ? { informe: ev.informe } : {}) }];
   }
