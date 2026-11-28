@@ -304,7 +304,7 @@ test("respuesta sin herramientas: eventos, auditoría y parámetros de la petici
   assert.equal("betas" in params, false);
   assert.deepEqual(params.output_config, { effort: "medium" });
   assert.deepEqual(params.cache_control, { type: "ephemeral" });
-  assert.equal(params.tools!.length, 28);   // 12 + buscar_duplicados + 7 proponer_* del CRM + proponer_correo; 4 consultas, 2 propuestas y documentación de Holded
+  assert.equal(params.tools!.length, 29);   // 12 + buscar_duplicados + 7 proponer_* + proponer_correo + mostrar_informe; 4 consultas, 2 propuestas y documentación de Holded
   assert.equal("thinking" in params, false);          // adaptativo por defecto en Sonnet 5.5 y Opus 5.5
   const sistema = (params.system as Msg[])[0].text as string;
   assert.doesNotMatch(sistema, /\d{4}-\d{2}-\d{2}|2026/);  // sin fechas en el sistema (caché estable)
@@ -564,7 +564,7 @@ test("las herramientas coinciden con las firmas de las RPC de crm/supabase-agent
   assert.equal(firmas.size, 12);
   const dup = /create function public\.agente_buscar_duplicados\(([^)]*)\)/.exec(esc)!;
   firmas.set("agente_buscar_duplicados", dup[1].split(",").map((a) => a.trim().split(/\s+/)[0]).filter(Boolean));
-  const delCrm = HERRAMIENTAS.filter((h) => !esHolded(h.name) && !h.name.startsWith("proponer_"));
+  const delCrm = HERRAMIENTAS.filter((h) => !esHolded(h.name) && !h.name.startsWith("proponer_") && h.name !== "mostrar_informe");
   assert.deepEqual([...firmas.keys()].sort(), delCrm.map((h) => `agente_${h.name}`).sort());
   for (const h of delCrm) {
     assert.deepEqual(Object.keys(h.input_schema.properties).map((k) => `p_${k}`).sort(), [...firmas.get(`agente_${h.name}`)!].sort(), h.name);
@@ -940,4 +940,65 @@ test("holded_proponer_*: el contexto trae el estado de las propuestas de Holded;
   const s = construirSistema([]);
   assert.match(s, /en la \\?s*tarjeta que sale en el chat|tarjeta que sale en el chat/);
   assert.match(s, /CONFIRMAR/);
+});
+
+// ================================================================= informes (mostrar_informe)
+import { validarInforme } from "./informe.ts";
+const INF = {
+  titulo: "Negocios por etapa", fuente: "CRM, negocios a 28/11/2026",
+  secciones: [
+    { tipo: "texto", texto: "Resumen\r\n de la cartera. " },
+    { tipo: "tabla", columnas: ["Etapa", "Nº", "Importe"], filas: [["Reunión", 3, 1200.5], ["Propuesta", 1, null]] },
+    { tipo: "grafico", grafico: { tipo: "barras", unidad: "€", etiquetas: ["Reunión", "Propuesta"], series: [{ nombre: "Importe", valores: [1200.5, 0] }] } },
+  ],
+};
+test("informe: valida y normaliza; rechaza lo que no cuadra", () => {
+  const r = validarInforme(structuredClone(INF));
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.equal((r.valor.secciones[0] as { texto: string }).texto, "Resumen\n de la cartera.");
+    assert.deepEqual((r.valor.secciones[1] as { filas: unknown[] }).filas, [["Reunión", 3, 1200.5], ["Propuesta", 1, null]]);
+  }
+  const malo = (cambio: (x: any) => void, re: RegExp) => { const x = structuredClone(INF) as any; cambio(x); const v = validarInforme(x); assert.ok(!v.ok && re.test(v.error), re.source + " → " + JSON.stringify(v)); };
+  malo((x) => delete x.fuente, /fuente/);
+  malo((x) => { x.secciones = []; }, /secciones/);
+  malo((x) => { x.secciones[1].filas[0].pop(); }, /3 celdas/);
+  malo((x) => { x.secciones[2].grafico.series[0].valores.push(1); }, /un valor por etiqueta/);
+  malo((x) => { x.secciones[2].grafico.series[0].valores[0] = "mil"; }, /números/);
+  malo((x) => { x.secciones[2].grafico.tipo = "radar"; }, /barras, lineas o tarta/);
+  malo((x) => { x.secciones[2].grafico.tipo = "tarta"; x.secciones[2].grafico.series[0].valores = [-1, 2]; }, /negativos/);
+  malo((x) => { x.secciones[2].grafico.tipo = "tarta"; x.secciones[2].grafico.series.push({ nombre: "b", valores: [1, 1] }); }, /una sola serie/);
+  malo((x) => { x.secciones[0].tipo = "imagen"; }, /texto, tabla o grafico/);
+  malo((x) => { x.secciones[1].filas = Array.from({ length: 201 }, () => ["a", 1, 2]); }, /200/);
+});
+
+test("informe: mostrar_informe no llama a nada, manda el informe en el evento y lo guarda normalizado en la llamada", async () => {
+  const db = new FakeDb();
+  const u = usar("mostrar_informe", structuredClone(INF));
+  const modelo = new FakeModelo([respuesta([u], "tool_use"), fin("Hecho.")]);
+  const { h } = montar({ db, modelo });
+  const ev = await eventos(await h(peticion({ pregunta: "Hazme un gráfico de negocios por etapa" })));
+  assert.equal(db.rpcs.length, 0);
+  const f = ev.find((e) => e.evento === "herramienta" && e.datos.id === u.id && e.datos.estado === "fin")!;
+  assert.equal(f.datos.informe.titulo, "Negocios por etapa");
+  assert.equal(f.datos.informe.secciones.length, 3);
+  const l = db.llamadas.find((x) => x.tool_use_id === u.id)!;
+  assert.equal((l.parametros as any).secciones[0].texto, "Resumen\n de la cartera.");
+  assert.match(JSON.stringify(modelo.llamadas[1].messages.at(-1)), /No repitas sus tablas/);
+  const api = HERRAMIENTAS_API.find((x) => x.name === "mostrar_informe")!;
+  assert.equal((api.input_schema as any).properties.secciones.type, "array");
+  // Un informe mal formado vuelve al modelo como error, sin evento de informe.
+  const db2 = new FakeDb();
+  const u2 = usar("mostrar_informe", { titulo: "x", fuente: "y", secciones: [{ tipo: "grafico", grafico: { tipo: "tarta", etiquetas: ["a"], series: [{ nombre: "s", valores: [0] }] } }] });
+  const m2 = new FakeModelo([respuesta([u2], "tool_use"), fin("Vale.")]);
+  const ev2 = await eventos(await montar({ db: db2, modelo: m2 }).h(peticion({ pregunta: "x" })));
+  assert.ok(ev2.every((e) => !e.datos?.informe));
+  assert.match(JSON.stringify(m2.llamadas[1].messages.at(-1)), /mayor que 0/);
+});
+
+test("informe: las instrucciones piden datos de herramientas, fuente y no inventar", () => {
+  const s = construirSistema([]);
+  assert.match(s, /Hacer INFORMES/);
+  assert.match(s, /NUNCA inventes, estimes/);
+  assert.match(s, /"fuente" dice de dónde salen/);
 });

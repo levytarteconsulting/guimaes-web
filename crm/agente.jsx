@@ -8,6 +8,8 @@ import {
 import { useDocDownload, DocPreviewModal } from "./documentos-comun.jsx";
 import { CORREO } from "./correo.jsx";
 import { TarjetaAccion } from "./acciones.jsx";
+import { TarjetaInforme, InformesGuardados } from "./informes.jsx";
+import { peticionDe } from "./informe-logica.js";
 /* GUIMAES CRM — Asistente.
    Botón en la topbar + cajón lateral (420 px en escritorio, pantalla completa
    en móvil). Habla con la Edge Function "agente" por SSE (fetch + getReader).
@@ -375,12 +377,14 @@ function Herramienta({ p }) {
     </div>
   );
 }
-function Burbuja({ b, onNav }) {
+function Burbuja({ b, onNav, peticion }) {
   if (b.rol === "user") return <div className="ag-msg ag-msg--user">{b.texto}</div>;
   const vacia = !b.partes.some((p) => p.tipo === "texto" && p.texto.trim());
   return (
     <div className="ag-msg ag-msg--bot">
-      {b.partes.map((p, i) => p.tipo === "herramienta" && p.accion
+      {b.partes.map((p, i) => p.tipo === "herramienta" && p.informe
+        ? <TarjetaInforme key={p.id || i} informe={p.informe} peticion={peticion} onNav={onNav} />
+        : p.tipo === "herramienta" && p.accion
         ? <TarjetaAccion key={p.accion} id={p.accion} onNav={onNav} />
         : p.tipo === "herramienta" && p.correo
         ? <TarjetaCorreo key={p.correo} id={p.correo} onNav={onNav} />
@@ -454,7 +458,7 @@ export function useChatAgente({ view } = {}) {
     const n = ++cargaRef.current;
     setConvId(id); setConvArchivada(archivadas); setBurbujas([]); setAviso(null); setCargando(true);
     try {
-      const [{ data, error }, props, correos, acciones] = await Promise.all([
+      const [{ data, error }, props, correos, acciones, informes] = await Promise.all([
         Auth.client.from("agente_mensajes")
           .select("orden,rol,tipo,texto,stop_reason,created_at").eq("conversacion_id", id)
           .in("tipo", ["pregunta", "modelo"]).order("orden", { ascending: true }),
@@ -462,10 +466,14 @@ export function useChatAgente({ view } = {}) {
         Auth.client.from("agente_correos").select("id, created_at").eq("conversacion_id", id).order("created_at"),
         Auth.client.from("agente_tool_calls").select("tarjeta_id, created_at").eq("conversacion_id", id)
           .in("herramienta", ["holded_proponer_accion", "holded_proponer_operacion"]).not("tarjeta_id", "is", null).order("created_at"),
+        Auth.client.from("agente_tool_calls").select("id, parametros, created_at").eq("conversacion_id", id)
+          .eq("herramienta", "mostrar_informe").eq("es_error", false).order("created_at"),
       ]);
       if (error) throw error;
       const tarjetas = [...(props.error ? [] : props.data), ...(correos.error ? [] : correos.data.map((x) => ({ ...x, clase: "correo" }))),
-                        ...(acciones.error ? [] : acciones.data.map((x) => ({ id: x.tarjeta_id, created_at: x.created_at, clase: "accion" })))];
+                        ...(acciones.error ? [] : acciones.data.map((x) => ({ id: x.tarjeta_id, created_at: x.created_at, clase: "accion" }))),
+                        ...(informes.error ? [] : informes.data.filter((x) => x.parametros && Array.isArray(x.parametros.secciones))
+                          .map((x) => ({ id: x.id, created_at: x.created_at, clase: "informe", informe: x.parametros })))];
       if (n === cargaRef.current) setBurbujas(burbujasDeHistorial(data, tarjetas));
     } catch (e) {
       if (n === cargaRef.current) setAviso("No se ha podido abrir la conversación.");
@@ -488,11 +496,17 @@ export function useChatAgente({ view } = {}) {
     return [...bs.slice(0, -1), f(bs[bs.length - 1])];
   });
 
-  const enviar = async () => {
-    const pregunta = entrada.trim();
+  // forzado = { texto, nueva }: regenerar un informe guardado (su petición, en una conversación nueva).
+  const enviar = async (forzado) => {
+    const esForzado = !!(forzado && typeof forzado.texto === "string");   // onClick pasa el evento: no cuenta
+    const nuevaConv = esForzado && !!forzado.nueva;
+    const pregunta = (esForzado ? forzado.texto : entrada).trim();
     if (!pregunta || enCurso) return;
-    setAviso(null); setEntrada(""); setEnCurso(true);
-    setBurbujas((bs) => [...bs, { rol: "user", texto: pregunta }, { rol: "assistant", partes: [], pendiente: true }]);
+    const conv = nuevaConv ? null : convId;
+    if (nuevaConv) { cargaRef.current++; setConvId(null); setConvArchivada(false); setCargando(false); }
+    setAviso(null); if (!esForzado) setEntrada(""); setEnCurso(true);
+    const nuevas = [{ rol: "user", texto: pregunta }, { rol: "assistant", partes: [], pendiente: true }];
+    setBurbujas((bs) => nuevaConv ? nuevas : [...bs, ...nuevas]);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     let terminado = false;
@@ -500,11 +514,11 @@ export function useChatAgente({ view } = {}) {
       const s = await sesion();
       if (!s) { tocarUltima((b) => ({ ...b, error: mensajeDeError(401) })); return; }
       const cuerpo = { pregunta };
-      if (convId) cuerpo.conversacion_id = convId;
+      if (conv) cuerpo.conversacion_id = conv;
       // Seguir una conversación archivada la vuelve a sacar a la lista.
-      if (convId && convArchivada) {
-        const { error } = await Auth.client.from("agente_conversaciones").update({ archivada: false }).eq("id", convId);
-        if (!error) { setConvArchivada(false); if (archivadas) setConvs((cs) => (cs || []).filter((c) => c.id !== convId)); }
+      if (conv && convArchivada) {
+        const { error } = await Auth.client.from("agente_conversaciones").update({ archivada: false }).eq("id", conv);
+        if (!error) { setConvArchivada(false); if (archivadas) setConvs((cs) => (cs || []).filter((c) => c.id !== conv)); }
       }
       const ctx = contextoDeVista(view);
       if (ctx) cuerpo.contexto = ctx;
@@ -603,10 +617,10 @@ function Hilo({ chat, onNav }) {
     {!cargando && burbujas.length === 0 && (
       <div className="ag-intro">
         <p>Pregunta lo que necesites sobre clientes, empresas, el pipeline, tareas, documentos, WhatsApp o el correo.</p>
-        <p className="ag-intro__nota">Solo consulta: no cambia ni envía nada. Puede equivocarse; comprueba los datos importantes en la ficha.</p>
+        <p className="ag-intro__nota">Consulta, propone cambios, redacta correos y prepara informes. No cambia ni envía nada sin que lo confirmes en su tarjeta. Puede equivocarse; comprueba los datos importantes en la ficha.</p>
       </div>
     )}
-    {burbujas.map((b, i) => <Burbuja key={i} b={b} onNav={onNav} />)}
+    {burbujas.map((b, i) => <Burbuja key={i} b={b} onNav={onNav} peticion={b.rol === "assistant" ? peticionDe(burbujas, i) : ""} />)}
     {aviso && <div className="ag-aviso ag-aviso--err">{aviso}</div>}
     <div ref={finRef}></div>
   </>;
@@ -682,6 +696,7 @@ export function Asistente({ abierto, onCerrar, view, titulo, nav }) {
         {lista
           ? <><div className="ag-lista__t">Mis conversaciones</div>
               <SelectorArchivadas chat={chat} />
+              <InformesGuardados deshabilitado={chat.enCurso} onRegenerar={(texto) => { setLista(false); chat.enviar({ texto, nueva: true }); }} />
               <ListaConversaciones chat={chat} onAbrir={(id) => { setLista(false); chat.abrirConv(id); }} /></>
           : <Hilo chat={chat} onNav={irA} />}
       </div>
@@ -729,7 +744,10 @@ export function AgenteVista({ nav }) {
         </button>
         <SelectorArchivadas chat={chat} />
       </div>
-      <div className="agv__lista-body"><ListaConversaciones chat={chat} onAbrir={abrir} /></div>
+      <div className="agv__lista-body">
+        <InformesGuardados deshabilitado={chat.enCurso} onRegenerar={(texto) => { chat.enviar({ texto, nueva: true }); setVerChat(true); }} />
+        <ListaConversaciones chat={chat} onAbrir={abrir} />
+      </div>
     </section>
   );
   const hilo = (

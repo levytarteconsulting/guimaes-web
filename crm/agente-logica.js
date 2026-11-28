@@ -91,6 +91,7 @@ const NOMBRES_HERRAMIENTAS = {
   proponer_nota: "Preparando el cambio",
   proponer_borrado: "Preparando el borrado",
   proponer_correo: "Redactando el correo",
+  mostrar_informe: "Preparando el informe",
 };
 export function etiquetaHerramienta(nombre) {
   return NOMBRES_HERRAMIENTAS[nombre] || "Consultando";
@@ -295,6 +296,10 @@ export function burbujasDeHistorial(filas, propuestas = []) {
     const destino = i >= 0 && out[i + 1] && out[i + 1].rol === "assistant" ? out[i + 1] : null;
     if (!destino) continue;
     if (!porBurbuja.has(destino)) porBurbuja.set(destino, []);
+    if (p.clase === "informe") {   // el informe no es una fila aparte: viaja entero (parametros de la llamada)
+      porBurbuja.get(destino).push({ tipo: "herramienta", id: "informe-" + p.id, nombre: "", estado: "fin", informe: p.informe });
+      continue;
+    }
     const clave = p.clase === "correo" ? "correo" : p.clase === "accion" ? "accion" : "propuesta";
     porBurbuja.get(destino).push({ tipo: "herramienta", id: clave + "-" + p.id, nombre: "", estado: "fin", [clave]: p.id });
   }
@@ -314,12 +319,12 @@ export function anotarHerramienta(partes, ev) {
   if (i === -1) {
     return [...partes, { tipo: "herramienta", id: ev.id, nombre: ev.nombre, estado: ev.estado, filas: ev.filas, error: !!ev.error,
                          ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}),
-                         ...(ev.accion ? { accion: ev.accion } : {}) }];
+                         ...(ev.accion ? { accion: ev.accion } : {}), ...(ev.informe ? { informe: ev.informe } : {}) }];
   }
   const copia = [...partes];
   copia[i] = { ...copia[i], estado: ev.estado, filas: ev.filas, error: !!ev.error,
                ...(ev.propuesta ? { propuesta: ev.propuesta } : {}), ...(ev.correo ? { correo: ev.correo } : {}),
-               ...(ev.accion ? { accion: ev.accion } : {}) };
+               ...(ev.accion ? { accion: ev.accion } : {}), ...(ev.informe ? { informe: ev.informe } : {}) };
   return copia;
 }
 

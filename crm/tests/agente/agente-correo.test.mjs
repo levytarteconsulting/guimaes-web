@@ -10,6 +10,7 @@ const agente = fs.readFileSync(new URL("../../supabase-agente.sql", import.meta.
 const escritura = fs.readFileSync(new URL("../../supabase-agente-escritura.sql", import.meta.url), "utf8");
 const mig = fs.readFileSync(new URL("../../supabase-agente-correo.sql", import.meta.url), "utf8");
 const tarjetas = fs.readFileSync(new URL("../../supabase-agente-tarjetas.sql", import.meta.url), "utf8");
+const informes = fs.readFileSync(new URL("../../supabase-agente-informes.sql", import.meta.url), "utf8");
 const base = fs.readFileSync(dir + "esquema-base.sql", "utf8");
 const parte = (txt, id, sig) => {
   const m = txt.match(new RegExp(`-- ${id} [\\s\\S]*?(?=\\n-- =+\\n-- ${sig} |$)`));
@@ -258,6 +259,43 @@ w = await como("admin", `update public.agente_tool_calls set tarjeta_id = null w
 ok(!!w.error, "y no se cambia después");
 w = await como("miembro", `select tarjeta_id from public.agente_tool_calls where conversacion_id = '${CT}'`);
 ok(!w.error && w.rows.length === 0, "un miembro no ve las llamadas de otro");
+
+// ---------------------------------------------------------------- 13A/13B/13C (informes guardados)
+console.log("13A/13B/13C:");
+const A13 = await tabla(parte(informes, "13A", "13B"));
+ok(A13["migración 20261128180000"] === "sí" && A13["migración 20261128200000"] === "no" && A13["tabla agente_informes"] === "0", "13A: lo esperado " + JSON.stringify(A13));
+await db.exec(parte(informes, "13B", "13C"));
+let rep13 = null; try { await db.exec(parte(informes, "13B", "13C")); } catch (e) { rep13 = e.message; }
+ok(/ya está aplicada/.test(rep13 || ""), "13B se niega a repetirse");
+const C13 = await tabla(parte(informes, "13C", "ZZZ"));
+ok(C13["RLS"] === "true" && C13["políticas"] === "4" && C13["authenticated s/d, insert(peticion), update(titulo), update(peticion)"] === "true/true/true/true/false"
+   && C13["filas"] === "0" && /^20261128200000 /.test(C13["migración registrada"] || ""), "13C: lo esperado " + JSON.stringify(C13));
+w = await como("admin", `insert into public.agente_informes (titulo, peticion, empresa_id) values ('Ventas', 'Gráfico de ventas de 2026', '${E1}') returning id, auth_user_id`);
+ok(!w.error && w.rows[0].auth_user_id === U.admin, "el admin guarda un informe (solo la petición) " + (w.error || ""));
+const I1 = w.rows[0].id;
+w = await como("miembro", `insert into public.agente_informes (titulo, peticion) values ('Mío', 'Tabla de tareas') returning id`);
+ok(!w.error, "un miembro guarda los suyos");
+const I2 = w.rows[0].id;
+w = await como("miembro", `insert into public.agente_informes (titulo, peticion, auth_user_id) values ('x', 'y', '${U.admin}')`);
+ok(!!w.error, "no se guarda a nombre de otro");
+w = await como("inactivo", `insert into public.agente_informes (titulo, peticion) values ('x', 'y')`);
+ok(!!w.error, "un inactivo, no");
+w = await como("admin", `insert into public.agente_informes (titulo, peticion) values ('  ', 'y')`);
+ok(!!w.error, "sin título, no");
+w = await como("miembro", `select id from public.agente_informes`);
+ok(w.rows.length === 1 && w.rows[0].id === I2, "un miembro solo ve los suyos");
+w = await como("admin", `select id from public.agente_informes`);
+ok(w.rows.length === 2, "el rol admin ve todos");
+w = await como("miembro", `update public.agente_informes set titulo = 'robado' where id = '${I1}' returning id`);
+ok(!w.error && w.rows.length === 0, "nadie renombra el de otro");
+w = await como("miembro", `update public.agente_informes set peticion = 'otra' where id = '${I2}'`);
+ok(!!w.error, "la petición no se cambia (se guarda otro)");
+w = await como("miembro", `update public.agente_informes set titulo = 'Tareas', ultimo_uso_at = now() where id = '${I2}' returning titulo`);
+ok(!w.error && w.rows[0].titulo === "Tareas", "renombra y marca el uso del suyo");
+w = await como("admin", `delete from public.agente_informes where id = '${I2}' returning id`);
+ok(!w.error && w.rows.length === 0, "ni el rol admin borra el de otro");
+w = await como("miembro", `delete from public.agente_informes where id = '${I2}' returning id`);
+ok(!w.error && w.rows.length === 1, "cada uno borra el suyo");
 
 console.log(`\n${total - fallos}/${total} ok`);
 process.exit(fallos ? 1 : 0);
