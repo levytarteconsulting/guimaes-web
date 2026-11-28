@@ -199,6 +199,7 @@ export function Acciones({ toast, nav, focusId }) {
     {actual && <Detalle key={actual.id} a={actual} toast={toast} nav={nav} onCambio={cargar} onCerrar={() => setSel(null)} />}
     <Cupos toast={toast} version={version} />
     <Politicas toast={toast} />
+    <Programadas toast={toast} />
   </div>;
 }
 
@@ -518,7 +519,7 @@ function Politicas({ toast }) {
     {pols.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th>Operación</th><th style={{ textAlign: "right" }}>Máx. elementos</th><th style={{ textAlign: "right" }}>Máx. importe</th><th></th></tr></thead><tbody>
       {pols.map((p) => <tr key={p.empresa_id + p.tipo}>
         <td>{nombreEmpresa(p.empresa_id)}</td><td style={{ fontSize: 12.5 }}>{nombreOp(p.tipo)}</td>
-        <td className="mono" style={{ textAlign: "right" }}>{p.max_documentos}</td><td className="mono" style={{ textAlign: "right" }}>{p.max_importe != null ? eur(p.max_importe) : "—"}</td>
+        <td className="mono" style={{ textAlign: "right" }}>{p.max_documentos}</td><td className="mono" style={{ textAlign: "right" }}>{p.max_importe == null ? "—" : Number(p.max_importe) >= 1e11 ? "Sin límite" : eur(p.max_importe)}</td>
         <td style={{ width: 1, whiteSpace: "nowrap" }}><button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => cambiar({ p_empresa_id: p.empresa_id, p_tipo: p.tipo, p_modo: "aprobacion", p_max_documentos: null, p_max_importe: null }, "Vuelve a necesitar aprobación")}>Volver a aprobación</button></td>
       </tr>)}
     </tbody></table></div>}
@@ -535,3 +536,57 @@ function Politicas({ toast }) {
     </div>}
   </div></div>;
 }
+
+// ---------------------------------------------------------------- acciones programadas (solo rol admin)
+// Cada día a la hora fijada (23:00 de Madrid) el sistema propone aprobar todos
+// los tickets pendientes con fecha de ese día o anterior, en tandas de hasta
+// 1000 (crm/supabase-holded-programadas.sql). Cada tanda es una propuesta
+// normal: solo se aprueba sola si la empresa tiene la política automática.
+function Programadas({ toast }) {
+  const [filas, setFilas] = aState(null);
+  const [empresas, setEmpresas] = aState([]);
+  const [pols, setPols] = aState([]);
+  const [nueva, setNueva] = aState("");
+  const [busy, setBusy] = aState(false);
+  const cargar = async () => {
+    const r = await Auth.client.from("holded_acciones_programadas")
+      .select("empresa_id, tipo, activa, hora, dia_en_curso, en_curso_manual, tandas, ultima_accion_id, ultimo_dia_completado, ultima_ejecucion_at, ultimo_resultado");
+    setFilas(r.error ? [] : r.data || []);
+    const p = await Auth.client.from("holded_acciones_politicas").select("empresa_id, tipo, modo");
+    setPols(p.data || []);
+  };
+  aEffect(() => { cargar(); rpc("holded_acciones_uso_mes", {}).then((x) => setEmpresas(x || [])).catch(() => setEmpresas([])); }, []);
+  const enMarcha = (filas || []).some((f) => f.dia_en_curso);
+  aEffect(() => { if (!enMarcha) return; const t = setInterval(cargar, 30000); return () => clearInterval(t); }, [enMarcha]);
+  const cambiar = async (empresa, activa, ahora, ok) => {
+    setBusy(true);
+    try { await rpc("holded_cambiar_programacion", { p_empresa_id: empresa, p_tipo: "aprobar_tickets_venta", p_activa: activa, p_ejecutar_ahora: ahora }); toast(ok); setNueva(""); await cargar(); }
+    catch (e) { toast("No se pudo cambiar: " + errorTexto(e)); }
+    setBusy(false);
+  };
+  const automatica = (e) => pols.some((p) => p.empresa_id === e && p.tipo === "aprobar_tickets_venta" && p.modo === "automatica");
+  const libres = empresas.filter((e) => !(filas || []).some((f) => f.empresa_id === e.empresa_id));
+  if (filas === null) return null;
+  return <div className="card" style={{ marginTop: 20 }}><div className="card__body">
+    <div style={{ fontWeight: 700, fontFamily: "var(--display)", marginBottom: 8 }}>Acciones programadas</div>
+    <p className="muted" style={{ fontSize: 12.5, marginTop: 0 }}>Cada día a las 23:00 propone aprobar <b>todos</b> los tickets de venta pendientes con fecha de ese día o anterior, en tandas de hasta 1000, hasta que no quede ninguno. Cada tanda se aprueba sola solo si la empresa tiene la política automática; si no, se queda en Propuestas y la pasada se para. Los tickets dudosos nunca se aprueban solos.</p>
+    {filas.length > 0 && <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Empresa</th><th>Estado</th><th>Último resultado</th><th></th></tr></thead><tbody>
+      {filas.map((f) => <tr key={f.empresa_id + f.tipo}>
+        <td>{nombreEmpresa(f.empresa_id)}<div className="muted" style={{ fontSize: 12 }}>Aprobar tickets · {String(f.hora).padStart(2, "0")}:00{!automatica(f.empresa_id) && <span style={{ color: "var(--danger)" }}> · sin política automática</span>}</div></td>
+        <td style={{ fontSize: 12.5 }}>{!f.activa ? "Desactivada" : f.dia_en_curso ? `En marcha${f.en_curso_manual ? " (manual)" : ""}: tanda ${f.tandas}, hasta ${f.dia_en_curso}` : "Activa"}
+          {f.ultimo_dia_completado && <div className="muted" style={{ fontSize: 12 }}>Última noche: {f.ultimo_dia_completado}</div>}</td>
+        <td style={{ fontSize: 12.5 }}>{f.ultimo_resultado || "—"}{f.ultima_ejecucion_at && <div className="muted" style={{ fontSize: 12 }}>{fmtFecha(f.ultima_ejecucion_at)}</div>}</td>
+        <td style={{ width: 1, whiteSpace: "nowrap" }}>
+          {f.activa && !f.dia_en_curso && <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => cambiar(f.empresa_id, true, true, "Pasada pedida: empieza en unos minutos")}>Ejecutar ahora</button>}
+          <button className="btn btn--sm btn--ghost" disabled={busy} onClick={() => cambiar(f.empresa_id, !f.activa, false, f.activa ? "Programación desactivada" : "Programación activada")}>{f.activa ? "Desactivar" : "Activar"}</button>
+        </td>
+      </tr>)}
+    </tbody></table></div>}
+    {libres.length > 0 && <div className="row" style={{ gap: 8, alignItems: "flex-end", marginTop: 10 }}>
+      <label style={{ fontSize: 12.5 }}>Programar para<select className="inp" style={{ display: "block", marginTop: 4 }} value={nueva} onChange={(e) => setNueva(e.target.value)}>
+        <option value="">—</option>{libres.map((e) => <option key={e.empresa_id} value={e.empresa_id}>{nombreEmpresa(e.empresa_id)}</option>)}</select></label>
+      <button className="btn btn--sm btn--primary" disabled={busy || !nueva} onClick={() => cambiar(nueva, true, false, "Programación activada")}>Activar cada noche</button>
+    </div>}
+  </div></div>;
+}
+
